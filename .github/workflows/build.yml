@@ -1,9 +1,15 @@
 name: build
 
 # Run by hand (Actions → build → Run workflow, or `gh workflow run build.yml --ref dev`):
-# the installable .pkg of a branch, to try on a console before a release.
+# the installable .pkg of a branch, to try on a console before a release. With log_host, a debug
+# build that sends its log to that PC over UDP port 18194 (read it with: nc -u -l 18194).
 on:
   workflow_dispatch:
+    inputs:
+      log_host:
+        description: "PC address for the debug log; empty for a release build"
+        type: string
+        default: ""
 
 permissions: {}
 
@@ -14,3 +20,4 @@ jobs:
     uses: ./.github/workflows/package.yml
     with:
       keep: true
+      log_host: ${{ inputs.log_host }}
