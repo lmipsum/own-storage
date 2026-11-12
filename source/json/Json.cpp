@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "Json.h"
+#include "json/Json.h"
 
 #include <json-c/json.h>
 

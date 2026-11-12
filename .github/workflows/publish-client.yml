@@ -2,7 +2,7 @@ name: publish-client
 
 # Run by hand after setting or changing the GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET secrets
 # (Actions → publish-client → Run workflow): writes the obfuscated clients.json the app fetches
-# at run time (see source/ClientCredentials.cpp) to the gh-pages branch, served by GitHub Pages.
+# at run time (see source/auth/ClientCredentials.cpp) to the gh-pages branch, served by GitHub Pages.
 on:
   workflow_dispatch:
 

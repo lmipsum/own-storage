@@ -34,14 +34,14 @@ include $(PSL1GHT)/ppu_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	$(notdir $(CURDIR))
 BUILD		:=	build
-SOURCES		:=	source
+SOURCES		:=	source source/app source/auth source/json source/net
 DATA		:=	data
-INCLUDES	:=	include
+INCLUDES	:=	source
 
 SFOXML		:=	$(CURDIR)/sfo.xml
-PKGFILES	:=	$(CURDIR)/release
-ICON0		:=	$(CURDIR)/release/ICON0.PNG
-PIC1		:=	$(CURDIR)/release/PIC1.PNG
+PKGFILES	:=	$(CURDIR)/package
+ICON0		:=	$(CURDIR)/package/ICON0.PNG
+PIC1		:=	$(CURDIR)/package/PIC1.PNG
 
 TITLE		:=	Own Storage
 APPID		:=	OWNS00001
@@ -52,7 +52,7 @@ CONTENTID	:=	OS0001-$(APPID)_00-0000000000000000
 #---------------------------------------------------------------------------------
 
 CFLAGS		=	-O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE) -DAPP_ID=\"$(APPID)\"
-# make LOG_HOST=<PC address>: a debug build that sends its log there (see source/log.cpp).
+# make LOG_HOST=<PC address>: a debug build that sends its log there (see source/app/Log.cpp).
 ifneq ($(strip $(LOG_HOST)),)
 CFLAGS		+=	-DLOG_HOST=\"$(LOG_HOST)\"
 endif
