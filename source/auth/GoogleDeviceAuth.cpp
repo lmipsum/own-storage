@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "auth/DeviceAuth.h"
+#include "auth/GoogleDeviceAuth.h"
 
 #include "net/HttpClient.h"
 #include "json/Json.h"
-#include "app/Log.h"
+#include "app/DebugLog.h"
 
 namespace
 {
@@ -14,14 +14,14 @@ const char kScope[] = "https://www.googleapis.com/auth/drive.file";
 const char kFormHeader[] = "Content-Type: application/x-www-form-urlencoded";
 } // namespace
 
-DeviceAuth::DeviceAuth(HttpClient &http) : m_http(http) {}
+GoogleDeviceAuth::GoogleDeviceAuth(HttpClient &http) : m_http(http) {}
 
-void DeviceAuth::SetClient(const ClientCredentials &client)
+void GoogleDeviceAuth::SetClient(const ClientCredentials &client)
 {
     m_client = client;
 }
 
-std::string DeviceAuth::Start()
+std::string GoogleDeviceAuth::Start()
 {
     const std::string form =
         "client_id=" + m_http.Escape(m_client.id) + "&scope=" + m_http.Escape(kScope);
@@ -38,12 +38,12 @@ std::string DeviceAuth::Start()
     return reply["user_code"].Str();
 }
 
-const std::string &DeviceAuth::VerificationUrl() const
+const std::string &GoogleDeviceAuth::VerificationUrl() const
 {
     return m_verificationUrl;
 }
 
-DeviceAuth::Status DeviceAuth::Poll()
+GoogleDeviceAuth::Status GoogleDeviceAuth::Poll()
 {
     const std::string form = "client_id=" + m_http.Escape(m_client.id) +
                              "&client_secret=" + m_http.Escape(m_client.secret) +
@@ -68,7 +68,7 @@ DeviceAuth::Status DeviceAuth::Poll()
     return Failed;
 }
 
-bool DeviceAuth::Refresh()
+bool GoogleDeviceAuth::Refresh()
 {
     const std::string form = "client_id=" + m_http.Escape(m_client.id) +
                              "&client_secret=" + m_http.Escape(m_client.secret) +
@@ -86,17 +86,17 @@ bool DeviceAuth::Refresh()
     return true;
 }
 
-const std::string &DeviceAuth::AccessToken() const
+const std::string &GoogleDeviceAuth::AccessToken() const
 {
     return m_accessToken;
 }
 
-const std::string &DeviceAuth::RefreshToken() const
+const std::string &GoogleDeviceAuth::RefreshToken() const
 {
     return m_refreshToken;
 }
 
-void DeviceAuth::SetRefreshToken(const std::string &token)
+void GoogleDeviceAuth::SetRefreshToken(const std::string &token)
 {
     m_refreshToken = token;
 }

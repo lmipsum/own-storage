@@ -5,7 +5,7 @@
  *	network debugging quickly.
  *					  http://nzhawk.mezoka.com/pslightlogger
  */
-#include "app/Log.h"
+#include "app/DebugLog.h"
 
 // Only a debug build (make LOG_HOST=<PC address>) sends its log, over UDP port 18194;
 // a release package logs nothing. To read it on the PC: nc -u -l 18194

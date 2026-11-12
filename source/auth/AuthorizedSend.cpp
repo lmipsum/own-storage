@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "auth/AuthorizedSend.h"
 
-#include "auth/DeviceAuth.h"
-#include "app/Log.h"
+#include "auth/GoogleDeviceAuth.h"
+#include "app/DebugLog.h"
 
 #include <sys/systime.h>
 
@@ -26,7 +26,8 @@ HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::stri
 }
 } // namespace
 
-long SendAuthorized(DeviceAuth &auth, const HttpClient::Headers &headers, const Request &request)
+long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
+                    const Request &request)
 {
     bool refreshed = false;
     unsigned long long wait = kFirstWaitMicroseconds;
