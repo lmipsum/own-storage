@@ -19,6 +19,7 @@
 
 #include "CurlAgent.h"
 #include "log.h"
+#include "AppPaths.h"
 
 // dependent libraries
 #include <ppu-types.h>
@@ -123,7 +124,7 @@ void CurlAgent::Init()
     ::curl_easy_reset(m_pimpl->curl);
     ::curl_easy_setopt(m_pimpl->curl, CURLOPT_SSL_VERIFYPEER, 1L);
     ::curl_easy_setopt(m_pimpl->curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    ::curl_easy_setopt(m_pimpl->curl, CURLOPT_CAINFO, "/dev_hdd0/game/PSCD00001/USRDIR/cert.cer");
+    ::curl_easy_setopt(m_pimpl->curl, CURLOPT_CAINFO, APP_DIR "cert.cer");
     ::curl_easy_setopt(m_pimpl->curl, CURLOPT_HEADERFUNCTION, &CurlAgent::HeaderCallback);
     ::curl_easy_setopt(m_pimpl->curl, CURLOPT_WRITEHEADER, this);
     ::curl_easy_setopt(m_pimpl->curl, CURLOPT_HEADER, 0L);
@@ -169,7 +170,7 @@ long CurlAgent::ExecCurl(const std::string &url, Receivable *dest, const Header 
     //::curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60);
     ::curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30);
     ::curl_easy_setopt(curl, CURLOPT_ENCODING, "gzip,deflate");
-    ::curl_easy_setopt(curl, CURLOPT_USERAGENT, "PS3 Cloud Drive (gzip)");
+    ::curl_easy_setopt(curl, CURLOPT_USERAGENT, "Own Storage (gzip)");
     ::curl_easy_setopt(curl, CURLOPT_SSL_CIPHER_LIST, "TLS-RSA-WITH-AES-128-GCM-SHA256");
     //::curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     //::curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debug_cb);

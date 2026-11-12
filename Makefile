@@ -38,21 +38,20 @@ SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=	include
 
-# The SDK's default PARAM.SFO and icon until the app has its own.
-SFOXML		:=	$(PS3DEV)/bin/sfo.xml
+SFOXML		:=	$(CURDIR)/sfo.xml
 PKGFILES	:=	$(CURDIR)/release
-ICON0		:=	$(PS3DEV)/bin/ICON0.PNG
+ICON0		:=	$(CURDIR)/release/ICON0.PNG
 PIC1		:=	$(CURDIR)/release/PIC1.PNG
 
-TITLE		:=	PS3 Cloud Drive
-APPID		:=	PSCD00001
-CONTENTID	:=	CD0001-$(APPID)_00-0000000000000000
+TITLE		:=	Own Storage
+APPID		:=	OWNS00001
+CONTENTID	:=	OS0001-$(APPID)_00-0000000000000000
 
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
 
-CFLAGS		=	-O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
+CFLAGS		=	-O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE) -DAPP_ID=\"$(APPID)\"
 CXXFLAGS	=	$(CFLAGS)
 
 LDFLAGS		=	$(MACHDEP) -Wl,-Map,$(notdir $@).map

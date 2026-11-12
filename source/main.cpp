@@ -53,16 +53,17 @@
 #include "JsonResponse.h"
 #include "Download.h"
 #include "log.h"
+#include "AppPaths.h"
 
 const std::string jsonMime = "application/json";
 const std::string folderMime = "application/vnd.google-apps.folder";
 const std::string octetMime = "application/octet-stream";
-const std::string appPath = "/dev_hdd0/game/PSCD00001/USRDIR/";
-const std::string appFile = "/dev_hdd0/game/PSCD00001/USRDIR/ps3clouddrive.json";
-const std::string appFileBackup = "/dev_hdd0/game/PSCD00001/USRDIR/ps3clouddrive.backup";
-const std::string localResourceFile = "/dev_hdd0/game/PSCD00001/USRDIR/local.json";
-const std::string remoteResourceFile = "/dev_hdd0/game/PSCD00001/USRDIR/remote.json";
-const std::string remoteBackup = "/dev_hdd0/game/PSCD00001/USRDIR/remote.backup";
+const std::string appPath = APP_DIR;
+const std::string appFile = APP_DIR "ps3clouddrive.json";
+const std::string appFileBackup = APP_DIR "ps3clouddrive.backup";
+const std::string localResourceFile = APP_DIR "local.json";
+const std::string remoteResourceFile = APP_DIR "remote.json";
+const std::string remoteBackup = APP_DIR "remote.backup";
 const std::string queryFields =
     "items(fileSize,id,md5Checksum,mimeType,modifiedDate,parents/id,title)";
 const std::string app_title = "ps3clouddrive";
@@ -1653,7 +1654,7 @@ int main(int argc, char **argv)
     SDL_Thread *thread = NULL;
 
     std::string imagePath;
-    char FontPath[] = "/dev_hdd0/game/PSCD00001/USRDIR/font.ttf";
+    char FontPath[] = APP_DIR "font.ttf";
 
     netInitialize();
     debugInit();
@@ -1675,19 +1676,19 @@ int main(int argc, char **argv)
     switch (appHeight)
     {
     case 1080:
-        imagePath = "/dev_hdd0/game/PSCD00001/USRDIR/bg.png";
+        imagePath = APP_DIR "bg.png";
         break;
     case 720:
-        imagePath = "/dev_hdd0/game/PSCD00001/USRDIR/bg-720.png";
+        imagePath = APP_DIR "bg-720.png";
         break;
     case 480:
-        imagePath = "/dev_hdd0/game/PSCD00001/USRDIR/bg-480.png";
+        imagePath = APP_DIR "bg-480.png";
         break;
     case 576:
-        imagePath = "/dev_hdd0/game/PSCD00001/USRDIR/bg-576.png";
+        imagePath = APP_DIR "bg-576.png";
         break;
     default:
-        imagePath = "/dev_hdd0/game/PSCD00001/USRDIR/bg.png";
+        imagePath = APP_DIR "bg.png";
         break;
     }
 
