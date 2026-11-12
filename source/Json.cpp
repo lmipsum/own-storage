@@ -1,367 +1,153 @@
-/*
-# Playstation 3 Cloud Drive
-# Copyright (C) 2013-2014 Mohammad Haseeb aka MHAQS
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program. If not, see <http://www.gnu.org/licenses/>.
-#
-*/
-
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "Json.h"
-#include "log.h"
-#include "StdioFile.h"
 
-#include <json/json_tokener.h>
-#include <json/linkhash.h>
+#include <json-c/json.h>
 
-#include <cstring>
-#include <iostream>
-#include <sstream>
-#include <utility>
+#include <cstdio>
 
-Json::Json() : m_json(::json_object_new_object())
+Json::Json() : m_node(json_object_new_object()) {}
+
+Json::Json(const std::string &text) : m_node(json_object_new_string(text.c_str())) {}
+
+Json::Json(const char *text) : m_node(json_object_new_string(text)) {}
+
+Json::Json(const Array &items) : m_node(json_object_new_array())
 {
-    if (m_json == 0)
-        debugPrintf("json_object_new: cannot create json object\n");
+    for (std::size_t i = 0; i < items.size(); ++i)
+    {
+        json_object_array_add(m_node, json_object_get(items[i].m_node));
+    }
 }
 
-Json::Json(const char *str) : m_json(::json_object_new_string(str))
+Json::Json(json_object *node) : m_node(node) {}
+
+Json::Json(const Json &other) : m_node(json_object_get(other.m_node)) {}
+
+Json &Json::operator=(const Json &other)
 {
-    if (m_json == 0)
-        debugPrintf("json_object_new: cannot create json string %s\n", str);
-}
-
-template <> Json::Json(const std::string &str) : m_json(::json_object_new_string(str.c_str()))
-{
-    if (m_json == 0)
-        debugPrintf("json_object_new: cannot create json string %s\n", str.c_str());
-
-    // paranoid check
-    if (::json_object_get_string(m_json) != str)
-        debugPrintf("paranoid json check failed\n");
-}
-
-template <> Json::Json(const int &l) : m_json(::json_object_new_int(l))
-{
-    if (m_json == 0)
-        debugPrintf("cannot create json int\n");
-}
-
-template <> Json::Json(const long &l) : m_json(::json_object_new_int(static_cast<int>(l)))
-{
-    if (m_json == 0)
-        debugPrintf("cannot create json int\n");
-}
-
-template <> Json::Json(const unsigned long &l) : m_json(::json_object_new_int(static_cast<int>(l)))
-{
-    if (m_json == 0)
-        debugPrintf("cannot create json int\n");
-}
-
-template <> Json::Json(const std::vector<Json> &arr) : m_json(::json_object_new_array())
-{
-    if (m_json == 0)
-        debugPrintf("cannot create json int\n");
-
-    for (std::vector<Json>::const_iterator i = arr.begin(); i != arr.end(); ++i)
-        Add(*i);
-}
-
-template <> Json::Json(const bool &b) : m_json(::json_object_new_boolean(b))
-{
-    if (m_json == 0)
-        debugPrintf("cannot create json bool\n");
-}
-
-template <> Json::Json(const Object &obj) : m_json(::json_object_new_object())
-{
-    if (m_json == 0)
-        debugPrintf("cannot create json object");
-
-    for (Object::const_iterator i = obj.begin(); i != obj.end(); ++i)
-        Add(i->first, i->second);
-}
-
-Json::Json(struct json_object *json, NotOwned) : m_json(json)
-{
-    if (m_json == 0)
-        debugPrintf("Json m_json is null\n");
-}
-
-Json::Json(struct json_object *json) : m_json(json)
-{
-    if (m_json == 0)
-        debugPrintf("JsonObj m_json is null\n");
-    ::json_object_get(m_json);
-}
-
-Json::Json(const Json &rhs) : m_json(rhs.m_json)
-{
-    if (m_json == 0)
-        debugPrintf("Jsonrhs m_json is null\n");
-    ::json_object_get(m_json);
+    json_object *previous = m_node;
+    m_node = json_object_get(other.m_node);
+    json_object_put(previous);
+    return *this;
 }
 
 Json::~Json()
 {
-    if (m_json == 0)
-        debugPrintf("Json destructor m_json is null\n");
-    if (m_json != 0)
-        ::json_object_put(m_json);
+    json_object_put(m_node);
 }
 
-Json &Json::operator=(const Json &rhs)
+Json Json::Parse(const std::string &text)
 {
-    Json tmp(rhs);
-    Swap(tmp);
-    return *this;
+    json_object *node = json_tokener_parse(text.c_str());
+    if (node == NULL)
+    {
+        return Json();
+    }
+    return Json(node);
 }
 
-void Json::Swap(Json &other)
+Json Json::Load(const std::string &path)
 {
-    if (m_json == 0)
-        debugPrintf("JsonSwap m_json is null\n");
-    if (other.m_json == 0)
-        debugPrintf("JsonSwap other.m_json is null\n");
-    std::swap(m_json, other.m_json);
+    FILE *file = std::fopen(path.c_str(), "rb");
+    if (file == NULL)
+    {
+        return Json();
+    }
+    std::string text;
+    char buffer[4096];
+    std::size_t count;
+    while ((count = std::fread(buffer, 1, sizeof buffer, file)) > 0)
+    {
+        text.append(buffer, count);
+    }
+    std::fclose(file);
+    return Parse(text);
+}
+
+bool Json::Save(const std::string &path) const
+{
+    FILE *file = std::fopen(path.c_str(), "wb");
+    if (file == NULL)
+    {
+        return false;
+    }
+    const std::string text = Str();
+    const bool written = std::fwrite(text.data(), 1, text.size(), file) == text.size();
+    return std::fclose(file) == 0 && written;
 }
 
 Json Json::operator[](const std::string &key) const
 {
-    if (m_json == 0)
-        debugPrintf("Json opkey m_json is null\n");
-
-    struct json_object *j = ::json_object_object_get(m_json, key.c_str());
-    if (j == 0)
-        debugPrintf("Json Array operator key: %s is not found in object\n", key.c_str());
-
-    return Json(j);
+    json_object *member = NULL;
+    if (!json_object_is_type(m_node, json_type_object) ||
+        !json_object_object_get_ex(m_node, key.c_str(), &member))
+    {
+        return Json(static_cast<json_object *>(NULL));
+    }
+    return Json(json_object_get(member));
 }
 
-Json Json::operator[](const std::size_t &idx) const
+Json Json::operator[](std::size_t index) const
 {
-    if (m_json == 0)
-        debugPrintf("Json opidex m_json is null\n");
-
-    struct json_object *j = ::json_object_array_get_idx(m_json, idx);
-    if (j == 0)
+    if (!json_object_is_type(m_node, json_type_array) ||
+        index >= static_cast<std::size_t>(json_object_array_length(m_node)))
     {
-        std::ostringstream ss;
-        ss << "index " << idx << " is not found in array";
-        debugPrintf("Json Array operator %s\n", ss.str().c_str());
+        return Json(static_cast<json_object *>(NULL));
     }
-
-    return Json(j);
+    return Json(json_object_get(json_object_array_get_idx(m_node, static_cast<int>(index))));
 }
 
 bool Json::Has(const std::string &key) const
 {
-    if (m_json == 0)
-        debugPrintf("JsonHas m_json is null\n");
-    return ::json_object_object_get(m_json, key.c_str()) != 0;
+    return json_object_is_type(m_node, json_type_object) &&
+           json_object_object_get_ex(m_node, key.c_str(), NULL);
 }
 
-bool Json::Get(const std::string &key, Json &json) const
+bool Json::IsEmpty() const
 {
-    if (m_json == 0)
-        debugPrintf("JsonGet m_json is null\n");
-    struct json_object *j = ::json_object_object_get(m_json, key.c_str());
-    if (j != 0)
+    if (json_object_is_type(m_node, json_type_object))
     {
-        Json tmp(j);
-        json.Swap(tmp);
-        return true;
+        return json_object_get_object(m_node)->count == 0;
     }
-    else
-        return false;
+    if (json_object_is_type(m_node, json_type_array))
+    {
+        return json_object_array_length(m_node) == 0;
+    }
+    return m_node == NULL;
 }
 
-void Json::Add(const std::string &key, const Json &json)
+void Json::Add(const std::string &key, const Json &value)
 {
-    if (m_json == 0)
-        debugPrintf("JsonAdd m_json is null\n");
-    if (json.m_json == 0)
-        debugPrintf("JsonAdd json.m_json is null\n");
-
-    ::json_object_get(json.m_json);
-    ::json_object_object_add(m_json, key.c_str(), json.m_json);
+    if (json_object_is_type(m_node, json_type_object))
+    {
+        json_object_object_add(m_node, key.c_str(), json_object_get(value.m_node));
+    }
 }
 
-void Json::Add(const Json &json)
+void Json::Append(const Json &value)
 {
-    if (m_json == 0)
-        debugPrintf("JsonAdd2 m_json is null\n");
-    if (json.m_json == 0)
-        debugPrintf("JsonAdd2 json.m_json is null\n");
-
-    ::json_object_get(json.m_json);
-    ::json_object_array_add(m_json, json.m_json);
-}
-
-bool Json::Bool() const
-{
-    if (m_json == 0)
-        debugPrintf("JsonBool m_json is null\n");
-    return ::json_object_get_boolean(m_json);
-}
-
-template <> bool Json::Is<bool>() const
-{
-    if (m_json == 0)
-        debugPrintf("Jsonisbool m_json is null\n");
-    return ::json_object_is_type(m_json, json_type_boolean);
+    if (json_object_is_type(m_node, json_type_array))
+    {
+        json_object_array_add(m_node, json_object_get(value.m_node));
+    }
 }
 
 std::string Json::Str() const
 {
-    if (m_json == 0)
-        debugPrintf("Jsonstr m_json is null\n");
-    return ::json_object_get_string(m_json);
-}
-
-template <> bool Json::Is<std::string>() const
-{
-    if (m_json == 0)
-        debugPrintf("Jsonisstr m_json is null\n");
-    return ::json_object_is_type(m_json, json_type_string);
-}
-
-int Json::Int() const
-{
-    if (m_json == 0)
-        debugPrintf("Jsonint m_json is null\n");
-
-    return ::json_object_get_int(m_json);
-}
-
-template <> bool Json::Is<int>() const
-{
-    if (m_json == 0)
-        debugPrintf("Jsonisint m_json is null\n");
-    return ::json_object_is_type(m_json, json_type_int);
-}
-
-std::ostream &operator<<(std::ostream &os, const Json &json)
-{
-    if (json.m_json == 0)
-        debugPrintf("Jsonstream m_json is null\n");
-    return os << ::json_object_to_json_string(json.m_json);
-}
-
-void Json::WriteFile(StdioFile &file) const
-{
-    const char *str = ::json_object_to_json_string(m_json);
-    file.Write(str, std::strlen(str));
-}
-
-Json::Type Json::DataType() const
-{
-    if (m_json == 0)
-        debugPrintf("Jsontype m_json is null\n");
-    return static_cast<Type>(::json_object_get_type(m_json));
-}
-
-Json::Object Json::AsObject() const
-{
-    Object result;
-
-    json_object_object_foreach(m_json, key, val)
-    {
-        result.insert(Object::value_type(key, Json(val)));
-    }
-
-    return result;
-}
-
-template <> bool Json::Is<Json::Object>() const
-{
-    if (m_json == 0)
-        debugPrintf("Jsonisobj m_json is null\n");
-    return ::json_object_is_type(m_json, json_type_object);
+    const char *text = json_object_get_string(m_node);
+    return text == NULL ? std::string() : std::string(text);
 }
 
 Json::Array Json::AsArray() const
 {
-    std::size_t count = ::json_object_array_length(m_json);
-    Array result;
-
-    for (std::size_t i = 0; i < count; ++i)
-        result.push_back(Json(::json_object_array_get_idx(m_json, i)));
-
-    return result;
-}
-
-template <> bool Json::Is<Json::Array>() const
-{
-    if (m_json == 0)
-        debugPrintf("JsonArray m_json is null\n");
-    return ::json_object_is_type(m_json, json_type_array);
-}
-
-Json Json::FindInArray(const std::string &key, const std::string &value) const
-{
-    std::size_t count = ::json_object_array_length(m_json);
-
-    for (std::size_t i = 0; i < count; ++i)
+    Array items;
+    if (json_object_is_type(m_node, json_type_array))
     {
-        Json item(::json_object_array_get_idx(m_json, i));
-        if (item.Has(key) && item[key].Str() == value)
-            return item;
+        const int length = json_object_array_length(m_node);
+        for (int i = 0; i < length; ++i)
+        {
+            items.push_back(Json(json_object_get(json_object_array_get_idx(m_node, i))));
+        }
     }
-    debugPrintf("cannot find %s = %s in array\n", key.c_str(), value.c_str());
-    ;
-    return Json();
-}
-
-bool Json::FindInArray(const std::string &key, const std::string &value, Json &result) const
-{
-    try
-    {
-        result = FindInArray(key, value);
-        return true;
-    }
-    catch (std::exception &e)
-    {
-        return false;
-    }
-}
-
-Json Json::Parse(const std::string &str)
-{
-    struct json_object *json = ::json_tokener_parse(str.c_str());
-    if (json == 0)
-        debugPrintf("json parse error\n");
-
-    return Json(json, NotOwned());
-}
-
-Json Json::ParseFile(StdioFile &file)
-{
-    struct json_tokener *tok = ::json_tokener_new();
-
-    struct json_object *json = 0;
-
-    char buf[1024];
-    std::size_t count = 0;
-
-    while ((count = file.Read(buf, sizeof(buf))) > 0)
-        json = ::json_tokener_parse_ex(tok, buf, count);
-
-    if (json == 0)
-        debugPrintf("Json Parse File Errors %s\n", ::json_tokener_errors[tok->err]);
-
-    ::json_tokener_free(tok);
-
-    return Json(json, NotOwned());
+    return items;
 }
