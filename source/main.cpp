@@ -1496,7 +1496,7 @@ int initCloudDrive(void *arg)
     else
     {
         userType = "two";
-        debugPrintf("Possible Token Read from file:  %s \n", authStatus.c_str());
+        debugPrintf("Refresh token read from the config file\n");
 
         googleAuth.SetRefreshToken(authStatus);
         if (!googleAuth.Refresh())

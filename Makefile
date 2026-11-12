@@ -52,6 +52,10 @@ CONTENTID	:=	OS0001-$(APPID)_00-0000000000000000
 #---------------------------------------------------------------------------------
 
 CFLAGS		=	-O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE) -DAPP_ID=\"$(APPID)\"
+# make LOG_HOST=<PC address>: a debug build that sends its log there (see source/log.cpp).
+ifneq ($(strip $(LOG_HOST)),)
+CFLAGS		+=	-DLOG_HOST=\"$(LOG_HOST)\"
+endif
 CXXFLAGS	=	$(CFLAGS)
 
 LDFLAGS		=	$(MACHDEP) -Wl,-Map,$(notdir $@).map
