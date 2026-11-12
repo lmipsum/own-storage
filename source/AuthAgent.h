@@ -25,58 +25,37 @@
 #include <memory>
 
 /*!	\brief	An HTTP agent with support OAuth2
-	
-	This is a HTTP agent that provide support for OAuth2. It will also perform retries on
-	certain HTTP errors.
+
+        This is a HTTP agent that provide support for OAuth2. It will also perform retries on
+        certain HTTP errors.
 */
 class AuthAgent : public Agent
 {
-	public :
-		AuthAgent( const OAuth2& auth, std::auto_ptr<Agent> real_agent ) ;
+  public:
+    AuthAgent(const OAuth2 &auth, std::auto_ptr<Agent> real_agent);
 
-		long Put(
-			const std::string&	url,
-			const std::string&	data,
-			Receivable			*dest,
-			const Header&		hdr ) ;
+    long Put(const std::string &url, const std::string &data, Receivable *dest, const Header &hdr);
 
-		long Put(
-			const std::string&	url,
-			StdioFile&			file,
-			Receivable			*dest,
-			const Header&		hdr ) ;
+    long Put(const std::string &url, StdioFile &file, Receivable *dest, const Header &hdr);
 
-		long Get(
-			const std::string& 	url,
-			Receivable	*dest,
-			const Header&	hdr ) ;
-	
-		long Post(
-			const std::string& 	url,
-			const std::string&	data,
-			Receivable	*dest,
-			const Header&	hdr ) ;
-	
-		long Custom(
-			const std::string&	method,
-			const std::string&	url,
-			Receivable	*dest,
-			const Header&	hdr ) ;
-	
-		std::string RedirLocation() const ;
-	
-		std::string Escape( const std::string& str ) ;
-		std::string Unescape( const std::string& str ) ;
+    long Get(const std::string &url, Receivable *dest, const Header &hdr);
 
-	private :
-		Header AppendHeader( const Header& hdr ) const ;
-		bool CheckRetry( long response ) ;
-		long CheckHttpResponse(
-			long 				response,
-			const std::string&	url,
-			const Header&	hdr  ) ;
-	
-	private :
-		OAuth2						m_auth ;
-		const std::auto_ptr<Agent>	m_agent ;
-} ;
+    long Post(const std::string &url, const std::string &data, Receivable *dest, const Header &hdr);
+
+    long Custom(const std::string &method, const std::string &url, Receivable *dest,
+                const Header &hdr);
+
+    std::string RedirLocation() const;
+
+    std::string Escape(const std::string &str);
+    std::string Unescape(const std::string &str);
+
+  private:
+    Header AppendHeader(const Header &hdr) const;
+    bool CheckRetry(long response);
+    long CheckHttpResponse(long response, const std::string &url, const Header &hdr);
+
+  private:
+    OAuth2 m_auth;
+    const std::auto_ptr<Agent> m_agent;
+};

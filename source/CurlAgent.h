@@ -27,77 +27,49 @@
 #include <string>
 
 /*!	\brief	agent to provide HTTP access
-	
-	This class provides functions to send HTTP request in many methods (e.g. get, post and put).
-	Normally the HTTP response is returned in a Receivable.
+
+        This class provides functions to send HTTP request in many methods (e.g. get, post and put).
+        Normally the HTTP response is returned in a Receivable.
 */
 class CurlAgent : public Agent
 {
-	public :
-		CurlAgent() ;
-		~CurlAgent() ;
-	
-		long Put(
-			const std::string&	url,
-			const std::string&	data,
-			Receivable		*dest,
-			const Header&		hdr ) ;
-		
-		long Put(
-			const std::string&	url,
-			StdioFile&		file,
-			Receivable		*dest,
-			const Header&		hdr ) ;
-                
-                long customPut(
-			const std::string&	url,
-			StdioFile&		file,
-			Receivable		*dest,
-                        curl_progress_callback  func,
-			const Header&		hdr ) ;
+  public:
+    CurlAgent();
+    ~CurlAgent();
 
-		long Get(
-			const std::string& 	url,
-			Receivable		*dest,
-			const Header&		hdr ) ;
-                
-                long customGet(
-			const std::string& 	url,
-			Receivable		*dest,
-                        curl_progress_callback  func,
-			const Header&		hdr ) ;
-	
-		long Post(
-			const std::string& 	url,
-			const std::string&	data,
-			Receivable		*dest,
-			const Header&		hdr ) ;
-	
-		long Custom(
-			const std::string&	method,
-			const std::string&	url,
-			Receivable			*dest,
-			const Header&		hdr ) ;
-	
-		std::string RedirLocation() const ;
-		std::string CheckSSLSupport() const;
-	
-		std::string Escape( const std::string& str ) ;
-		std::string Unescape( const std::string& str ) ;
+    long Put(const std::string &url, const std::string &data, Receivable *dest, const Header &hdr);
 
-	private :
-		static std::size_t HeaderCallback( void *ptr, size_t size, size_t nmemb, CurlAgent *pthis ) ;
-		static std::size_t Receive( void* ptr, size_t size, size_t nmemb, Receivable *recv ) ;
-	
-		void SetHeader( const Header& hdr ) ;
-		long ExecCurl(
-			const std::string&	url,
-			Receivable			*dest,
-			const Header&		hdr ) ;
+    long Put(const std::string &url, StdioFile &file, Receivable *dest, const Header &hdr);
 
-		void Init() ;
-	
-	private :
-		struct Impl ;
-		std::auto_ptr<Impl>	m_pimpl ;
-} ;
+    long customPut(const std::string &url, StdioFile &file, Receivable *dest,
+                   curl_progress_callback func, const Header &hdr);
+
+    long Get(const std::string &url, Receivable *dest, const Header &hdr);
+
+    long customGet(const std::string &url, Receivable *dest, curl_progress_callback func,
+                   const Header &hdr);
+
+    long Post(const std::string &url, const std::string &data, Receivable *dest, const Header &hdr);
+
+    long Custom(const std::string &method, const std::string &url, Receivable *dest,
+                const Header &hdr);
+
+    std::string RedirLocation() const;
+    std::string CheckSSLSupport() const;
+
+    std::string Escape(const std::string &str);
+    std::string Unescape(const std::string &str);
+
+  private:
+    static std::size_t HeaderCallback(void *ptr, size_t size, size_t nmemb, CurlAgent *pthis);
+    static std::size_t Receive(void *ptr, size_t size, size_t nmemb, Receivable *recv);
+
+    void SetHeader(const Header &hdr);
+    long ExecCurl(const std::string &url, Receivable *dest, const Header &hdr);
+
+    void Init();
+
+  private:
+    struct Impl;
+    std::auto_ptr<Impl> m_pimpl;
+};

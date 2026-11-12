@@ -25,23 +25,23 @@
 
 class Header
 {
-	private :
-		typedef std::vector<std::string>	Vec ;
+  private:
+    typedef std::vector<std::string> Vec;
 
-	public :
-		typedef Vec::const_iterator	iterator ;
+  public:
+    typedef Vec::const_iterator iterator;
 
-	public :
-		Header() ;
-	
-		void Add( const std::string& str ) ;
-	
-		iterator begin() const ;
-		iterator end() const ;
+  public:
+    Header();
 
-	private :
-		Vec	m_vec ;
-} ;
+    void Add(const std::string &str);
 
-std::ostream& operator<<( std::ostream& os, const Header& h ) ;
-Header operator+( const Header& header, const std::string& str ) ;
+    iterator begin() const;
+    iterator end() const;
+
+  private:
+    Vec m_vec;
+};
+
+std::ostream &operator<<(std::ostream &os, const Header &h);
+Header operator+(const Header &header, const std::string &str);

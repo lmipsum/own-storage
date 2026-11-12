@@ -1,0 +1,9 @@
+# The style the original sources mostly follow: Allman braces, four spaces.
+BasedOnStyle: LLVM
+IndentWidth: 4
+UseTab: Never
+BreakBeforeBraces: Allman
+ColumnLimit: 100
+AllowShortFunctionsOnASingleLine: Empty
+# PSL1GHT headers depend on their include order (ppu-types.h first).
+SortIncludes: Never

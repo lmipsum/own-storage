@@ -45,23 +45,27 @@ size_t ReadStringCallback(void *ptr, size_t size, size_t nmemb, std::string *dat
 
 size_t ReadFileCallback(void *ptr, size_t size, size_t nmemb, StdioFile *file)
 {
-	if( ptr == 0 ) debugPrintf("ReadFileCallback: ptr is null\n") ;
-	if( file == 0 ) debugPrintf("ReadFileCallback: file ptr is null\n") ;;
+    if (ptr == 0)
+        debugPrintf("ReadFileCallback: ptr is null\n");
+    if (file == 0)
+        debugPrintf("ReadFileCallback: file ptr is null\n");
+    ;
 
-	u64 count = std::min(
-		static_cast<u64>(size * nmemb),
-		static_cast<u64>(file->Size() - file->Tell()) ) ;
-	if( count > std::numeric_limits<size_t>::max() ) debugPrintf("ReadFileCallback: numeric limit issue?\n") ; ;
-	
-	if ( count > 0 )
-		file->Read( ptr, static_cast<size_t>(count) ) ;
-	
-	return count ;
+    u64 count =
+        std::min(static_cast<u64>(size * nmemb), static_cast<u64>(file->Size() - file->Tell()));
+    if (count > std::numeric_limits<size_t>::max())
+        debugPrintf("ReadFileCallback: numeric limit issue?\n");
+    ;
+
+    if (count > 0)
+        file->Read(ptr, static_cast<size_t>(count));
+
+    return count;
 }
 
-/*int debug_cb ( CURL *handle, curl_infotype type, char *data, size_t size, void *userp) 
+/*int debug_cb ( CURL *handle, curl_infotype type, char *data, size_t size, void *userp)
 {
-    switch ( type ) 
+    switch ( type )
     {
         case CURLINFO_TEXT: {
                 debugPrintf("INFO: %s\n", data);
@@ -81,7 +85,7 @@ size_t ReadFileCallback(void *ptr, size_t size, size_t nmemb, StdioFile *file)
                 debugPrintf("RECIEVED: %d bytes\n", size);
                 break;
         }
-        case CURLINFO_DATA_OUT: { 
+        case CURLINFO_DATA_OUT: {
                 debugPrintf("TRANSMIT: %d bytes\n", size);
                 break;
         }
@@ -89,15 +93,15 @@ size_t ReadFileCallback(void *ptr, size_t size, size_t nmemb, StdioFile *file)
                 debugPrintf("SSL RECIEVED: %d bytes\n", size);
                 break;
         }
-        case CURLINFO_SSL_DATA_OUT: { 
+        case CURLINFO_SSL_DATA_OUT: {
                 debugPrintf("SSL TRANSMIT: %d bytes\n", size);
                 break;
         }
-        case CURLINFO_END: { 
+        case CURLINFO_END: {
                 debugPrintf("This should never happen!");
                 break;
         }
-        default: 
+        default:
             return 0;
     }
     return 0;
@@ -109,8 +113,7 @@ struct CurlAgent::Impl
     std::string location;
 };
 
-CurlAgent::CurlAgent() :
-m_pimpl(new Impl)
+CurlAgent::CurlAgent() : m_pimpl(new Impl)
 {
     m_pimpl->curl = ::curl_easy_init();
 }
@@ -133,7 +136,7 @@ CurlAgent::~CurlAgent()
 
 std::size_t CurlAgent::HeaderCallback(void *ptr, size_t size, size_t nmemb, CurlAgent *pthis)
 {
-    char *str = reinterpret_cast<char*> (ptr);
+    char *str = reinterpret_cast<char *>(ptr);
     std::string line(str, str + size * nmemb);
 
     static const std::string loc = "Location: ";
@@ -144,19 +147,17 @@ std::size_t CurlAgent::HeaderCallback(void *ptr, size_t size, size_t nmemb, Curl
         pthis->m_pimpl->location = line.substr(loc.size(), end_pos - loc.size());
     }
 
-    return size*nmemb;
+    return size * nmemb;
 }
 
-std::size_t CurlAgent::Receive(void* ptr, size_t size, size_t nmemb, Receivable *recv)
+std::size_t CurlAgent::Receive(void *ptr, size_t size, size_t nmemb, Receivable *recv)
 {
-    if(recv == 0) debugPrintf("Receive: no data received\n") ;
+    if (recv == 0)
+        debugPrintf("Receive: no data received\n");
     return recv->OnData(ptr, size * nmemb);
 }
 
-long CurlAgent::ExecCurl(
-                         const std::string& url,
-                         Receivable *dest,
-                         const Header& hdr)
+long CurlAgent::ExecCurl(const std::string &url, Receivable *dest, const Header &hdr)
 {
     CURL *curl = m_pimpl->curl;
 
@@ -181,7 +182,7 @@ long CurlAgent::ExecCurl(
     // get the HTTTP response code
     long http_code = 0;
     ::curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-    debugPrintf("HTTP response %d\n", http_code ) ;
+    debugPrintf("HTTP response %d\n", http_code);
 
     // reset the curl buffer to prevent it from touch our "error" buffer
     ::curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, 0);
@@ -189,19 +190,16 @@ long CurlAgent::ExecCurl(
     // only throw for libcurl errors
     if (curl_code != CURLE_OK)
     {
-        debugPrintf("ExecCurl %d,%s\n",curl_code,url.c_str(),error);
+        debugPrintf("ExecCurl %d,%s\n", curl_code, url.c_str(), error);
     }
 
     return http_code;
 }
 
-long CurlAgent::Put(
-                    const std::string& url,
-                    const std::string& data,
-                    Receivable *dest,
-                    const Header& hdr)
+long CurlAgent::Put(const std::string &url, const std::string &data, Receivable *dest,
+                    const Header &hdr)
 {
-    debugPrintf("HTTP PUT %s\n", url.c_str() ) ;
+    debugPrintf("HTTP PUT %s\n", url.c_str());
 
     Init();
     CURL *curl = m_pimpl->curl;
@@ -217,56 +215,45 @@ long CurlAgent::Put(
     return ExecCurl(url, dest, hdr);
 }
 
-long CurlAgent::Put(
-                    const std::string& url,
-                    StdioFile& file,
-                    Receivable *dest,
-                    const Header& hdr)
+long CurlAgent::Put(const std::string &url, StdioFile &file, Receivable *dest, const Header &hdr)
 {
-	debugPrintf("HTTP PUT %s\n", url.c_str() ) ;
-	
-	Init() ;
-	CURL *curl = m_pimpl->curl ;
+    debugPrintf("HTTP PUT %s\n", url.c_str());
 
-	// set common options
-	::curl_easy_setopt(curl, CURLOPT_UPLOAD,			1L ) ;
-	::curl_easy_setopt(curl, CURLOPT_READFUNCTION,		&ReadFileCallback ) ;
-	::curl_easy_setopt(curl, CURLOPT_READDATA ,			&file ) ;
-	::curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, 	static_cast<curl_off_t>(file.Size()) ) ;
-	
-	return ExecCurl( url, dest, hdr ) ;
+    Init();
+    CURL *curl = m_pimpl->curl;
+
+    // set common options
+    ::curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    ::curl_easy_setopt(curl, CURLOPT_READFUNCTION, &ReadFileCallback);
+    ::curl_easy_setopt(curl, CURLOPT_READDATA, &file);
+    ::curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(file.Size()));
+
+    return ExecCurl(url, dest, hdr);
 }
 
-long CurlAgent::customPut(
-                    const std::string& url,
-                    StdioFile& file,
-                    Receivable *dest,
-                    curl_progress_callback func,
-                    const Header& hdr)
+long CurlAgent::customPut(const std::string &url, StdioFile &file, Receivable *dest,
+                          curl_progress_callback func, const Header &hdr)
 {
-	debugPrintf("HTTP PUT %s\n", url.c_str() ) ;
-	
-	Init() ;
-	CURL *curl = m_pimpl->curl ;
+    debugPrintf("HTTP PUT %s\n", url.c_str());
 
-	// set common options
-	::curl_easy_setopt(curl, CURLOPT_UPLOAD,			1L ) ;
-	::curl_easy_setopt(curl, CURLOPT_READFUNCTION,		&ReadFileCallback ) ;
-	::curl_easy_setopt(curl, CURLOPT_READDATA ,			&file ) ;
-	::curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, 	static_cast<curl_off_t>(file.Size()) ) ;
-	::curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        ::curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, func);
-	::curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, func);
-                
-	return ExecCurl( url, dest, hdr ) ;
+    Init();
+    CURL *curl = m_pimpl->curl;
+
+    // set common options
+    ::curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    ::curl_easy_setopt(curl, CURLOPT_READFUNCTION, &ReadFileCallback);
+    ::curl_easy_setopt(curl, CURLOPT_READDATA, &file);
+    ::curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, static_cast<curl_off_t>(file.Size()));
+    ::curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    ::curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, func);
+    ::curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, func);
+
+    return ExecCurl(url, dest, hdr);
 }
 
-long CurlAgent::Get(
-                    const std::string& url,
-                    Receivable *dest,
-                    const Header& hdr)
+long CurlAgent::Get(const std::string &url, Receivable *dest, const Header &hdr)
 {
-    debugPrintf("HTTP GET %s\n", url.c_str() ) ;
+    debugPrintf("HTTP GET %s\n", url.c_str());
     Init();
 
     // set get specific options
@@ -275,17 +262,14 @@ long CurlAgent::Get(
     return ExecCurl(url, dest, hdr);
 }
 
-long CurlAgent::customGet(
-                    const std::string& url,
-                    Receivable *dest,
-                    curl_progress_callback func,
-                    const Header& hdr)
+long CurlAgent::customGet(const std::string &url, Receivable *dest, curl_progress_callback func,
+                          const Header &hdr)
 {
-    debugPrintf("HTTP GET %s\n", url.c_str() ) ;
+    debugPrintf("HTTP GET %s\n", url.c_str());
     Init();
 
     // set get specific options
-    CURL *curl = m_pimpl->curl ;
+    CURL *curl = m_pimpl->curl;
     ::curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
     ::curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     ::curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, func);
@@ -294,13 +278,10 @@ long CurlAgent::customGet(
     return ExecCurl(url, dest, hdr);
 }
 
-long CurlAgent::Post(
-                     const std::string& url,
-                     const std::string& data,
-                     Receivable *dest,
-                     const Header& hdr)
+long CurlAgent::Post(const std::string &url, const std::string &data, Receivable *dest,
+                     const Header &hdr)
 {
-    debugPrintf("HTTP POST %s with %s\n", url.c_str(), data.c_str() ) ;
+    debugPrintf("HTTP POST %s with %s\n", url.c_str(), data.c_str());
 
     Init();
     CURL *curl = m_pimpl->curl;
@@ -316,13 +297,10 @@ long CurlAgent::Post(
     return ExecCurl(url, dest, hdr);
 }
 
-long CurlAgent::Custom(
-                       const std::string& method,
-                       const std::string& url,
-                       Receivable *dest,
-                       const Header& hdr)
+long CurlAgent::Custom(const std::string &method, const std::string &url, Receivable *dest,
+                       const Header &hdr)
 {
-    debugPrintf("HTTP %s. %s\n", url.c_str(), method.c_str() ) ;
+    debugPrintf("HTTP %s. %s\n", url.c_str(), method.c_str());
 
     CURL *curl = m_pimpl->curl;
 
@@ -332,13 +310,13 @@ long CurlAgent::Custom(
     return ExecCurl(url, dest, hdr);
 }
 
-void CurlAgent::SetHeader(const Header& hdr)
+void CurlAgent::SetHeader(const Header &hdr)
 {
     // set headers
     struct curl_slist *curl_hdr = 0;
     for (Header::iterator i = hdr.begin(); i != hdr.end(); ++i)
     {
-        //debugPrintf("Set Header %s\n",i->c_str());
+        // debugPrintf("Set Header %s\n",i->c_str());
         curl_hdr = curl_slist_append(curl_hdr, i->c_str());
     }
 
@@ -347,20 +325,20 @@ void CurlAgent::SetHeader(const Header& hdr)
 
 std::string CurlAgent::RedirLocation() const
 {
-    //debugPrintf("Returning location %s\n",m_pimpl->location.c_str());
+    // debugPrintf("Returning location %s\n",m_pimpl->location.c_str());
     return m_pimpl->location;
 }
 
 std::string CurlAgent::CheckSSLSupport() const
 {
-    curl_version_info_data * vinfo = curl_version_info(CURLVERSION_NOW);
+    curl_version_info_data *vinfo = curl_version_info(CURLVERSION_NOW);
     if (vinfo->features & CURL_VERSION_SSL)
         return "SSL is supported";
     else
         return "Aww man, no Sweet Socks Support";
 }
 
-std::string CurlAgent::Escape(const std::string& str)
+std::string CurlAgent::Escape(const std::string &str)
 {
     CURL *curl = m_pimpl->curl;
 
@@ -371,7 +349,7 @@ std::string CurlAgent::Escape(const std::string& str)
     return result;
 }
 
-std::string CurlAgent::Unescape(const std::string& str)
+std::string CurlAgent::Unescape(const std::string &str)
 {
     CURL *curl = m_pimpl->curl;
 

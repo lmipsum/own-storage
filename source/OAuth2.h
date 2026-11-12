@@ -23,35 +23,31 @@
 
 class OAuth2
 {
-	public :
-		OAuth2(
-			const std::string&	client_id,
-			const std::string&	client_secret ) ;
-		OAuth2(
-			const std::string&	refresh_code,
-			const std::string&	client_id,
-			const std::string&	client_secret ) ;
+  public:
+    OAuth2(const std::string &client_id, const std::string &client_secret);
+    OAuth2(const std::string &refresh_code, const std::string &client_id,
+           const std::string &client_secret);
 
-		std::string Str() const ;
+    std::string Str() const;
 
-		std::string Auth() ;
-		std::string DeviceAuth();
-		std::string Refresh( ) ;
-		
-                void setRefreshToken(std::string token);
-		std::string RefreshToken( ) const ;
-		std::string AccessToken( ) const ;
-		std::string DeviceCode( ) const;
-	
-		// adding HTTP auth header
-		std::string HttpHeader( ) const ;
-		std::string HostHeader( ) const;
-	
-	private :
-		std::string m_access ;
-		std::string m_refresh ;
-		std::string m_device;
-	
-		const std::string	m_client_id ;
-		const std::string	m_client_secret ;
-} ;
+    std::string Auth();
+    std::string DeviceAuth();
+    std::string Refresh();
+
+    void setRefreshToken(std::string token);
+    std::string RefreshToken() const;
+    std::string AccessToken() const;
+    std::string DeviceCode() const;
+
+    // adding HTTP auth header
+    std::string HttpHeader() const;
+    std::string HostHeader() const;
+
+  private:
+    std::string m_access;
+    std::string m_refresh;
+    std::string m_device;
+
+    const std::string m_client_id;
+    const std::string m_client_secret;
+};

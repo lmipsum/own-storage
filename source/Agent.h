@@ -26,38 +26,23 @@
 
 class Agent
 {
-	public :
-		virtual long Put(
-			const std::string&	url,
-			const std::string&	data,
-			Receivable			*dest,
-			const Header&		hdr ) = 0 ;
+  public:
+    virtual long Put(const std::string &url, const std::string &data, Receivable *dest,
+                     const Header &hdr) = 0;
 
-		virtual long Put(
-			const std::string&	url,
-			StdioFile&			file,
-			Receivable			*dest,
-			const Header&		hdr ) = 0 ;
-		
-		virtual long Get(
-			const std::string& 	url,
-			Receivable			*dest,
-			const Header&		hdr ) = 0 ;
-	
-		virtual long Post(
-			const std::string& 	url,
-			const std::string&	data,
-			Receivable			*dest,
-			const Header&		hdr ) = 0 ;
-	
-		virtual long Custom(
-			const std::string&	method,
-			const std::string&	url,
-			Receivable			*dest,
-			const Header&		hdr ) = 0 ;
-	
-		virtual std::string RedirLocation() const = 0 ;
-	
-		virtual std::string Escape( const std::string& str ) = 0 ;
-		virtual std::string Unescape( const std::string& str ) = 0 ;
-} ;
+    virtual long Put(const std::string &url, StdioFile &file, Receivable *dest,
+                     const Header &hdr) = 0;
+
+    virtual long Get(const std::string &url, Receivable *dest, const Header &hdr) = 0;
+
+    virtual long Post(const std::string &url, const std::string &data, Receivable *dest,
+                      const Header &hdr) = 0;
+
+    virtual long Custom(const std::string &method, const std::string &url, Receivable *dest,
+                        const Header &hdr) = 0;
+
+    virtual std::string RedirLocation() const = 0;
+
+    virtual std::string Escape(const std::string &str) = 0;
+    virtual std::string Unescape(const std::string &str) = 0;
+};

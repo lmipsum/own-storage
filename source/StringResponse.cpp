@@ -20,22 +20,20 @@
 #include "StringResponse.h"
 #include "log.h"
 
-StringResponse::StringResponse()
-{
-}
+StringResponse::StringResponse() {}
 
 void StringResponse::Clear()
 {
-	m_resp.clear() ;
+    m_resp.clear();
 }
 
-size_t StringResponse::OnData( void *data, size_t count )
+size_t StringResponse::OnData(void *data, size_t count)
 {
-	m_resp.append( reinterpret_cast<char*>(data), count ) ;
-	return count ;
+    m_resp.append(reinterpret_cast<char *>(data), count);
+    return count;
 }
 
-const std::string& StringResponse::Response() const
+const std::string &StringResponse::Response() const
 {
-	return m_resp ;
+    return m_resp;
 }
