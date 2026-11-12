@@ -48,13 +48,13 @@
 
 #include <polarssl/md5.h>
 
-#include "AuthorizedSend.h"
-#include "ClientCredentials.h"
-#include "DeviceAuth.h"
-#include "HttpClient.h"
-#include "Json.h"
-#include "log.h"
-#include "AppPaths.h"
+#include "auth/AuthorizedSend.h"
+#include "auth/ClientCredentials.h"
+#include "auth/DeviceAuth.h"
+#include "net/HttpClient.h"
+#include "json/Json.h"
+#include "app/Log.h"
+#include "app/AppPaths.h"
 
 const std::string jsonMime = "application/json";
 const std::string folderMime = "application/vnd.google-apps.folder";

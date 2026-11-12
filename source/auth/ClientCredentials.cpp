@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "ClientCredentials.h"
+#include "auth/ClientCredentials.h"
 
-#include "HttpClient.h"
-#include "Json.h"
-#include "log.h"
+#include "net/HttpClient.h"
+#include "json/Json.h"
+#include "app/Log.h"
 
 namespace
 {

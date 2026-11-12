@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "AuthorizedSend.h"
+#include "auth/AuthorizedSend.h"
 
-#include "DeviceAuth.h"
-#include "log.h"
+#include "auth/DeviceAuth.h"
+#include "app/Log.h"
 
 #include <sys/systime.h>
 

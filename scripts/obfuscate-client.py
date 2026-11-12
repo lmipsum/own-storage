@@ -1,7 +1,7 @@
 """Writes the published clients file the app fetches at run time.
 
 The Google client comes from GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET; the values are
-obfuscated with the key in source/ClientCredentials.cpp, which Deobfuscate() reverses. This
+obfuscated with the key in source/auth/ClientCredentials.cpp, which Deobfuscate() reverses. This
 hides them from leaked-credential scanners only: the key ships with the app.
 
     GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... python3 scripts/obfuscate-client.py > clients.json
@@ -13,7 +13,9 @@ import pathlib
 import re
 import sys
 
-SOURCE = pathlib.Path(__file__).resolve().parent.parent / "source" / "ClientCredentials.cpp"
+SOURCE = (
+    pathlib.Path(__file__).resolve().parent.parent / "source" / "auth" / "ClientCredentials.cpp"
+)
 
 
 def obfuscation_key():
