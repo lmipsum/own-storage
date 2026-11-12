@@ -26,13 +26,13 @@
 
 class Download : public Receivable
 {
-public :
-	Download( const std::string& filename ) ;
-	~Download() ;
-	
-	void Clear() ;
-	size_t OnData( void *data, std::size_t count ) ;
-	
-private :
-	StdioFile			m_file ;
-} ;
+  public:
+    Download(const std::string &filename);
+    ~Download();
+
+    void Clear();
+    size_t OnData(void *data, std::size_t count);
+
+  private:
+    StdioFile m_file;
+};

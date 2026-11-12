@@ -1,0 +1,53 @@
+name: package
+
+# Builds the PS3 package; ci.yml runs it on every push, build.yml by hand to keep the .pkg.
+on:
+  workflow_call:
+    inputs:
+      keep:
+        description: "Keep the .pkg as a workflow artifact"
+        type: boolean
+        default: false
+
+permissions: {}
+
+env:
+  # The prebuilt PSL1GHT SDK with its portlibs (SDL, json-c, curl, mbedTLS), as Apollo Save Tool uses it.
+  TOOLCHAIN_URL: https://github.com/bucanero/ps3toolchain/releases/download/ubuntu-latest-fad3b5fb/ps3dev-ubuntu-latest-2020-08-31.tar.gz
+  TOOLCHAIN_SHA256: bc411294771a9a17ce70941e935b26ec9567654a075c545da1c0d7898b3892d3
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    # The SDK was built on Ubuntu 20.04: make_self needs its OpenSSL 1.1, sfo.py and pkg.py its Python 2.7.
+    container: ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: SDK tools' libraries
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates curl make python2.7 libelf1 libssl1.1
+      - name: PSL1GHT SDK
+        run: |
+          curl -fsSL "$TOOLCHAIN_URL" -o ps3dev.tar.gz
+          echo "$TOOLCHAIN_SHA256  ps3dev.tar.gz" | sha256sum -c -
+          tar xzf ps3dev.tar.gz -C /opt
+          rm ps3dev.tar.gz
+          echo "PS3DEV=/opt/ps3dev" >> "$GITHUB_ENV"
+          echo "PSL1GHT=/opt/ps3dev" >> "$GITHUB_ENV"
+      - name: Build
+        run: make pkg
+      - if: inputs.keep
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: own-storage-${{ github.sha }}
+          path: own-storage*.pkg
+          if-no-files-found: error
+          retention-days: 14

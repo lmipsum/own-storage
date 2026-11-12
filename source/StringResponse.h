@@ -22,15 +22,16 @@
 #include "Receivable.h"
 #include <string>
 
-class StringResponse : public Receivable {
-public:
+class StringResponse : public Receivable
+{
+  public:
     StringResponse();
 
     size_t OnData(void *data, size_t count);
     void Clear();
 
-    const std::string& Response() const;
+    const std::string &Response() const;
 
-private:
+  private:
     std::string m_resp;
 };

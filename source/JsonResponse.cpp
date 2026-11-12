@@ -20,21 +20,19 @@
 #include "JsonResponse.h"
 #include "log.h"
 
-JsonResponse::JsonResponse()
-{
-}
+JsonResponse::JsonResponse() {}
 
 void JsonResponse::Clear()
 {
-	m_resp.Clear() ;
+    m_resp.Clear();
 }
 
-size_t JsonResponse::OnData( void *data, size_t count )
+size_t JsonResponse::OnData(void *data, size_t count)
 {
-	return m_resp.OnData( data, count ) ;
+    return m_resp.OnData(data, count);
 }
 
 Json JsonResponse::Response() const
 {
-	return Json::Parse( m_resp.Response() ) ;
+    return Json::Parse(m_resp.Response());
 }

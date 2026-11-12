@@ -1,0 +1,6 @@
+# make pkg output
+build/
+*.elf
+*.self
+*.pkg
+*.map

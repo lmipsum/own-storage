@@ -23,7 +23,7 @@
 
 class Receivable
 {
-	public :
-		virtual std::size_t OnData( void *data, std::size_t count ) = 0 ;
-		virtual void Clear() = 0 ;
+  public:
+    virtual std::size_t OnData(void *data, std::size_t count) = 0;
+    virtual void Clear() = 0;
 };

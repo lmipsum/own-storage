@@ -27,40 +27,40 @@
 
 class StdioFile
 {
-public :
-	StdioFile( const std::string& path ) ;
-	StdioFile( const std::string& path, int chmod ) ;
-	StdioFile( const std::string& path, int flags, int chmod ) ;
-	~StdioFile( ) ;
+  public:
+    StdioFile(const std::string &path);
+    StdioFile(const std::string &path, int chmod);
+    StdioFile(const std::string &path, int flags, int chmod);
+    ~StdioFile();
 
-	void OpenForRead() ;
-	void OpenWithFlags(int flags, int chmod );
-	void OpenForWrite( int chmod = 0600 ) ;
-	void Close() ;
-	bool IsOpened() const ;
-	
-	size_t Read( void *ptr, size_t size ) ;
-	size_t Write( const void *ptr, size_t size ) ;
-        
-        s32 fileStatus() const;
+    void OpenForRead();
+    void OpenWithFlags(int flags, int chmod);
+    void OpenForWrite(int chmod = 0600);
+    void Close();
+    bool IsOpened() const;
 
-	u64 Seek( s64 offset, int whence ) ;
-	u64 Tell()  ;
-	u64 Size() const;
-        
-        bool Exists();
-        s32 IsDir();
-	
-	void Chmod(int chmod );
-	
-private :
-	void Open( int flags, int chmod ) ;
-	
-private :
-	s32	m_fd ;
-        s32     m_ret;
-        u64     m_read;
-        u64     m_written;
-        u64     m_pos;
-	std::string m_path;
-} ;
+    size_t Read(void *ptr, size_t size);
+    size_t Write(const void *ptr, size_t size);
+
+    s32 fileStatus() const;
+
+    u64 Seek(s64 offset, int whence);
+    u64 Tell();
+    u64 Size() const;
+
+    bool Exists();
+    s32 IsDir();
+
+    void Chmod(int chmod);
+
+  private:
+    void Open(int flags, int chmod);
+
+  private:
+    s32 m_fd;
+    s32 m_ret;
+    u64 m_read;
+    u64 m_written;
+    u64 m_pos;
+    std::string m_path;
+};

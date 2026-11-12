@@ -23,34 +23,32 @@
 #include <iterator>
 #include <ostream>
 
-Header::Header()
-{
-}
+Header::Header() {}
 
-void Header::Add( const std::string& str )
+void Header::Add(const std::string &str)
 {
-	m_vec.push_back( str ) ;
+    m_vec.push_back(str);
 }
 
 Header::iterator Header::begin() const
 {
-	return m_vec.begin() ;
+    return m_vec.begin();
 }
 
 Header::iterator Header::end() const
 {
-	return m_vec.end() ;
+    return m_vec.end();
 }
 
-std::ostream& operator<<( std::ostream& os, const Header& h )
+std::ostream &operator<<(std::ostream &os, const Header &h)
 {
-	std::copy( h.begin(), h.end(), std::ostream_iterator<std::string>( os, "\n" ) ) ;
-	return os ;
+    std::copy(h.begin(), h.end(), std::ostream_iterator<std::string>(os, "\n"));
+    return os;
 }
 
-Header operator+( const Header& header, const std::string& str )
+Header operator+(const Header &header, const std::string &str)
 {
-	Header h( header ) ;
-	h.Add( str ) ;
-	return h ;
+    Header h(header);
+    h.Add(str);
+    return h;
 }

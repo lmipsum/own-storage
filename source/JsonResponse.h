@@ -25,14 +25,14 @@
 
 class JsonResponse : public Receivable
 {
-public :
-	JsonResponse() ;
+  public:
+    JsonResponse();
 
-	size_t OnData( void *data, size_t count ) ;
-	void Clear() ;
+    size_t OnData(void *data, size_t count);
+    void Clear();
 
-	Json Response() const ;
-	
-private :
-	StringResponse	m_resp ;
-} ;
+    Json Response() const;
+
+  private:
+    StringResponse m_resp;
+};

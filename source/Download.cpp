@@ -20,23 +20,19 @@
 #include "Download.h"
 #include "log.h"
 
-Download::Download( const std::string& filename ) :
-	m_file( filename, 0600 )
-{
-}
+Download::Download(const std::string &filename) : m_file(filename, 0600) {}
 
-Download::~Download()
-{
-}
+Download::~Download() {}
 
 void Download::Clear()
 {
-	// no need to do anything
+    // no need to do anything
 }
 
-std::size_t Download::OnData( void *data, std::size_t count )
+std::size_t Download::OnData(void *data, std::size_t count)
 {
-	if( data == 0 ) debugPrintf("Download-OnData, no data\n");
-	
-	return m_file.Write( data, count ) ;
+    if (data == 0)
+        debugPrintf("Download-OnData, no data\n");
+
+    return m_file.Write(data, count);
 }
