@@ -48,10 +48,9 @@
 
 #include <polarssl/md5.h>
 
-#include "OAuth2.h"
-#include "CurlAgent.h"
-#include "JsonResponse.h"
-#include "Download.h"
+#include "DeviceAuth.h"
+#include "HttpClient.h"
+#include "Json.h"
 #include "log.h"
 #include "AppPaths.h"
 
@@ -70,10 +69,10 @@ const std::string app_title = "ps3clouddrive";
 const std::string client_id = "google_drive_app_client_id";
 const std::string client_secret = "google_drive_app_client_secret";
 
-OAuth2 authToken(client_id, client_secret);
+HttpClient http;
+DeviceAuth authToken(http, client_id, client_secret);
 
 std::string rootFolderId = "root";
-std::string deviceId = "nill";
 std::string remoteJsonId = "root";
 std::string last_sync = "0";
 
@@ -99,8 +98,6 @@ int appWidth = 1280;
 int appHeight = 720;
 
 std::string userType = "one";
-
-CurlAgent http;
 
 typedef struct
 {
@@ -212,17 +209,17 @@ Json::Array getResourcesUnderFolder(std::string parentId)
     long ret;
     Json::Array parsedArray;
 
-    Header hdr;
-    hdr.Add("Authorization: Bearer " + authToken.AccessToken());
+    HttpClient::Headers hdr;
+    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
 
     std::string query = parentId + "' in parents";
-    JsonResponse resp;
+    std::string resp;
 
     while (CheckRetry(
-        ret = http.Get("https://www.googleapis.com/drive/v2/files?q=" + query, &resp, hdr)))
+        ret = http.Get("https://www.googleapis.com/drive/v2/files?q=" + query, hdr, resp)))
         ;
 
-    if (ret >= 400 && ret < 500)
+    if (!HttpClient::Succeeded(ret))
     {
         debugPrintf("getResourcesUnderFolder: HTTP Server Error...%l\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
@@ -230,7 +227,7 @@ Json::Array getResourcesUnderFolder(std::string parentId)
     }
     else
     {
-        Json parsedResp = resp.Response();
+        Json parsedResp = Json::Parse(resp);
         parsedArray = parsedResp["items"].AsArray();
     }
     return parsedArray;
@@ -250,20 +247,20 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
     long ret;
     Json resourceObject;
 
-    Header hdr;
-    hdr.Add("Authorization: Bearer " + authToken.AccessToken());
+    HttpClient::Headers hdr;
+    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
 
     std::string query = "mimeType='" + mimeType + "' and trashed=false and title='" +
                         resourceTitle + "' and '" + parentId + "' in parents";
-    JsonResponse resp;
+    std::string resp;
 
     std::string url = "https://www.googleapis.com/drive/v2/files?q=" + http.Escape(query) +
                       "&fields=" + http.Escape(queryFields);
 
-    while (CheckRetry(ret = http.Get(url, &resp, hdr)))
+    while (CheckRetry(ret = http.Get(url, hdr, resp)))
         ;
 
-    if (ret >= 400 && ret < 500)
+    if (!HttpClient::Succeeded(ret))
     {
         debugPrintf("checkIfRemoteResourceExists: HTTP Server Error...%l\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
@@ -271,7 +268,7 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
     }
     else
     {
-        Json parsedResp = resp.Response();
+        Json parsedResp = Json::Parse(resp);
         Json::Array parsedArray = parsedResp["items"].AsArray();
         if (parsedArray.size() > 0)
         {
@@ -287,21 +284,14 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
  */
 void storeConfig()
 {
-    StdioFile file(appFile, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, 0644);
-    StdioFile backup(appFileBackup, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, 0644);
-
     Json appConfig;
     appConfig.Add("refresh_token", Json(authToken.RefreshToken()));
-    appConfig.Add("device_id", Json(authToken.DeviceCode()));
     appConfig.Add("root_id", Json(rootFolderId));
     appConfig.Add("last_sync", Json(last_sync));
     appConfig.Add("remote_fid", Json(remoteJsonId));
 
-    appConfig.WriteFile(file);
-    appConfig.WriteFile(backup);
-
-    file.Close();
-    backup.Close();
+    appConfig.Save(appFile);
+    appConfig.Save(appFileBackup);
 
     sysFsChmod(appFile.c_str(), 0644);
     sysFsChmod(appFileBackup.c_str(), 0644);
@@ -314,20 +304,18 @@ void storeConfig()
 std::string isUserAuthenticated()
 {
     std::string result = "not_found";
-    Json config;
-    StdioFile file(appFile);
+    sysFSStat entry;
 
-    if (file.Exists())
+    if (sysFsStat(appFile.c_str(), &entry) == 0)
     {
         debugPrintf("Config file found, parsing...\n");
 
-        config = Json::ParseFile(file);
+        Json config = Json::Load(appFile);
 
-        if (!config.AsObject().empty())
+        if (!config.IsEmpty())
         {
             debugPrintf("Config file not empty, returning refresh token...\n");
             result = config["refresh_token"].Str();
-            deviceId = config.Has("device_id") ? config["device_id"].Str() : "nill";
             rootFolderId = config.Has("root_id") ? config["root_id"].Str() : "root";
             last_sync = config.Has("last_sync") ? config["last_sync"].Str() : "0";
             remoteJsonId = config.Has("remote_fid") ? config["remote_fid"].Str() : "root";
@@ -414,19 +402,18 @@ void downloadDirectory(std::string path)
 bool downloadFile(std::string localPath, std::string fileId)
 {
     long ret;
-    Download file(localPath);
 
-    Header hdr;
-    hdr.Add("Authorization: Bearer " + authToken.AccessToken());
+    HttpClient::Headers hdr;
+    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
 
-    JsonResponse resp;
+    std::string resp;
 
     while (CheckRetry(ret = http.Get("https://www.googleapis.com/drive/v2/files/" + fileId +
                                          "?fields=downloadUrl",
-                                     &resp, hdr)))
+                                     hdr, resp)))
         ;
 
-    if (ret >= 400 && ret < 500)
+    if (!HttpClient::Succeeded(ret))
     {
         debugPrintf("downloadFile: Could not get downloadUrl...%l\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
@@ -435,7 +422,7 @@ bool downloadFile(std::string localPath, std::string fileId)
     }
 
     // the content upload URL is in the "Location" HTTP header
-    Json fileRes = resp.Response();
+    Json fileRes = Json::Parse(resp);
     std::string downloadLink;
 
     if (fileRes.Has("downloadUrl"))
@@ -446,7 +433,6 @@ bool downloadFile(std::string localPath, std::string fileId)
     {
         return false;
     }
-    resp.Clear();
 
     debugPrintf("Downlink is %s\n", downloadLink.c_str());
 
@@ -455,12 +441,12 @@ bool downloadFile(std::string localPath, std::string fileId)
     msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
     msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, localPath.c_str());
 
-    while (CheckRetry(ret = http.customGet(downloadLink, &file, transferProgress, hdr)))
+    while (CheckRetry(ret = http.Download(downloadLink, hdr, localPath, transferProgress)))
         ;
 
     debugPrintf("Return Code for file download is %d\n", ret);
 
-    if (ret >= 400 && ret < 500)
+    if (!HttpClient::Succeeded(ret))
     {
         debugPrintf("downloadFile: Could not download File..%l\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
@@ -626,7 +612,6 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
                 std::string fileId = "")
 {
     long ret;
-    StdioFile file(path);
     Json obj;
     sysFSStat entry;
 
@@ -637,19 +622,19 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     }
 
     std::ostringstream xcontent_len;
-    xcontent_len << "X-Upload-Content-Length: " << file.Size();
+    xcontent_len << "X-Upload-Content-Length: " << entry.st_size;
 
-    Header hdr;
-    hdr.Add("Authorization: Bearer " + authToken.AccessToken());
-    hdr.Add("Content-Type: application/json");
-    hdr.Add("X-Upload-Content-Type: " + mimeType);
-    hdr.Add(xcontent_len.str());
-    // hdr.Add( "If-Match: " + m_etag ) ;
-    hdr.Add("Expect:");
+    HttpClient::Headers hdr;
+    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    hdr.push_back("Content-Type: application/json");
+    hdr.push_back("X-Upload-Content-Type: " + mimeType);
+    hdr.push_back(xcontent_len.str());
+    // hdr.push_back( "If-Match: " + m_etag ) ;
+    hdr.push_back("Expect:");
 
     std::string meta = constructMetaData(filename, mimeType, parentId);
 
-    JsonResponse resp;
+    std::string resp;
 
     std::string postUrl;
 
@@ -657,7 +642,7 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     {
         postUrl = "https://www.googleapis.com/upload/drive/v2/files?uploadType=resumable&fields=" +
                   http.Escape("fileSize,id,md5Checksum,modifiedDate,parents/id");
-        while (CheckRetry(ret = http.Post(postUrl, meta, &resp, hdr)))
+        while (CheckRetry(ret = http.Post(postUrl, meta, hdr, resp)))
             ;
     }
     else
@@ -665,11 +650,11 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
         postUrl = "https://www.googleapis.com/upload/drive/v2/files/" + fileId +
                   "?uploadType=resumable&fields=" +
                   http.Escape("fileSize,id,md5Checksum,modifiedDate,parents/id");
-        while (CheckRetry(ret = http.Put(postUrl, meta, &resp, hdr)))
+        while (CheckRetry(ret = http.Put(postUrl, meta, hdr, resp)))
             ;
     }
 
-    if (ret >= 400 && ret < 500)
+    if (!HttpClient::Succeeded(ret))
     {
         debugPrintf("uploadFile: Could not pose meta data..%l\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
@@ -678,29 +663,29 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     }
 
     std::ostringstream content_len;
-    content_len << "Content-Length: " << file.Size();
+    content_len << "Content-Length: " << entry.st_size;
 
-    Header uphdr;
-    uphdr.Add("Authorization: Bearer " + authToken.AccessToken());
-    uphdr.Add("Content-Type: " + mimeType);
-    uphdr.Add(content_len.str());
-    uphdr.Add("Expect:");
-    uphdr.Add("Accept:");
-    uphdr.Add("Accept-Encoding: gzip");
+    HttpClient::Headers uphdr;
+    uphdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    uphdr.push_back("Content-Type: " + mimeType);
+    uphdr.push_back(content_len.str());
+    uphdr.push_back("Expect:");
+    uphdr.push_back("Accept:");
+    uphdr.push_back("Accept-Encoding: gzip");
 
     // the content upload URL is in the "Location" HTTP header
-    JsonResponse resp2;
+    const std::string uploadUrl = http.Location();
+    std::string resp2;
 
     progFuncLastProgress = 0.0;
 
     msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
     msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, path.c_str());
 
-    while (CheckRetry(
-        ret = http.customPut(http.RedirLocation(), file, &resp2, transferProgress, uphdr)))
+    while (CheckRetry(ret = http.Upload(uploadUrl, uphdr, path, transferProgress, resp2)))
         ;
 
-    if (ret >= 400 && ret < 500)
+    if (!HttpClient::Succeeded(ret))
     {
         debugPrintf("uploadFile: Could not upload file..%l\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
@@ -708,7 +693,7 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
         return obj;
     }
 
-    obj = resp2.Response();
+    obj = Json::Parse(resp2);
     if (obj.Has("id"))
     {
         debugPrintf("Resource id is %s\n", obj["id"].Str().c_str());
@@ -733,23 +718,23 @@ Json uploadDirectory(std::string dirName, std::string parentId)
     Json obj;
 
     // Step 1 - Creating SaveData Directory Online
-    Header hdr;
-    hdr.Add("Authorization: Bearer " + authToken.AccessToken());
-    hdr.Add("Content-Type: application/json");
-    hdr.Add("Expect:");
+    HttpClient::Headers hdr;
+    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    hdr.push_back("Content-Type: application/json");
+    hdr.push_back("Expect:");
 
     std::string meta = constructMetaData(dirName, folderMime, parentId);
 
-    JsonResponse resp;
+    std::string resp;
 
     debugPrintf("Attempting folder creation on GDrive...\n");
 
     while (CheckRetry(ret = http.Post("https://www.googleapis.com/drive/v2/files?fields=" +
                                           http.Escape("id,modifiedDate,parents/id"),
-                                      meta, &resp, hdr)))
+                                      meta, hdr, resp)))
         ;
 
-    if (ret >= 400 && ret < 500)
+    if (!HttpClient::Succeeded(ret))
     {
         debugPrintf("uploadDirectory: Could not upload directory..%l\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
@@ -757,7 +742,7 @@ Json uploadDirectory(std::string dirName, std::string parentId)
         return obj;
     }
 
-    obj = resp.Response();
+    obj = Json::Parse(resp);
     if (obj.Has("id"))
     {
         debugPrintf("Folder id is %d, %s\n", ret, obj["id"].Str().c_str());
@@ -802,14 +787,10 @@ std::string getParentIdByFolderName(std::string folderName)
 void writeChangesToFile()
 {
     // Backup remote.json before a write to save from any catastrophies
-    StdioFile backup(remoteBackup, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, 0644);
-    remoteResourceRoot.WriteFile(backup);
-    backup.Close();
+    remoteResourceRoot.Save(remoteBackup);
     sysFsChmod(remoteBackup.c_str(), 0644);
 
-    StdioFile file(remoteResourceFile, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, 0644);
-    remoteResourceRoot.WriteFile(file);
-    file.Close();
+    remoteResourceRoot.Save(remoteResourceFile);
     sysFsChmod(remoteResourceFile.c_str(), 0644);
 
     debugPrintf("writeChangesToFile: Changes to remote.json written successfully\n");
@@ -1169,7 +1150,7 @@ void detectChanges()
         {
             debugPrintf("Found New Entry in Local Resource, Adding for sync %s",
                         lres["path"].Str().c_str());
-            remoteResourceRoot["data"].Add(lres);
+            remoteResourceRoot["data"].Append(lres);
         }
 
         std::stringstream ss;
@@ -1202,12 +1183,12 @@ std::string authenticateUser()
     std::string usercode;
 
     debugPrintf("Device Authentication Function Called...\n");
-    usercode = authToken.DeviceAuth();
+    usercode = authToken.Start();
 
     debugPrintf("Your User Code is:  %s \n", usercode.c_str());
 
-    std::string userCodePrint = "Your User Code is: " + usercode +
-                                "\n\n Please visit http://www.google.com/device for approval";
+    std::string userCodePrint = "Your User Code is: " + usercode + "\n\n Please visit " +
+                                authToken.VerificationUrl() + " for approval";
 
     SDL_Surface *codeAuthText = NULL;
     codeAuthText = TTF_RenderText_Blended(Sans, userCodePrint.c_str(), GREY);
@@ -1220,15 +1201,20 @@ std::string authenticateUser()
     sysGetCurrentTime(&epochTime, &nsec);
     previousCallTime = epochTime;
 
-    while (authStatus != "authorization_complete")
+    DeviceAuth::Status status = usercode.empty() ? DeviceAuth::Failed : DeviceAuth::Pending;
+    while (status == DeviceAuth::Pending)
     {
         sysGetCurrentTime(&epochTime, &nsec);
         if (epochTime - previousCallTime > 10)
         {
             debugPrintf("Polling for user authentication....\n");
-            authStatus = authToken.Auth();
+            status = authToken.Poll();
             previousCallTime = epochTime;
         }
+    }
+    if (status == DeviceAuth::Approved)
+    {
+        authStatus = "authorization_complete";
     }
     SDL_FreeSurface(codeAuthText);
     return authStatus;
@@ -1253,10 +1239,9 @@ void buildRemoteResourceTree()
             {
                 for (Json::Array::iterator i = tempArray.begin(); i != tempArray.end(); ++i)
                 {
-                    Json::Object tmpObject = i->AsObject();
-                    if (tmpObject["mimeType"].Str() == folderMime)
-                        foldersToTraverse.push_back(tmpObject["id"].Str());
-                    resourceTree.push_back(Json(i->AsObject()));
+                    if ((*i)["mimeType"].Str() == folderMime)
+                        foldersToTraverse.push_back((*i)["id"].Str());
+                    resourceTree.push_back(*i);
                 }
             }
             foldersToTraverse.pop_back();
@@ -1282,8 +1267,8 @@ void buildLocalResourceTree()
     sysFSDirent entry;
     s32 fd;
     u64 read;
-    Header profileList;
-    Header profilePaths;
+    std::vector<std::string> profileList;
+    std::vector<std::string> profilePaths;
 
     std::string entryName = "";
     std::string path = "/dev_hdd0/home";
@@ -1302,8 +1287,8 @@ void buildLocalResourceTree()
                 entryName.clear();
                 entryName.assign(entry.d_name, strlen(entry.d_name));
 
-                profileList.Add(entryName);
-                profilePaths.Add(path + "/" + entryName + "/savedata");
+                profileList.push_back(entryName);
+                profilePaths.push_back(path + "/" + entryName + "/savedata");
 
                 Json resource;
                 resource.Add("id", Json("nill"));
@@ -1322,10 +1307,10 @@ void buildLocalResourceTree()
         fd = -1;
     }
 
-    Header::iterator k = profileList.begin();
-    Header::iterator l = profilePaths.begin();
-    Header folderList;
-    Header pathList;
+    std::vector<std::string>::const_iterator k = profileList.begin();
+    std::vector<std::string>::const_iterator l = profilePaths.begin();
+    std::vector<std::string> folderList;
+    std::vector<std::string> pathList;
 
     // Recursively list all saves under every profile
     while (k != profileList.end())
@@ -1342,7 +1327,7 @@ void buildLocalResourceTree()
                 }
                 else
                 {
-                    folderList.Add(entry.d_name);
+                    folderList.push_back(entry.d_name);
 
                     entryName.clear();
                     entryName.assign(entry.d_name, strlen(entry.d_name));
@@ -1350,7 +1335,7 @@ void buildLocalResourceTree()
                     std::stringstream fPath;
                     fPath << *l << "/" << entryName;
 
-                    pathList.Add(fPath.str());
+                    pathList.push_back(fPath.str());
 
                     // debugPrintf("Save Path Entry...%s\n",entryName.c_str());
 
@@ -1375,8 +1360,8 @@ void buildLocalResourceTree()
 
     debugPrintf("Directory enumeration complete...listing files inside them...\n");
 
-    Header::iterator i = pathList.begin();
-    Header::iterator j = folderList.begin();
+    std::vector<std::string>::const_iterator i = pathList.begin();
+    std::vector<std::string>::const_iterator j = folderList.begin();
 
     // Recursively list all files under every save directory
     while (i != pathList.end())
@@ -1463,12 +1448,8 @@ void buildLocalResourceTree()
     debugPrintf("Resource Tree built, writing to Resource Json\n");
 
     // Overwrite local.json every time
-    StdioFile file(localResourceFile, SYS_O_WRONLY | SYS_O_CREAT | SYS_O_TRUNC, 0644);
-
     localResourceRoot.Add("data", Json(resourceTree));
-    localResourceRoot.WriteFile(file);
-
-    file.Close();
+    localResourceRoot.Save(localResourceFile);
     sysFsChmod(localResourceFile.c_str(), 0644);
 
     debugPrintf("Resource file has been written successfully...\n");
@@ -1498,8 +1479,8 @@ int initCloudDrive(void *arg)
         userType = "two";
         debugPrintf("Possible Token Read from file:  %s \n", authStatus.c_str());
 
-        authToken.setRefreshToken(authStatus);
-        if (authToken.Refresh() != "valid")
+        authToken.SetRefreshToken(authStatus);
+        if (!authToken.Refresh())
         {
             debugPrintf("Token Read from file was invalid, need to Re-Authenticate");
             authenticateUser();
@@ -1564,13 +1545,8 @@ int initCloudDrive(void *arg)
     // DONE: Upload remote.json to Google Drive
     if (userType == "one")
     {
-        StdioFile file(localResourceFile);
-        remoteResourceRoot = Json::ParseFile(file);
-        file.Close();
-
-        StdioFile file2(remoteResourceFile);
-        remoteResourceRoot.WriteFile(file2);
-        file.Close();
+        remoteResourceRoot = Json::Load(localResourceFile);
+        remoteResourceRoot.Save(remoteResourceFile);
 
         uploadChanges();
     }
@@ -1587,9 +1563,7 @@ int initCloudDrive(void *arg)
     // TODO: Upload RRT to Google Drive
     if (userType == "two")
     {
-        StdioFile file(remoteResourceFile);
-        remoteResourceRoot = Json::ParseFile(file);
-        file.Close();
+        remoteResourceRoot = Json::Load(remoteResourceFile);
 
         detectChanges();
 
@@ -1612,9 +1586,7 @@ int initCloudDrive(void *arg)
                         remoteJsonId.c_str());
             downloadFile(remoteResourceFile, remoteJsonId);
 
-            StdioFile file(remoteResourceFile);
-            remoteResourceRoot = Json::ParseFile(file);
-            file.Close();
+            remoteResourceRoot = Json::Load(remoteResourceFile);
 
             downloadChanges();
             debugPrintf(
