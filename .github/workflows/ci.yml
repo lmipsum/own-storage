@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+
+permissions: {}
+
+# A newer push to the same branch makes the older run moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: clang-format
+        # The same pinned version formats locally: pip install clang-format==21.1.8
+        run: git ls-files -z '*.c' '*.cpp' '*.h' | xargs -0 pipx run --spec clang-format==21.1.8 clang-format --dry-run --Werror
+
+  package:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/package.yml
+
+  actionlint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: actionlint
+        # The install script and the binary are pinned to one release.
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color

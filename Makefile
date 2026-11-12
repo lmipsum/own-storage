@@ -38,9 +38,10 @@ SOURCES		:=	source
 DATA		:=	data
 INCLUDES	:=	include
 
-SFOXML		:=	$(CURDIR)/sfo.xml
+# The SDK's default PARAM.SFO and icon until the app has its own.
+SFOXML		:=	$(PS3DEV)/bin/sfo.xml
 PKGFILES	:=	$(CURDIR)/release
-ICON0		:=	$(CURDIR)/release/ICON0.PNG	
+ICON0		:=	$(PS3DEV)/bin/ICON0.PNG
 PIC1		:=	$(CURDIR)/release/PIC1.PNG
 
 TITLE		:=	PS3 Cloud Drive

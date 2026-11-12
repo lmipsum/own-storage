@@ -1,0 +1,16 @@
+name: build
+
+# Run by hand (Actions → build → Run workflow, or `gh workflow run build.yml --ref dev`):
+# the installable .pkg of a branch, to try on a console before a release.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  package:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/package.yml
+    with:
+      keep: true
