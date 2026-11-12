@@ -30,7 +30,7 @@ std::string DeviceAuth::Start()
     const Json reply = Json::Parse(body);
     if (!HttpClient::Succeeded(status) || !reply.Has("device_code"))
     {
-        debugPrintf("Device code request failed: %ld %s\n", status, body.c_str());
+        debugPrintf("Device code request failed: %ld %s\n", status, reply["error"].Str().c_str());
         return std::string();
     }
     m_deviceCode = reply["device_code"].Str();

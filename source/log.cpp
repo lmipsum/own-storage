@@ -5,11 +5,13 @@
  *	network debugging quickly.
  *					  http://nzhawk.mezoka.com/pslightlogger
  */
-// EDIT THESE VALUES TO SUIT YOUR NETWORK/////////
-#define PCIP "10.0.0.2" /////
-#define PCPORT 18194    /////
-/////////////////////////////////////////////////
-/////////////////////////////////////////////////
+#include "log.h"
+
+// Only a debug build (make LOG_HOST=<PC address>) sends its log, over UDP port 18194;
+// a release package logs nothing. To read it on the PC: nc -u -l 18194
+#ifdef LOG_HOST
+
+#define PCPORT 18194
 
 #include <net/net.h>
 
@@ -24,11 +26,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-// Configure these (especially the IP) to your own setup.
-// Use netcat to receive the results on your PC:
-// UDP: nc -u -l -p 4000
-// For some versions of netcat the -p option may need to be removed.
-
 #define INITSTRING "Logging Started\n"
 #define BYESTRING "Logging Stopped\n"
 
@@ -40,7 +37,7 @@ void debugInit()
     memset(&server, 0, sizeof(server));
     server.sin_len = sizeof(server);
     server.sin_family = AF_INET;
-    inet_pton(AF_INET, PCIP, &server.sin_addr);
+    inet_pton(AF_INET, LOG_HOST, &server.sin_addr);
     server.sin_port = htons(PCPORT);
 
     sendto(s, INITSTRING, strlen(INITSTRING), 0, (struct sockaddr *)&server, sizeof(server));
@@ -67,3 +64,13 @@ void debugPrintf(const char *format, ...)
     va_end(va);
     sendto(s, logBuffer, wrote, 0, (struct sockaddr *)&server, sizeof(server));
 }
+
+#else
+
+void debugInit() {}
+
+void debugClose() {}
+
+void debugPrintf(const char *, ...) {}
+
+#endif
