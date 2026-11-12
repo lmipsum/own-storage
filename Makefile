@@ -69,8 +69,10 @@ LIBDIRS	:= $(PORTLIBS)
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project
 #---------------------------------------------------------------------------------
-#LIBS	:=	-lgcm_sys -lrsx -lsysutil -lio -llv2 -lcurl -lpolarssl -ljson -lssl -lsysfs -lz -lm -lnet -lsysmodule 
-LIBS	:= -lSDL -lSDL_image -lSDL_mixer -lSDL_ttf -lpngdec -lpng -ljpeg -ljpgdec  -lvorbisfile -lvorbis -logg -laudio -lmikmod -ltiff -lm -lfreetype -lz -lpixman-1 -lSDLmain -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm  -lSDL_gfx -lSDL -lSDL_image -lSDL_mixer -lSDL_ttf -lpngdec -lpng -ljpeg -ljpgdec  -lvorbisfile -lvorbis -logg -laudio -lmikmod -ltiff -lm -lfreetype -lz -lpixman-1 -lSDLmain -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm -lSDL_gfx -lsysutil -lcurl -lpolarssl -ljson-c -lssl -lsysfs -lnet -lsysmodule
+LIBS	:=	-lSDLmain -lSDL_gfx -lSDL_image -lSDL_mixer -lSDL_ttf -lSDL \
+			-lpngdec -ljpgdec -ltiff -lpng -ljpeg -lvorbisfile -lvorbis -logg -lmikmod -lfreetype -lpixman-1 \
+			-lcurl -lmbedtls -lmbedx509 -lmbedcrypto -ljson-c -lz \
+			-lrsx -lgcm_sys -lio -laudio -lsysutil -lsysfs -lssl -lnet -lsysmodule -lrt -llv2 -lm
 
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional

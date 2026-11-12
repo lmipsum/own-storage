@@ -16,15 +16,16 @@ on:
 permissions: {}
 
 env:
-  # The prebuilt PSL1GHT SDK with its portlibs (SDL, json-c, curl, mbedTLS), as Apollo Save Tool uses it.
-  TOOLCHAIN_URL: https://github.com/bucanero/ps3toolchain/releases/download/ubuntu-latest-fad3b5fb/ps3dev-ubuntu-latest-2020-08-31.tar.gz
-  TOOLCHAIN_SHA256: bc411294771a9a17ce70941e935b26ec9567654a075c545da1c0d7898b3892d3
+  # The ps3dev SDK with its portlibs (SDL, json-c, curl on mbedTLS). It is only published as
+  # nightlies, so one is pinned by its hash.
+  SDK_URL: https://github.com/ps3dev/ps3dev/releases/download/nightly-2026-10-12/ps3dev-linux-X64.tar.gz
+  SDK_SHA256: 76b1b3bc9ac260a4ece86da520225da7f2f4e334174e37b850093ff925eeb900
 
 jobs:
   package:
     runs-on: ubuntu-24.04
-    # The SDK was built on Ubuntu 20.04: make_self needs its OpenSSL 1.1, sfo.py and pkg.py its Python 2.7.
-    container: ubuntu:20.04@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
+    # The SDK is built on Ubuntu 24.04, and its tools need that system's libraries.
+    container: ubuntu:24.04@sha256:2198e4c65076e9cb0b3d695219df667c0e3b0072da64ca3c2648aca17dcecaf5
     timeout-minutes: 20
     permissions:
       contents: read
@@ -37,11 +38,11 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends ca-certificates curl make python2.7 libelf1 libssl1.1
+          apt-get install -y -qq --no-install-recommends ca-certificates curl make libelf1t64
       - name: PSL1GHT SDK
         run: |
-          curl -fsSL "$TOOLCHAIN_URL" -o ps3dev.tar.gz
-          echo "$TOOLCHAIN_SHA256  ps3dev.tar.gz" | sha256sum -c -
+          curl -fsSL "$SDK_URL" -o ps3dev.tar.gz
+          echo "$SDK_SHA256  ps3dev.tar.gz" | sha256sum -c -
           tar xzf ps3dev.tar.gz -C /opt
           rm ps3dev.tar.gz
           echo "PS3DEV=/opt/ps3dev" >> "$GITHUB_ENV"
