@@ -48,6 +48,7 @@
 
 #include <polarssl/md5.h>
 
+#include "ClientCredentials.h"
 #include "DeviceAuth.h"
 #include "HttpClient.h"
 #include "Json.h"
@@ -63,14 +64,14 @@ const std::string appFileBackup = APP_DIR "ps3clouddrive.backup";
 const std::string localResourceFile = APP_DIR "local.json";
 const std::string remoteResourceFile = APP_DIR "remote.json";
 const std::string remoteBackup = APP_DIR "remote.backup";
+// A Google client of the user's own, which takes the place of the published one.
+const std::string userClientFile = APP_DIR "client.json";
 const std::string queryFields =
     "items(fileSize,id,md5Checksum,mimeType,modifiedDate,parents/id,title)";
 const std::string app_title = "ps3clouddrive";
-const std::string client_id = "google_drive_app_client_id";
-const std::string client_secret = "google_drive_app_client_secret";
 
 HttpClient http;
-DeviceAuth authToken(http, client_id, client_secret);
+DeviceAuth authToken(http);
 
 std::string rootFolderId = "root";
 std::string remoteJsonId = "root";
@@ -1460,6 +1461,24 @@ void buildLocalResourceTree()
  */
 int initCloudDrive(void *arg)
 {
+    ClientCredentials client = LoadUserCredentials(userClientFile, "google");
+    if (!client.IsComplete())
+    {
+        client = FetchPublishedCredentials(http, "google");
+    }
+    if (!client.IsComplete())
+    {
+        // Without a client there is no sign-in; the user reads this and quits with X.
+        SDL_Surface *noClientText = TTF_RenderText_Blended(
+            Sans, "Cannot reach the Own Storage configuration. Check the network.", GREY);
+        draw_surface(screen, image, 0, 0);
+        draw_surface(screen, noClientText, (appWidth - noClientText->w) / 2,
+                     (70 * appHeight) / 100);
+        SDL_FreeSurface(noClientText);
+        return 0;
+    }
+    authToken.SetClient(client);
+
     debugPrintf("Checking if User is Authenticated...\n");
     std::string authStatus = isUserAuthenticated();
 

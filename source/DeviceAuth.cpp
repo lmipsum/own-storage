@@ -14,16 +14,17 @@ const char kScope[] = "https://www.googleapis.com/auth/drive.file";
 const char kFormHeader[] = "Content-Type: application/x-www-form-urlencoded";
 } // namespace
 
-DeviceAuth::DeviceAuth(HttpClient &http, const std::string &clientId,
-                       const std::string &clientSecret)
-    : m_http(http), m_clientId(clientId), m_clientSecret(clientSecret)
+DeviceAuth::DeviceAuth(HttpClient &http) : m_http(http) {}
+
+void DeviceAuth::SetClient(const ClientCredentials &client)
 {
+    m_client = client;
 }
 
 std::string DeviceAuth::Start()
 {
     const std::string form =
-        "client_id=" + m_http.Escape(m_clientId) + "&scope=" + m_http.Escape(kScope);
+        "client_id=" + m_http.Escape(m_client.id) + "&scope=" + m_http.Escape(kScope);
     std::string body;
     const long status = m_http.Post(kCodeUrl, form, HttpClient::Headers(1, kFormHeader), body);
     const Json reply = Json::Parse(body);
@@ -44,8 +45,8 @@ const std::string &DeviceAuth::VerificationUrl() const
 
 DeviceAuth::Status DeviceAuth::Poll()
 {
-    const std::string form = "client_id=" + m_http.Escape(m_clientId) +
-                             "&client_secret=" + m_http.Escape(m_clientSecret) +
+    const std::string form = "client_id=" + m_http.Escape(m_client.id) +
+                             "&client_secret=" + m_http.Escape(m_client.secret) +
                              "&device_code=" + m_http.Escape(m_deviceCode) +
                              "&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code";
     std::string body;
@@ -69,8 +70,8 @@ DeviceAuth::Status DeviceAuth::Poll()
 
 bool DeviceAuth::Refresh()
 {
-    const std::string form = "client_id=" + m_http.Escape(m_clientId) +
-                             "&client_secret=" + m_http.Escape(m_clientSecret) +
+    const std::string form = "client_id=" + m_http.Escape(m_client.id) +
+                             "&client_secret=" + m_http.Escape(m_client.secret) +
                              "&refresh_token=" + m_http.Escape(m_refreshToken) +
                              "&grant_type=refresh_token";
     std::string body;

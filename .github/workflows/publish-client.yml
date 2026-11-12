@@ -1,0 +1,44 @@
+name: publish-client
+
+# Run by hand after setting or changing the GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET secrets
+# (Actions → publish-client → Run workflow): writes the obfuscated clients.json the app fetches
+# at run time (see source/ClientCredentials.cpp) to the gh-pages branch, served by GitHub Pages.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-client
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Write clients.json
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: python3 scripts/obfuscate-client.py > "$RUNNER_TEMP/clients.json"
+      - name: Publish on gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch -q origin gh-pages; then
+            git worktree add pages FETCH_HEAD && git -C pages switch -c gh-pages
+          else
+            git worktree add --orphan -b gh-pages pages
+          fi
+          cp "$RUNNER_TEMP/clients.json" pages/clients.json
+          touch pages/.nojekyll
+          git -C pages add clients.json .nojekyll
+          if git -C pages diff --cached --quiet; then
+            echo "clients.json is unchanged."
+            exit 0
+          fi
+          git -C pages commit -qm "Publish the app's clients"
+          git -C pages push -q origin gh-pages

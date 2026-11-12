@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "ClientCredentials.h"
+
 #include <string>
 
 class HttpClient;
@@ -19,7 +21,10 @@ class DeviceAuth
         Failed
     };
 
-    DeviceAuth(HttpClient &http, const std::string &clientId, const std::string &clientSecret);
+    explicit DeviceAuth(HttpClient &http);
+
+    /** The client to sign in as; needed before any other call. */
+    void SetClient(const ClientCredentials &client);
 
     /** Asks for a new code; the code to show the user, or "" when the request failed. */
     std::string Start();
@@ -36,8 +41,7 @@ class DeviceAuth
 
   private:
     HttpClient &m_http;
-    const std::string m_clientId;
-    const std::string m_clientSecret;
+    ClientCredentials m_client;
     std::string m_deviceCode;
     std::string m_verificationUrl;
     std::string m_accessToken;
