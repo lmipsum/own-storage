@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "net/HttpClient.h"
 
-#include "app/AppPaths.h"
-#include "app/Log.h"
+#include "app/Paths.h"
+#include "app/DebugLog.h"
 
 #include <cstdio>
 #include <strings.h>

@@ -11,7 +11,7 @@ class HttpClient;
  * OAuth 2.0 sign-in for devices without a browser (RFC 8628) against Google: the console
  * shows a code, the user approves it on another device, and the app keeps the refresh token.
  */
-class DeviceAuth
+class GoogleDeviceAuth
 {
   public:
     enum Status
@@ -21,7 +21,7 @@ class DeviceAuth
         Failed
     };
 
-    explicit DeviceAuth(HttpClient &http);
+    explicit GoogleDeviceAuth(HttpClient &http);
 
     /** The client to sign in as; needed before any other call. */
     void SetClient(const ClientCredentials &client);

@@ -50,18 +50,18 @@
 
 #include "auth/AuthorizedSend.h"
 #include "auth/ClientCredentials.h"
-#include "auth/DeviceAuth.h"
+#include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
 #include "json/Json.h"
-#include "app/Log.h"
-#include "app/AppPaths.h"
+#include "app/DebugLog.h"
+#include "app/Paths.h"
 
 const std::string jsonMime = "application/json";
 const std::string folderMime = "application/vnd.google-apps.folder";
 const std::string octetMime = "application/octet-stream";
 const std::string appPath = APP_DIR;
-const std::string appFile = APP_DIR "ps3clouddrive.json";
-const std::string appFileBackup = APP_DIR "ps3clouddrive.backup";
+const std::string appFile = APP_DIR "config.json";
+const std::string appFileBackup = APP_DIR "config.backup";
 const std::string localResourceFile = APP_DIR "local.json";
 const std::string remoteResourceFile = APP_DIR "remote.json";
 const std::string remoteBackup = APP_DIR "remote.backup";
@@ -69,10 +69,11 @@ const std::string remoteBackup = APP_DIR "remote.backup";
 const std::string userClientFile = APP_DIR "client.json";
 const std::string queryFields =
     "items(fileSize,id,md5Checksum,mimeType,modifiedDate,parents/id,title)";
-const std::string app_title = "ps3clouddrive";
+// The folder in the user's Drive that holds every backup.
+const std::string driveFolderName = "Own Storage";
 
 HttpClient http;
-DeviceAuth googleAuth(http);
+GoogleDeviceAuth googleAuth(http);
 
 std::string rootFolderId = "root";
 std::string remoteJsonId = "root";
@@ -739,7 +740,7 @@ Json uploadDirectory(std::string dirName, std::string parentId)
 std::string getParentIdByFolderName(std::string folderName)
 {
     std::string result = "not_found";
-    if (folderName == app_title)
+    if (folderName == driveFolderName)
     {
         result = rootFolderId;
     }
@@ -1183,8 +1184,9 @@ std::string authenticateUser()
     sysGetCurrentTime(&epochTime, &nsec);
     previousCallTime = epochTime;
 
-    DeviceAuth::Status status = usercode.empty() ? DeviceAuth::Failed : DeviceAuth::Pending;
-    while (status == DeviceAuth::Pending)
+    GoogleDeviceAuth::Status status =
+        usercode.empty() ? GoogleDeviceAuth::Failed : GoogleDeviceAuth::Pending;
+    while (status == GoogleDeviceAuth::Pending)
     {
         sysGetCurrentTime(&epochTime, &nsec);
         if (epochTime - previousCallTime > 10)
@@ -1194,7 +1196,7 @@ std::string authenticateUser()
             previousCallTime = epochTime;
         }
     }
-    if (status == DeviceAuth::Approved)
+    if (status == GoogleDeviceAuth::Approved)
     {
         authStatus = "authorization_complete";
     }
@@ -1209,7 +1211,7 @@ void buildRemoteResourceTree()
 {
     std::vector<Json> resourceTree;
     std::vector<std::string> foldersToTraverse;
-    Json resourceObject = checkIfRemoteResourceExists(app_title, folderMime, rootFolderId);
+    Json resourceObject = checkIfRemoteResourceExists(driveFolderName, folderMime, rootFolderId);
     if (resourceObject.Has("id"))
     {
         resourceTree.push_back(Json(resourceObject));
@@ -1278,7 +1280,7 @@ void buildLocalResourceTree()
                 resource.Add("path", Json(path + "/" + entryName + "/savedata"));
                 resource.Add("mimeType", Json(folderMime));
                 resource.Add("parentid", Json(rootFolderId));
-                resource.Add("parentFolder", Json(app_title));
+                resource.Add("parentFolder", Json(driveFolderName));
                 resource.Add("modifiedDate", Json("0"));
                 resource.Add("status", Json("upload"));
 
@@ -1414,7 +1416,7 @@ void buildLocalResourceTree()
                         resource.Add("path", Json("/dev_hdd0/savedata/vmc/" + entryName));
                         resource.Add("mimeType", Json(octetMime));
                         resource.Add("parentid", Json(rootFolderId));
-                        resource.Add("parentFolder", Json(app_title));
+                        resource.Add("parentFolder", Json(driveFolderName));
                         resource.Add("modifiedDate", Json("0"));
                         resource.Add("status", Json("upload"));
 
@@ -1504,7 +1506,7 @@ int initCloudDrive(void *arg)
     msgDialogOpen2(dialog_type, "Performing Sync...", dialog_handler, NULL, NULL);
 
     // If user new but remote data exists
-    Json rootResource = checkIfRemoteResourceExists(app_title, folderMime, "root");
+    Json rootResource = checkIfRemoteResourceExists(driveFolderName, folderMime, "root");
     if (rootResource.Has("id"))
     {
         rootFolderId = rootResource["id"].Str();
@@ -1516,7 +1518,7 @@ int initCloudDrive(void *arg)
     {
         debugPrintf("User has no previous data on Google Drive\n");
         Json rtId;
-        rtId = uploadDirectory(app_title, "root");
+        rtId = uploadDirectory(driveFolderName, "root");
 
         if (rtId.Has("id"))
         {

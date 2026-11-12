@@ -3,7 +3,7 @@
 
 #include "net/HttpClient.h"
 #include "json/Json.h"
-#include "app/Log.h"
+#include "app/DebugLog.h"
 
 namespace
 {
