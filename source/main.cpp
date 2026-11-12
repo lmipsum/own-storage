@@ -48,6 +48,7 @@
 
 #include <polarssl/md5.h>
 
+#include "AuthorizedSend.h"
 #include "ClientCredentials.h"
 #include "DeviceAuth.h"
 #include "HttpClient.h"
@@ -174,32 +175,6 @@ void draw_surface(SDL_Surface *destination, SDL_Surface *source, int x, int y)
     SDL_BlitSurface(source, NULL, destination, &offset);
 }
 
-bool CheckRetry(long response)
-{
-    // HTTP 500 and 503 should be temperory. just wait a bit and retry
-    if (response == 500 || response == 503)
-    {
-        debugPrintf("Request failed due to temporary error: %d, retrying in 5 seconds\n", response);
-
-        sysUsleep(5);
-        return true;
-    }
-
-    // HTTP 401 Unauthorized. the auth token has been expired. refresh it
-    else if (response == 401)
-    {
-        debugPrintf("Request failed due to Auth token expired: %d. refreshing token\n", response);
-
-        googleAuth.Refresh();
-        return true;
-    }
-    else
-    {
-        debugPrintf("All is fine with GDrive, continue... %l\n", response);
-        return false;
-    }
-}
-
 /**
  * Retrieves a Resource tree of the resources under a folder in google drive
  * @param parentId the parentid for whomm the resources are to be listed
@@ -211,14 +186,16 @@ Json::Array getResourcesUnderFolder(std::string parentId)
     Json::Array parsedArray;
 
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
 
     std::string query = parentId + "' in parents";
     std::string resp;
 
-    while (CheckRetry(
-        ret = http.Get("https://www.googleapis.com/drive/v2/files?q=" + query, hdr, resp)))
-        ;
+    ret = SendAuthorized(googleAuth, hdr,
+                         [&](const HttpClient::Headers &headers)
+                         {
+                             return http.Get("https://www.googleapis.com/drive/v2/files?q=" + query,
+                                             headers, resp);
+                         });
 
     if (!HttpClient::Succeeded(ret))
     {
@@ -249,7 +226,6 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
     Json resourceObject;
 
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
 
     std::string query = "mimeType='" + mimeType + "' and trashed=false and title='" +
                         resourceTitle + "' and '" + parentId + "' in parents";
@@ -258,8 +234,8 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
     std::string url = "https://www.googleapis.com/drive/v2/files?q=" + http.Escape(query) +
                       "&fields=" + http.Escape(queryFields);
 
-    while (CheckRetry(ret = http.Get(url, hdr, resp)))
-        ;
+    ret = SendAuthorized(googleAuth, hdr, [&](const HttpClient::Headers &headers)
+                         { return http.Get(url, headers, resp); });
 
     if (!HttpClient::Succeeded(ret))
     {
@@ -405,14 +381,16 @@ bool downloadFile(std::string localPath, std::string fileId)
     long ret;
 
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
 
     std::string resp;
 
-    while (CheckRetry(ret = http.Get("https://www.googleapis.com/drive/v2/files/" + fileId +
-                                         "?fields=downloadUrl",
-                                     hdr, resp)))
-        ;
+    ret = SendAuthorized(googleAuth, hdr,
+                         [&](const HttpClient::Headers &headers)
+                         {
+                             return http.Get("https://www.googleapis.com/drive/v2/files/" + fileId +
+                                                 "?fields=downloadUrl",
+                                             headers, resp);
+                         });
 
     if (!HttpClient::Succeeded(ret))
     {
@@ -442,8 +420,9 @@ bool downloadFile(std::string localPath, std::string fileId)
     msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
     msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, localPath.c_str());
 
-    while (CheckRetry(ret = http.Download(downloadLink, hdr, localPath, transferProgress)))
-        ;
+    ret = SendAuthorized(
+        googleAuth, hdr, [&](const HttpClient::Headers &headers)
+        { return http.Download(downloadLink, headers, localPath, transferProgress); });
 
     debugPrintf("Return Code for file download is %d\n", ret);
 
@@ -626,7 +605,6 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     xcontent_len << "X-Upload-Content-Length: " << entry.st_size;
 
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
     hdr.push_back("Content-Type: application/json");
     hdr.push_back("X-Upload-Content-Type: " + mimeType);
     hdr.push_back(xcontent_len.str());
@@ -643,16 +621,16 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     {
         postUrl = "https://www.googleapis.com/upload/drive/v2/files?uploadType=resumable&fields=" +
                   http.Escape("fileSize,id,md5Checksum,modifiedDate,parents/id");
-        while (CheckRetry(ret = http.Post(postUrl, meta, hdr, resp)))
-            ;
+        ret = SendAuthorized(googleAuth, hdr, [&](const HttpClient::Headers &headers)
+                             { return http.Post(postUrl, meta, headers, resp); });
     }
     else
     {
         postUrl = "https://www.googleapis.com/upload/drive/v2/files/" + fileId +
                   "?uploadType=resumable&fields=" +
                   http.Escape("fileSize,id,md5Checksum,modifiedDate,parents/id");
-        while (CheckRetry(ret = http.Put(postUrl, meta, hdr, resp)))
-            ;
+        ret = SendAuthorized(googleAuth, hdr, [&](const HttpClient::Headers &headers)
+                             { return http.Put(postUrl, meta, headers, resp); });
     }
 
     if (!HttpClient::Succeeded(ret))
@@ -667,7 +645,6 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     content_len << "Content-Length: " << entry.st_size;
 
     HttpClient::Headers uphdr;
-    uphdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
     uphdr.push_back("Content-Type: " + mimeType);
     uphdr.push_back(content_len.str());
     uphdr.push_back("Expect:");
@@ -683,8 +660,9 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
     msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, path.c_str());
 
-    while (CheckRetry(ret = http.Upload(uploadUrl, uphdr, path, transferProgress, resp2)))
-        ;
+    ret =
+        SendAuthorized(googleAuth, uphdr, [&](const HttpClient::Headers &headers)
+                       { return http.Upload(uploadUrl, headers, path, transferProgress, resp2); });
 
     if (!HttpClient::Succeeded(ret))
     {
@@ -720,7 +698,6 @@ Json uploadDirectory(std::string dirName, std::string parentId)
 
     // Step 1 - Creating SaveData Directory Online
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
     hdr.push_back("Content-Type: application/json");
     hdr.push_back("Expect:");
 
@@ -730,10 +707,13 @@ Json uploadDirectory(std::string dirName, std::string parentId)
 
     debugPrintf("Attempting folder creation on GDrive...\n");
 
-    while (CheckRetry(ret = http.Post("https://www.googleapis.com/drive/v2/files?fields=" +
-                                          http.Escape("id,modifiedDate,parents/id"),
-                                      meta, hdr, resp)))
-        ;
+    ret = SendAuthorized(googleAuth, hdr,
+                         [&](const HttpClient::Headers &headers)
+                         {
+                             return http.Post("https://www.googleapis.com/drive/v2/files?fields=" +
+                                                  http.Escape("id,modifiedDate,parents/id"),
+                                              meta, headers, resp);
+                         });
 
     if (!HttpClient::Succeeded(ret))
     {
@@ -1055,16 +1035,17 @@ void uploadChanges()
 std::string calculateMD5Checksum(std::string fpath)
 {
     unsigned char md5Out[16];
-    char convBuf[64];
 
     if (md5_file(fpath.c_str(), md5Out) == 0)
     {
+        std::string hex;
+        char digits[3];
         for (int k = 0; k < 16; k++)
         {
-            snprintf(convBuf, 64, "%s%02x", convBuf, md5Out[k]);
+            snprintf(digits, sizeof digits, "%02x", md5Out[k]);
+            hex += digits;
         }
-        // std::string res = convBuf;
-        return convBuf;
+        return hex;
     }
     return "nill";
 }
