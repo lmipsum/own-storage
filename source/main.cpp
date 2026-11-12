@@ -46,7 +46,7 @@
 #include <SDL/SDL_ttf.h>
 #include <SDL/SDL_thread.h>
 
-#include <polarssl/md5.h>
+#include <mbedtls/md.h>
 
 #include "auth/AuthorizedSend.h"
 #include "auth/ClientCredentials.h"
@@ -1033,22 +1033,27 @@ void uploadChanges()
     }
 }
 
-std::string calculateMD5Checksum(std::string fpath)
+/**
+ * Hashes a file the way Drive reports md5Checksum.
+ *
+ * @param path File to hash.
+ * @return The MD5 digest as lowercase hex, or an empty string when the file cannot be read.
+ */
+std::string calculateMD5Checksum(const std::string &path)
 {
-    unsigned char md5Out[16];
-
-    if (md5_file(fpath.c_str(), md5Out) == 0)
+    unsigned char digest[16];
+    if (mbedtls_md_file(mbedtls_md_info_from_type(MBEDTLS_MD_MD5), path.c_str(), digest) != 0)
     {
-        std::string hex;
-        char digits[3];
-        for (int k = 0; k < 16; k++)
-        {
-            snprintf(digits, sizeof digits, "%02x", md5Out[k]);
-            hex += digits;
-        }
-        return hex;
+        return "";
     }
-    return "nill";
+    std::string hex;
+    char digits[3];
+    for (unsigned char byte : digest)
+    {
+        snprintf(digits, sizeof digits, "%02x", byte);
+        hex += digits;
+    }
+    return hex;
 }
 
 void detectChanges()
@@ -1113,7 +1118,7 @@ void detectChanges()
 
                             std::string md5c = calculateMD5Checksum(lres["path"].Str());
 
-                            if (md5c != "nill")
+                            if (!md5c.empty())
                             {
                                 if (md5c != rres["md5Checksum"].Str())
                                 {
