@@ -28,7 +28,7 @@ size_t ReadFrom(char *data, size_t size, size_t count, void *file)
 }
 
 /** The headers as a curl list; the caller frees it. */
-curl_slist *ToList(const HttpClient::Headers &headers)
+curl_slist *BuildHeaderList(const HttpClient::Headers &headers)
 {
     curl_slist *list = NULL;
     for (size_t i = 0; i < headers.size(); ++i)
@@ -74,7 +74,7 @@ void HttpClient::Prepare(const std::string &url)
 
 long HttpClient::Perform(const Headers &headers)
 {
-    curl_slist *list = ToList(headers);
+    curl_slist *list = BuildHeaderList(headers);
     curl_easy_setopt(m_curl, CURLOPT_HTTPHEADER, list);
     char error[CURL_ERROR_SIZE] = "";
     curl_easy_setopt(m_curl, CURLOPT_ERRORBUFFER, error);

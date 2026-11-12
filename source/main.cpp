@@ -48,6 +48,7 @@
 
 #include <polarssl/md5.h>
 
+#include "ClientCredentials.h"
 #include "DeviceAuth.h"
 #include "HttpClient.h"
 #include "Json.h"
@@ -63,14 +64,14 @@ const std::string appFileBackup = APP_DIR "ps3clouddrive.backup";
 const std::string localResourceFile = APP_DIR "local.json";
 const std::string remoteResourceFile = APP_DIR "remote.json";
 const std::string remoteBackup = APP_DIR "remote.backup";
+// A Google client of the user's own, which takes the place of the published one.
+const std::string userClientFile = APP_DIR "client.json";
 const std::string queryFields =
     "items(fileSize,id,md5Checksum,mimeType,modifiedDate,parents/id,title)";
 const std::string app_title = "ps3clouddrive";
-const std::string client_id = "google_drive_app_client_id";
-const std::string client_secret = "google_drive_app_client_secret";
 
 HttpClient http;
-DeviceAuth authToken(http, client_id, client_secret);
+DeviceAuth googleAuth(http);
 
 std::string rootFolderId = "root";
 std::string remoteJsonId = "root";
@@ -189,7 +190,7 @@ bool CheckRetry(long response)
     {
         debugPrintf("Request failed due to Auth token expired: %d. refreshing token\n", response);
 
-        authToken.Refresh();
+        googleAuth.Refresh();
         return true;
     }
     else
@@ -210,7 +211,7 @@ Json::Array getResourcesUnderFolder(std::string parentId)
     Json::Array parsedArray;
 
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
 
     std::string query = parentId + "' in parents";
     std::string resp;
@@ -248,7 +249,7 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
     Json resourceObject;
 
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
 
     std::string query = "mimeType='" + mimeType + "' and trashed=false and title='" +
                         resourceTitle + "' and '" + parentId + "' in parents";
@@ -285,7 +286,7 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
 void storeConfig()
 {
     Json appConfig;
-    appConfig.Add("refresh_token", Json(authToken.RefreshToken()));
+    appConfig.Add("refresh_token", Json(googleAuth.RefreshToken()));
     appConfig.Add("root_id", Json(rootFolderId));
     appConfig.Add("last_sync", Json(last_sync));
     appConfig.Add("remote_fid", Json(remoteJsonId));
@@ -404,7 +405,7 @@ bool downloadFile(std::string localPath, std::string fileId)
     long ret;
 
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
 
     std::string resp;
 
@@ -625,7 +626,7 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     xcontent_len << "X-Upload-Content-Length: " << entry.st_size;
 
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
     hdr.push_back("Content-Type: application/json");
     hdr.push_back("X-Upload-Content-Type: " + mimeType);
     hdr.push_back(xcontent_len.str());
@@ -666,7 +667,7 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     content_len << "Content-Length: " << entry.st_size;
 
     HttpClient::Headers uphdr;
-    uphdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    uphdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
     uphdr.push_back("Content-Type: " + mimeType);
     uphdr.push_back(content_len.str());
     uphdr.push_back("Expect:");
@@ -719,7 +720,7 @@ Json uploadDirectory(std::string dirName, std::string parentId)
 
     // Step 1 - Creating SaveData Directory Online
     HttpClient::Headers hdr;
-    hdr.push_back("Authorization: Bearer " + authToken.AccessToken());
+    hdr.push_back("Authorization: Bearer " + googleAuth.AccessToken());
     hdr.push_back("Content-Type: application/json");
     hdr.push_back("Expect:");
 
@@ -1183,12 +1184,12 @@ std::string authenticateUser()
     std::string usercode;
 
     debugPrintf("Device Authentication Function Called...\n");
-    usercode = authToken.Start();
+    usercode = googleAuth.Start();
 
     debugPrintf("Your User Code is:  %s \n", usercode.c_str());
 
     std::string userCodePrint = "Your User Code is: " + usercode + "\n\n Please visit " +
-                                authToken.VerificationUrl() + " for approval";
+                                googleAuth.VerificationUrl() + " for approval";
 
     SDL_Surface *codeAuthText = NULL;
     codeAuthText = TTF_RenderText_Blended(Sans, userCodePrint.c_str(), GREY);
@@ -1208,7 +1209,7 @@ std::string authenticateUser()
         if (epochTime - previousCallTime > 10)
         {
             debugPrintf("Polling for user authentication....\n");
-            status = authToken.Poll();
+            status = googleAuth.Poll();
             previousCallTime = epochTime;
         }
     }
@@ -1460,6 +1461,24 @@ void buildLocalResourceTree()
  */
 int initCloudDrive(void *arg)
 {
+    ClientCredentials client = LoadUserCredentials(userClientFile, "google");
+    if (!client.IsComplete())
+    {
+        client = FetchPublishedCredentials(http, "google");
+    }
+    if (!client.IsComplete())
+    {
+        // Without a client there is no sign-in; the user reads this and quits with X.
+        SDL_Surface *noClientText = TTF_RenderText_Blended(
+            Sans, "Cannot reach the Own Storage configuration. Check the network.", GREY);
+        draw_surface(screen, image, 0, 0);
+        draw_surface(screen, noClientText, (appWidth - noClientText->w) / 2,
+                     (70 * appHeight) / 100);
+        SDL_FreeSurface(noClientText);
+        return 0;
+    }
+    googleAuth.SetClient(client);
+
     debugPrintf("Checking if User is Authenticated...\n");
     std::string authStatus = isUserAuthenticated();
 
@@ -1479,8 +1498,8 @@ int initCloudDrive(void *arg)
         userType = "two";
         debugPrintf("Possible Token Read from file:  %s \n", authStatus.c_str());
 
-        authToken.SetRefreshToken(authStatus);
-        if (!authToken.Refresh())
+        googleAuth.SetRefreshToken(authStatus);
+        if (!googleAuth.Refresh())
         {
             debugPrintf("Token Read from file was invalid, need to Re-Authenticate");
             authenticateUser();
