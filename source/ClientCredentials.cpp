@@ -12,7 +12,8 @@ const char kPublishedUrl[] = "https://lmipsum.github.io/own-storage/clients.json
 // scripts/obfuscate-client.py reads this line; keep it on one line.
 const char kObfuscationKey[] = "ba3b3c5e8ff3d58002d71e609e327025560933c50e9972ff4bddd266ccac600a";
 
-int HexDigit(char c)
+/** The value of hex digit c, or -1 when c is not one. */
+int ParseHexDigit(char c)
 {
     if (c >= '0' && c <= '9')
         return c - '0';
@@ -23,7 +24,7 @@ int HexDigit(char c)
     return -1;
 }
 
-std::string AsIs(const std::string &text)
+std::string KeepAsIs(const std::string &text)
 {
     return text;
 }
@@ -46,7 +47,7 @@ ClientCredentials ReadCredentials(const Json &file, const std::string &provider,
 
 ClientCredentials LoadUserCredentials(const std::string &path, const std::string &provider)
 {
-    return ReadCredentials(Json::Load(path), provider, &AsIs);
+    return ReadCredentials(Json::Load(path), provider, &KeepAsIs);
 }
 
 ClientCredentials FetchPublishedCredentials(HttpClient &http, const std::string &provider)
@@ -71,8 +72,8 @@ std::string Deobfuscate(const std::string &hex)
     std::string text;
     for (std::string::size_type i = 0; i < hex.size(); i += 2)
     {
-        const int high = HexDigit(hex[i]);
-        const int low = HexDigit(hex[i + 1]);
+        const int high = ParseHexDigit(hex[i]);
+        const int low = ParseHexDigit(hex[i + 1]);
         if (high < 0 || low < 0)
         {
             return std::string();
