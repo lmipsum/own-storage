@@ -4,54 +4,41 @@
 #include "app/DebugLog.h"
 #include "app/Files.h"
 #include "app/Paths.h"
-#include "auth/GoogleDeviceAuth.h"
 #include "json/Json.h"
 
-// TODO: main.cpp still owns these; a Config value takes them over (#24).
-extern GoogleDeviceAuth googleAuth;
-extern std::string rootFolderId;
-extern std::string remoteJsonId;
-extern std::string last_sync;
-
-const std::string appFile = APP_DIR "config.json";
-const std::string appFileBackup = APP_DIR "config.backup";
-
-/**
- * Stores the current application configuration in the application config json
- */
-void storeConfig()
+namespace
 {
-    Json appConfig;
-    appConfig.Add("refresh_token", Json(googleAuth.RefreshToken()));
-    appConfig.Add("root_id", Json(rootFolderId));
-    appConfig.Add("last_sync", Json(last_sync));
-    appConfig.Add("remote_fid", Json(remoteJsonId));
+const std::string kConfigFile = APP_DIR "config.json";
+const std::string kConfigBackup = APP_DIR "config.backup";
+} // namespace
 
-    saveStateFile(appConfig, appFile);
-    saveStateFile(appConfig, appFileBackup);
+bool LoadConfig(Config &config)
+{
+    const Json saved = LoadWithBackup(kConfigFile, kConfigBackup);
+    if (saved.IsEmpty())
+    {
+        debugPrintf("LoadConfig: No readable config file\n");
+        return false;
+    }
+    config.refreshToken = saved["refresh_token"].Str();
+    if (saved.Has("root_id"))
+    {
+        config.rootFolderId = saved["root_id"].Str();
+    }
+    if (saved.Has("remote_fid"))
+    {
+        config.remoteJsonId = saved["remote_fid"].Str();
+    }
+    debugPrintf("LoadConfig: Config file read\n");
+    return true;
 }
 
-/**
- * Utility function that reads the config file for refresh token etc
- * @return "not_found" if file not found or corrupt else the refresh_token
- */
-std::string isUserAuthenticated()
+void SaveConfig(const Config &config)
 {
-    std::string result = "not_found";
-    Json config = loadWithBackup(appFile, appFileBackup);
-
-    if (!config.IsEmpty())
-    {
-        debugPrintf("Config file not empty, returning refresh token...\n");
-        result = config["refresh_token"].Str();
-        rootFolderId = config.Has("root_id") ? config["root_id"].Str() : "root";
-        last_sync = config.Has("last_sync") ? config["last_sync"].Str() : "0";
-        remoteJsonId = config.Has("remote_fid") ? config["remote_fid"].Str() : "root";
-    }
-    else
-    {
-        debugPrintf("No readable config file, returning empty handed...\n");
-    }
-
-    return result;
+    Json saved;
+    saved.Add("refresh_token", Json(config.refreshToken));
+    saved.Add("root_id", Json(config.rootFolderId));
+    saved.Add("remote_fid", Json(config.remoteJsonId));
+    SaveStateFile(saved, kConfigFile);
+    SaveStateFile(saved, kConfigBackup);
 }

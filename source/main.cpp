@@ -88,9 +88,7 @@ void beginTransfer(const std::string &path);
 void endTransfer();
 GoogleDrive drive(http, googleAuth, TransferDisplay{beginTransfer, transferProgress, endTransfer});
 
-std::string rootFolderId = "root";
-std::string remoteJsonId = "root";
-std::string last_sync = "0";
+Config config;
 
 Json localResourceRoot;
 Json remoteResourceRoot;
@@ -313,15 +311,16 @@ void downloadDirectory(std::string path)
  */
 Json downloadRemoteState()
 {
-    const Json remoteJson = drive.FindInFolder("remote.json", jsonMime, rootFolderId);
+    const Json remoteJson = drive.FindInFolder("remote.json", jsonMime, config.rootFolderId);
     if (!remoteJson.Has("id"))
     {
         debugPrintf("downloadRemoteState: there is no remote.json on Google Drive\n");
         return Json();
     }
-    remoteJsonId = remoteJson["id"].Str();
-    debugPrintf("Downloading remote.json from Google Drive with id %s\n", remoteJsonId.c_str());
-    if (!drive.DownloadFile(remoteJsonId, remoteResourceFile))
+    config.remoteJsonId = remoteJson["id"].Str();
+    debugPrintf("Downloading remote.json from Google Drive with id %s\n",
+                config.remoteJsonId.c_str());
+    if (!drive.DownloadFile(config.remoteJsonId, remoteResourceFile))
     {
         return Json();
     }
@@ -498,7 +497,7 @@ std::string getParentIdByFolderName(std::string folderName)
     std::string result = "not_found";
     if (folderName == driveFolderName)
     {
-        result = rootFolderId;
+        result = config.rootFolderId;
     }
     else
     {
@@ -528,8 +527,8 @@ std::string getParentIdByFolderName(std::string folderName)
 void writeChangesToFile()
 {
     // Backup remote.json before a write to save from any catastrophes
-    const bool backupSaved = saveStateFile(remoteResourceRoot, remoteBackup);
-    const bool saved = saveStateFile(remoteResourceRoot, remoteResourceFile);
+    const bool backupSaved = SaveStateFile(remoteResourceRoot, remoteBackup);
+    const bool saved = SaveStateFile(remoteResourceRoot, remoteResourceFile);
 
     if (backupSaved && saved)
     {
@@ -1045,20 +1044,22 @@ void uploadChanges()
 
     debugPrintf("uploadChanges Step 3: Uploading remote.json to google drive\n");
 
-    if (remoteJsonId == "root")
+    if (config.remoteJsonId == "root")
     {
         Json remJson;
-        remJson = drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, rootFolderId);
+        remJson =
+            drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, config.rootFolderId);
         if (remJson.Has("id"))
         {
-            remoteJsonId = remJson["id"].Str();
-            storeConfig();
+            config.remoteJsonId = remJson["id"].Str();
+            SaveConfig(config);
         }
     }
     else if (progress.done > 0)
     {
         debugPrintf("Updating remote.json on the server...\n");
-        drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, rootFolderId, remoteJsonId);
+        drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, config.rootFolderId,
+                         config.remoteJsonId);
     }
 }
 
@@ -1262,7 +1263,7 @@ void buildLocalResourceTree()
                 resource.Add("title", Json(entryName));
                 resource.Add("path", Json(path + "/" + entryName + "/savedata"));
                 resource.Add("mimeType", Json(folderMime));
-                resource.Add("parentid", Json(rootFolderId));
+                resource.Add("parentid", Json(config.rootFolderId));
                 resource.Add("parentFolder", Json(driveFolderName));
                 resource.Add("modifiedDate", Json("0"));
                 resource.Add("status", Json("upload"));
@@ -1398,7 +1399,7 @@ void buildLocalResourceTree()
                         resource.Add("title", Json(entryName));
                         resource.Add("path", Json("/dev_hdd0/savedata/vmc/" + entryName));
                         resource.Add("mimeType", Json(octetMime));
-                        resource.Add("parentid", Json(rootFolderId));
+                        resource.Add("parentid", Json(config.rootFolderId));
                         resource.Add("parentFolder", Json(driveFolderName));
                         resource.Add("modifiedDate", Json("0"));
                         resource.Add("status", Json("upload"));
@@ -1416,7 +1417,7 @@ void buildLocalResourceTree()
 
     // Overwrite local.json every time
     localResourceRoot.Add("data", Json(resourceTree));
-    saveStateFile(localResourceRoot, localResourceFile);
+    SaveStateFile(localResourceRoot, localResourceFile);
 
     debugPrintf("Resource file has been written successfully...\n");
 }
@@ -1440,11 +1441,11 @@ int initCloudDrive(void *arg)
     googleAuth.SetClient(client);
 
     debugPrintf("Checking if User is Authenticated...\n");
-    std::string authStatus = isUserAuthenticated();
+    const bool signedIn = LoadConfig(config) && !config.refreshToken.empty();
 
     showMessage("Checking if User is authenticated...");
 
-    if (authStatus == "not_found")
+    if (!signedIn)
     {
         debugPrintf("User is not authenticated, starting Authentication...\n");
         authenticateUser();
@@ -1454,7 +1455,7 @@ int initCloudDrive(void *arg)
         userType = "two";
         debugPrintf("Refresh token read from the config file\n");
 
-        googleAuth.SetRefreshToken(authStatus);
+        googleAuth.SetRefreshToken(config.refreshToken);
         if (!googleAuth.Refresh())
         {
             debugPrintf("Token Read from file was invalid, need to Re-Authenticate");
@@ -1462,7 +1463,8 @@ int initCloudDrive(void *arg)
         }
     }
 
-    storeConfig();
+    config.refreshToken = googleAuth.RefreshToken();
+    SaveConfig(config);
     debugPrintf("Authentication Phase Complete, checking remote root folder existence\n");
 
     syncing = 1;
@@ -1475,8 +1477,9 @@ int initCloudDrive(void *arg)
     Json rootResource = drive.FindInFolder(driveFolderName, folderMime, "root");
     if (rootResource.Has("id"))
     {
-        rootFolderId = rootResource["id"].Str();
-        debugPrintf("User has previous data on Google Drive with id %s\n", rootFolderId.c_str());
+        config.rootFolderId = rootResource["id"].Str();
+        debugPrintf("User has previous data on Google Drive with id %s\n",
+                    config.rootFolderId.c_str());
         if (userType == "one")
             userType = "three";
     }
@@ -1488,10 +1491,10 @@ int initCloudDrive(void *arg)
 
         if (rtId.Has("id"))
         {
-            rootFolderId = rtId["id"].Str();
+            config.rootFolderId = rtId["id"].Str();
             debugPrintf("Created root directory on Google Drive with id %s\n",
-                        rootFolderId.c_str());
-            storeConfig();
+                        config.rootFolderId.c_str());
+            SaveConfig(config);
         }
         else
         {
@@ -1531,7 +1534,7 @@ int initCloudDrive(void *arg)
     // TODO: Upload RRT to Google Drive
     if (userType == "two")
     {
-        remoteResourceRoot = loadWithBackup(remoteResourceFile, remoteBackup);
+        remoteResourceRoot = LoadWithBackup(remoteResourceFile, remoteBackup);
         if (remoteResourceRoot.IsEmpty())
         {
             remoteResourceRoot = downloadRemoteState();
@@ -1566,14 +1569,6 @@ int initCloudDrive(void *arg)
                 "Data from Google Drive downloaded, Please restart app to upload changes\n");
         }
     }
-
-    // TODO: After every scenario completion, write last sync date to config
-    /*u64 epochTime;
-    u64 nsec;
-
-    sysGetCurrentTime(&epochTime, &nsec);
-
-    last_sync = new std::string(epochTime);*/
 
     msgDialogAbort();
     if (drive.IsFull())
