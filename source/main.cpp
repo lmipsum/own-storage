@@ -492,7 +492,24 @@ void showDriveFullDialog()
     }
 }
 
-std::string getParentIdByFolderName(std::string folderName)
+/**
+ * Whether an entry still has to be created on Drive, including one whose creation an earlier
+ * run started but did not record.
+ * @param resource the remote.json entry
+ * @return true when its status is "upload" or creatingStatus
+ */
+bool isPendingCreation(const Json &resource)
+{
+    const std::string status = resource["status"].Str();
+    return status == "upload" || status == creatingStatus;
+}
+
+/**
+ * Finds the Drive id of the folder that holds an entry.
+ * @param folderName the parent folder's title
+ * @return the folder's id; "not_found" while the folder does not exist on Drive yet
+ */
+std::string getParentIdByFolderName(const std::string &folderName)
 {
     std::string result = "not_found";
     if (folderName == driveFolderName)
@@ -501,16 +518,14 @@ std::string getParentIdByFolderName(std::string folderName)
     }
     else
     {
-        int remSize = remoteResourceRoot["data"].AsArray().size();
-        for (int i = 0; i < remSize; i++)
+        const u32 remSize = remoteResourceRoot["data"].AsArray().size();
+        for (u32 i = 0; i < remSize; i++)
         {
-            Json resource = remoteResourceRoot["data"][i];
-            if (resource["mimeType"].Str() == folderMime)
+            const Json resource = remoteResourceRoot["data"][i];
+            if (resource["mimeType"].Str() == folderMime && resource["title"].Str() == folderName &&
+                !isPendingCreation(resource))
             {
-                if (resource["title"].Str() == folderName)
-                {
-                    result = resource["id"].Str();
-                }
+                result = resource["id"].Str();
             }
         }
     }
@@ -608,18 +623,6 @@ void replayJournal()
 }
 
 std::string calculateMD5Checksum(const std::string &path);
-
-/**
- * Whether an entry still has to be created on Drive, including one whose creation an earlier
- * run started but did not record.
- * @param resource the remote.json entry
- * @return true when its status is "upload" or creatingStatus
- */
-bool isPendingCreation(const Json &resource)
-{
-    const std::string status = resource["status"].Str();
-    return status == "upload" || status == creatingStatus;
-}
 
 /**
  * Saves that an entry's creation on Drive is about to start. A run that ends before it records
