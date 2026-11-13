@@ -20,8 +20,8 @@ class SyncDialog : public SyncDisplay
     SyncDialog(const SyncDialog &) = delete;
     SyncDialog &operator=(const SyncDialog &) = delete;
 
-    /** Shows the progress bars, unless they are shown. */
-    void ShowProgress();
+    /** Shows the progress bars for a new task, which the user has not stopped yet. */
+    void Open();
     /** Takes the dialog away. */
     void Close();
     /** Shows an error in place of the progress bars and waits until the user closes it. */
@@ -35,6 +35,8 @@ class SyncDialog : public SyncDisplay
     Answer Ask(const std::string &question) override;
 
   private:
+    /** Shows the progress bars, unless they are shown. */
+    void ShowProgress();
     /**
      * Opens a dialog once the system lets it, which it does not while the last one is closing.
      * @param type the dialog's msgType

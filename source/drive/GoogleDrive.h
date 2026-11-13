@@ -57,6 +57,7 @@ class GoogleDrive : public CloudStorage
      * through and then goes up the resumable way.
      */
     void QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done) override;
+    /** Forgets that Drive was full, then sends. */
     void RunQueue(const Stop &stop) override;
     /** Not counting a file that goes up the resumable way after the queue. */
     unsigned int Running() const override;

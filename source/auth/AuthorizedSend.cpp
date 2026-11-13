@@ -47,6 +47,13 @@ long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
                     const Request &request, std::string &reply, Retry retry)
 {
     bool refreshed = false;
+    // Google answers a request without a token with 403, not 401, so a token is got first.
+    // Should that fail, the request fails too and tells why.
+    if (auth.AccessToken().empty())
+    {
+        auth.Refresh();
+        refreshed = true;
+    }
     unsigned long long wait = kFirstRetryWaitMicroseconds;
     long status = HttpClient::kNoAnswer;
     for (int attempt = 1; attempt <= kSendAttempts; ++attempt)

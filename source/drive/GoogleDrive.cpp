@@ -21,7 +21,8 @@ const char kFoundItemFields[] =
 const char kStoredFileFields[] = "fileSize,id,md5Checksum,modifiedDate,parents/id";
 const char kCreatedFolderFields[] = "id,modifiedDate,parents/id";
 // What a listing gives of each file, and how many files one request may give.
-const char kListedFields[] = "kind,items(description,id,md5Checksum,title),nextPageToken";
+const char kListedFields[] =
+    "kind,items(description,fileSize,id,md5Checksum,modifiedDate,title),nextPageToken";
 const char kTrashedFileFields[] = "id";
 // What a listing reply says it is; any other reply is not a listing, however it ends.
 const char kFileListKind[] = "drive#fileList";
@@ -423,6 +424,8 @@ void GoogleDrive::QueueFile(const std::string &path, const PrepareFile &prepare,
 
 void GoogleDrive::RunQueue(const Stop &stop)
 {
+    // The app may run the queue again later, by when the user may have made room.
+    m_full = false;
     m_queue.Run(stop);
     // A callback may queue more, so the loop goes over a list of its own.
     std::vector<ResumableFile> resumable;

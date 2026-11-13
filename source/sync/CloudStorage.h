@@ -65,7 +65,7 @@ class CloudStorage
      * Every file in a folder, unless it is trashed; folders in it are left out.
      * @param folderId the folder
      * @param files receives what the cloud says about each file, with its "id", "title",
-     * "description" and "md5Checksum"
+     * "description", "md5Checksum", "fileSize" and "modifiedDate"
      * @return false when the listing failed
      */
     virtual bool ListFiles(const std::string &folderId, Json::Array &files) = 0;
@@ -112,7 +112,7 @@ class CloudStorage
     /** How many queued requests are being sent right now. */
     virtual unsigned int Running() const = 0;
 
-    /** Whether the cloud has refused an upload for lack of room. */
+    /** Whether the cloud has refused an upload for lack of room since the queue last ran. */
     virtual bool IsFull() const = 0;
     /** The likely cause of the last failed request. */
     virtual Failure LastFailure() const = 0;

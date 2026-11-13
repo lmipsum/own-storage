@@ -20,7 +20,7 @@ const unsigned int kSlowDownSeconds = 5;
 } // namespace
 
 GoogleDeviceAuth::GoogleDeviceAuth(HttpClient &http)
-    : m_http(http), m_pollIntervalSeconds(kDefaultPollIntervalSeconds)
+    : m_http(http), m_pollIntervalSeconds(kDefaultPollIntervalSeconds), m_signInRefused(false)
 {
 }
 
@@ -97,6 +97,8 @@ bool GoogleDeviceAuth::Refresh()
     std::string body;
     const long status = m_http.Post(kTokenUrl, form, HttpClient::Headers(1, kFormHeader), body);
     const Json reply = Json::Parse(body);
+    // RFC 6749 5.2: a refresh token that was revoked or has expired.
+    m_signInRefused = reply["error"].Str() == "invalid_grant";
     if (!HttpClient::Succeeded(status) || !reply.Has("access_token"))
     {
         debugPrintf("Token refresh failed: %ld %s\n", status, reply["error"].Str().c_str());
@@ -116,7 +118,15 @@ const std::string &GoogleDeviceAuth::RefreshToken() const
     return m_refreshToken;
 }
 
+bool GoogleDeviceAuth::SignInRefused() const
+{
+    return m_signInRefused;
+}
+
 void GoogleDeviceAuth::SetRefreshToken(const std::string &token)
 {
+    // An access token of another sign-in must not be sent with this one.
+    m_accessToken.clear();
+    m_signInRefused = false;
     m_refreshToken = token;
 }

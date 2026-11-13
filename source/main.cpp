@@ -52,13 +52,17 @@
 #include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
 #include "app/ConsoleStorage.h"
+#include "app/CloudSaveMenu.h"
 #include "app/Profile.h"
+#include "sync/SaveBrowser.h"
 #include "sync/SaveScanner.h"
 #include "sync/Sync.h"
 #include "sync/SyncState.h"
 #include "json/Json.h"
 #include "app/DebugLog.h"
 #include "app/Paths.h"
+#include "ui/Menu.h"
+#include "ui/Screen.h"
 #include "ui/SyncDialog.h"
 #include "ui/TransferBar.h"
 
@@ -69,37 +73,39 @@ const std::string userClientFile = APP_DIR "client.json";
 // overlap. Eight went 1.5 times as fast as four, with no request refused.
 const unsigned int parallelUploads = 8;
 const unsigned int microsecondsPerSecond = 1000000;
+// How often a wait checks whether the user has gone back.
+const unsigned int backPollMicroseconds = 100000;
 
 HttpClient http;
 GoogleDeviceAuth googleAuth(http);
 GoogleDrive drive(http, googleAuth, parallelUploads, MakeTransferBar());
 
-SDL_Event event;
 SDL_Surface *screen = NULL;
 SDL_Surface *image = NULL;
 TTF_Font *Sans;
-SDL_Color GREY = {57, 57, 57};
 
-// The line the main loop draws over the background; the sync thread sets it through
-// showMessage, because SDL is not thread-safe and only the main thread may draw.
-const int messageTopPercent = 70;
-SDL_mutex *messageLock = NULL;
-std::string pendingMessage;
-bool messageChanged = false;
-
-// The sync thread and the main thread both use these flags.
+// The app thread and the main thread both use this flag.
 std::atomic<int> exitapp(0);
-std::atomic<int> syncing(0);
 
 SyncDialog syncDialog(exitapp);
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
-                                "Free up space in Google Drive, then run Own Storage again.";
+                                "Free up space in Google Drive, then sync again.";
 const char driveUnreachableMessage[] = "Cannot reach Google Drive. Check the network.";
-const char driveRefusedMessage[] = "Google Drive refused a request. Run Own Storage again later.";
+const char driveRefusedMessage[] = "Google Drive refused a request. Try again later.";
+const char signInExpiredMessage[] =
+    "The Google sign-in is no longer valid. Sign out, then sign in again.";
 const char localFileMessage[] =
     "Own Storage cannot write to the PS3 hard disk. Check the free space.";
 const char unknownUserMessage[] = "Own Storage cannot tell which user is logged in.";
+const char menuHint[] = "X: select";
+
+// The main menu's rows.
+const char signInRow[] = "Sign in to Google Drive";
+const char syncRow[] = "Sync";
+const char cloudSavesRow[] = "Saves in the cloud";
+const char signOutRow[] = "Sign out";
+const char quitRow[] = "Quit";
 
 int xmbopen = 0;
 
@@ -147,120 +153,191 @@ SDL_Surface *Load_Image(std::string filePath)
     return optimizedImage;
 }
 
-void draw_surface(SDL_Surface *destination, SDL_Surface *source, int x, int y)
-{
-    SDL_Rect offset;
-    offset.x = x;
-    offset.y = y;
-    SDL_BlitSurface(source, NULL, destination, &offset);
-}
-
-/**
- * Hands a line of text to the main loop, which draws it over the background on its next frame.
- * Safe to call from any thread.
- * @param text the line to show in place of the previous one
- */
-void showMessage(const std::string &text)
-{
-    SDL_LockMutex(messageLock);
-    pendingMessage = text;
-    messageChanged = true;
-    SDL_UnlockMutex(messageLock);
-}
-
-/**
- * Redraws the background and the latest line from showMessage, if it changed. Main thread only.
- */
-void drawPendingMessage()
-{
-    SDL_LockMutex(messageLock);
-    const bool changed = messageChanged;
-    const std::string text = pendingMessage;
-    messageChanged = false;
-    SDL_UnlockMutex(messageLock);
-
-    if (!changed)
-    {
-        return;
-    }
-    draw_surface(screen, image, 0, 0);
-    SDL_Surface *rendered = TTF_RenderText_Blended(Sans, text.c_str(), GREY);
-    if (rendered == NULL)
-    {
-        return;
-    }
-    draw_surface(screen, rendered, (appWidth - rendered->w) / 2,
-                 (messageTopPercent * appHeight) / 100);
-    SDL_FreeSurface(rendered);
-}
-
-/**
- * Ends the sync early and tells the user why; the user quits with X.
- * @param message the reason, as the user reads it
- */
-void stopSync(const char *message)
-{
-    syncDialog.Close();
-    showMessage(message);
-    syncing = 0;
-}
-
-/**
- * Ends the sync early after a failed Drive request, naming its likely cause.
- */
-void stopSyncAfterFailure()
+/** The likely cause of the last failed Drive request, as the user reads it. */
+const char *driveFailureMessage()
 {
     switch (drive.LastFailure())
     {
     case Failure::LocalFile:
-        stopSync(localFileMessage);
-        break;
+        return localFileMessage;
     case Failure::Unreachable:
-        stopSync(driveUnreachableMessage);
-        break;
-    case Failure::Refused:
-        stopSync(driveRefusedMessage);
-        break;
+        return driveUnreachableMessage;
+    default:
+        return googleAuth.SignInRefused() ? signInExpiredMessage : driveRefusedMessage;
+    }
+}
+
+/** Where a user's sync state is kept. */
+std::string stateFile(const std::string &profile)
+{
+    return profile + "/state.json";
+}
+
+/** Where the backup of a user's sync state is kept. */
+std::string stateBackup(const std::string &profile)
+{
+    return profile + "/state.backup";
+}
+
+/** Shows why the app cannot go on, and waits until the user quits. */
+void waitForQuit(Menu &menu, const std::string &message)
+{
+    menu.ShowMessage(message);
+    while (exitapp == 0 && menu.Choose("", {quitRow}, menuHint, 0) == Menu::kNone)
+    {
     }
 }
 
 /**
- * Initiates the user authentication and is also responsible for getting device id
- * @return "authorization_complete" if authenticated and "not_found" if it fails
+ * Signs the user in with a code to enter on another device, and keeps the sign-in for the next
+ * runs. The user may go back while the code is shown.
+ * @param menu where the code is shown
+ * @param profile the user's directory of the app
+ * @param config receives the sign-in
  */
-std::string authenticateUser()
+void signIn(Menu &menu, const std::string &profile, Config &config)
 {
-    std::string authStatus = "not_found";
-    std::string usercode;
-
-    debugPrintf("Device Authentication Function Called...\n");
-    usercode = googleAuth.Start();
-
-    debugPrintf("Your User Code is:  %s \n", usercode.c_str());
-
-    showMessage("Your User Code is: " + usercode + "\n\n Please visit " +
-                googleAuth.VerificationUrl() + " for approval");
-
-    GoogleDeviceAuth::Status status =
-        usercode.empty() ? GoogleDeviceAuth::Failed : GoogleDeviceAuth::Pending;
+    menu.ShowMessage("Asking Google for a sign-in code...");
+    const std::string code = googleAuth.Start();
+    if (code.empty())
+    {
+        menu.ShowMessage("Cannot reach Google. Check the network.");
+        return;
+    }
+    menu.ShowMessage("On a phone or computer, open " + googleAuth.VerificationUrl() +
+                     " and enter " + code + "    O: cancel");
+    GoogleDeviceAuth::Status status = GoogleDeviceAuth::Pending;
     while (status == GoogleDeviceAuth::Pending)
     {
-        sysUsleep(googleAuth.PollIntervalSeconds() * microsecondsPerSecond);
-        debugPrintf("Polling for user authentication....\n");
+        // Google asks for seconds between polls; the user should not wait that long to go back.
+        for (unsigned int waited = 0;
+             waited < googleAuth.PollIntervalSeconds() * microsecondsPerSecond;
+             waited += backPollMicroseconds)
+        {
+            if (exitapp != 0 || menu.TakeBack())
+            {
+                menu.ShowMessage("Sign-in cancelled.");
+                return;
+            }
+            sysUsleep(backPollMicroseconds);
+        }
         status = googleAuth.Poll();
     }
-    if (status == GoogleDeviceAuth::Approved)
+    if (status != GoogleDeviceAuth::Approved)
     {
-        authStatus = "authorization_complete";
+        menu.ShowMessage("The sign-in did not go through. Try again.");
+        return;
     }
-    return authStatus;
+    config.refreshToken = googleAuth.RefreshToken();
+    SaveConfig(profile, config);
+    menu.ShowMessage("Signed in.");
+}
+
+/** Forgets the user's sign-in, so that the user may sign in again, with another account too. */
+void signOut(Menu &menu, const std::string &profile, Config &config)
+{
+    config = Config();
+    SaveConfig(profile, config);
+    googleAuth.SetRefreshToken(std::string());
+    menu.ShowMessage("Signed out.");
 }
 
 /**
- * Starts the authentication and sync process, should be the Drive class
+ * Finds the Own Storage folder in the user's Drive.
+ * @param create whether to create it when it is not there
+ * @param folderId receives its id; empty when it is not there and was not to be created
+ * @return false when Drive could not be asked
  */
-int initCloudDrive(void *arg)
+bool findBackupFolder(bool create, std::string &folderId)
 {
+    Json folder;
+    if (!drive.FindFolder(driveFolderName, "root", folder))
+    {
+        return false;
+    }
+    if (!folder.Has("id") && create)
+    {
+        folder = drive.CreateFolder(driveFolderName, "root");
+        if (!folder.Has("id"))
+        {
+            return false;
+        }
+    }
+    folderId = folder["id"].Str();
+    return true;
+}
+
+/** Brings the user's saves and their backup in line. */
+void runSync(Menu &menu, ConsoleStorage &storage, const std::string &profile,
+             const std::string &savedata)
+{
+    menu.ShowMessage("Syncing... Do not quit or switch off the PS3.");
+    syncDialog.Open();
+    std::string folderId;
+    bool done = findBackupFolder(true, folderId);
+    if (done)
+    {
+        // Without a state of its own every save starts without a base; the sync works it out.
+        SyncState state(stateFile(profile), stateBackup(profile));
+        state.Load();
+        Sync sync(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
+                  profile);
+        done = sync.Run();
+    }
+    const bool full = done && drive.IsFull();
+    if (full)
+    {
+        syncDialog.ShowError(driveFullMessage);
+    }
+    syncDialog.Close();
+    if (!done)
+    {
+        menu.ShowMessage(driveFailureMessage());
+    }
+    else if (full)
+    {
+        menu.ShowMessage("The sync stopped: the Google storage is full.");
+    }
+    else
+    {
+        menu.ShowMessage(syncDialog.Cancelled() ? "The sync was stopped." : "The sync is done.");
+    }
+}
+
+/** Lets the user load saves from the backup one by one. */
+void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &profile,
+                      const std::string &savedata)
+{
+    menu.ShowMessage("Looking for the backup...");
+    std::string folderId;
+    if (!findBackupFolder(false, folderId))
+    {
+        menu.ShowMessage(driveFailureMessage());
+        return;
+    }
+    if (folderId.empty())
+    {
+        menu.ShowMessage("There are no saves in the cloud yet.");
+        return;
+    }
+    SyncState state(stateFile(profile), stateBackup(profile));
+    state.Load();
+    SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
+                        profile);
+    if (!BrowseCloudSaves(menu, syncDialog, browser))
+    {
+        menu.ShowMessage(driveFailureMessage());
+    }
+}
+
+/**
+ * The app on its own thread: finds the logged-in user, then runs the main menu until the user
+ * quits. The menu waits for the main thread's pad presses.
+ * @param arg the Menu
+ */
+int runApp(void *arg)
+{
+    Menu &menu = *static_cast<Menu *>(arg);
     ClientCredentials client = LoadUserCredentials(userClientFile, "google");
     if (!client.IsComplete())
     {
@@ -268,8 +345,8 @@ int initCloudDrive(void *arg)
     }
     if (!client.IsComplete())
     {
-        // Without a client there is no sign-in; the user reads this and quits with X.
-        showMessage("Cannot reach the Own Storage configuration. Check the network.");
+        waitForQuit(menu, "Cannot reach the Own Storage configuration. Check the network.");
+        exitapp = 1;
         return 0;
     }
     googleAuth.SetClient(client);
@@ -278,109 +355,117 @@ int initCloudDrive(void *arg)
     const std::optional<std::string> user = FindLoggedInUser(consoleStorage);
     if (!user)
     {
-        showMessage(unknownUserMessage);
+        waitForQuit(menu, unknownUserMessage);
+        exitapp = 1;
         return 0;
     }
     const std::string profile = MakeProfileDirectory(consoleStorage, *user);
     const std::string savedata = SavedataDirectory(*user);
-
-    debugPrintf("Checking if User is Authenticated...\n");
     Config config;
-    const bool signedIn = LoadConfig(profile, config) && !config.refreshToken.empty();
+    LoadConfig(profile, config);
+    // The first request finds the access token missing and gets one with this.
+    googleAuth.SetRefreshToken(config.refreshToken);
 
-    showMessage("Checking if User is authenticated...");
-
-    if (!signedIn)
+    std::size_t cursor = 0;
+    while (exitapp == 0)
     {
-        debugPrintf("User is not authenticated, starting Authentication...\n");
-        authenticateUser();
-    }
-    else
-    {
-        debugPrintf("Refresh token read from the config file\n");
-
-        googleAuth.SetRefreshToken(config.refreshToken);
-        if (!googleAuth.Refresh())
+        const bool signedIn = !config.refreshToken.empty();
+        const std::vector<std::string> rows =
+            signedIn ? std::vector<std::string>{syncRow, cloudSavesRow, signOutRow, quitRow}
+                     : std::vector<std::string>{signInRow, quitRow};
+        const int chosen = menu.Choose("", rows, menuHint, cursor);
+        if (chosen == Menu::kNone)
         {
-            debugPrintf("Token Read from file was invalid, need to Re-Authenticate");
-            authenticateUser();
+            continue;
         }
-    }
-
-    config.refreshToken = googleAuth.RefreshToken();
-    SaveConfig(profile, config);
-    debugPrintf("Authentication Phase Complete, checking remote root folder existence\n");
-
-    syncing = 1;
-
-    showMessage("Syncing...Please DO NOT Quit or Shutdown the PS3!");
-
-    syncDialog.ShowProgress();
-
-    // If user new but remote data exists
-    Json rootResource;
-    if (!drive.FindFolder(driveFolderName, "root", rootResource))
-    {
-        stopSyncAfterFailure();
-        return 0;
-    }
-    if (rootResource.Has("id"))
-    {
-        config.rootFolderId = rootResource["id"].Str();
-        debugPrintf("User has previous data on Google Drive with id %s\n",
-                    config.rootFolderId.c_str());
-    }
-    else
-    {
-        debugPrintf("User has no previous data on Google Drive\n");
-        Json rtId;
-        rtId = drive.CreateFolder(driveFolderName, "root");
-
-        if (rtId.Has("id"))
+        cursor = static_cast<std::size_t>(chosen);
+        const std::string &row = rows[cursor];
+        if (row == signInRow)
         {
-            config.rootFolderId = rtId["id"].Str();
-            debugPrintf("Created root directory on Google Drive with id %s\n",
-                        config.rootFolderId.c_str());
-            SaveConfig(profile, config);
+            signIn(menu, profile, config);
+            cursor = 0;
+        }
+        else if (row == syncRow)
+        {
+            runSync(menu, consoleStorage, profile, savedata);
+        }
+        else if (row == cloudSavesRow)
+        {
+            browseCloudSaves(menu, consoleStorage, profile, savedata);
+        }
+        else if (row == signOutRow)
+        {
+            signOut(menu, profile, config);
+            cursor = 0;
         }
         else
         {
-            debugPrintf("Error creating root folder on Google Drive\n");
-            stopSyncAfterFailure();
-            return 0;
+            exitapp = 1;
         }
     }
-
-    // Without a state of its own every save starts without a base; the sync works it out.
-    SyncState state(profile + "/state.json", profile + "/state.backup");
-    state.Load();
-    Sync sync(drive, state, consoleStorage, syncDialog, config.rootFolderId, savedata,
-              profileMarkerSave, profile);
-    if (!sync.Run())
-    {
-        stopSyncAfterFailure();
-        return 0;
-    }
-
-    if (drive.IsFull())
-    {
-        syncDialog.ShowError(driveFullMessage);
-    }
-    syncDialog.Close();
-
-    syncing = 0;
-
-    exitapp = 1;
-
     return 0;
+}
+
+// The pad buttons the menus take, as bits of what a pad holds down.
+const unsigned int padUp = 1 << 0;
+const unsigned int padDown = 1 << 1;
+const unsigned int padLeft = 1 << 2;
+const unsigned int padRight = 1 << 3;
+const unsigned int padCross = 1 << 4;
+const unsigned int padCircle = 1 << 5;
+
+/** The menu buttons a pad holds down. */
+unsigned int heldButtons(const padData &data)
+{
+    return (data.BTN_UP ? padUp : 0) | (data.BTN_DOWN ? padDown : 0) |
+           (data.BTN_LEFT ? padLeft : 0) | (data.BTN_RIGHT ? padRight : 0) |
+           (data.BTN_CROSS ? padCross : 0) | (data.BTN_CIRCLE ? padCircle : 0);
+}
+
+/**
+ * Hands the menu every button that went down on a pad since its last report.
+ * @param menu takes the presses
+ * @param held what each pad held down at its last report; updated
+ */
+void readPads(Menu &menu, unsigned int held[MAX_PADS])
+{
+    static const struct
+    {
+        unsigned int bit;
+        PadButton button;
+    } presses[] = {{padUp, PadButton::Up},        {padDown, PadButton::Down},
+                   {padLeft, PadButton::PageUp},  {padRight, PadButton::PageDown},
+                   {padCross, PadButton::Select}, {padCircle, PadButton::Back}};
+    padInfo info;
+    ioPadGetInfo(&info);
+    for (int pad = 0; pad < MAX_PADS; ++pad)
+    {
+        if (!info.status[pad])
+        {
+            // A pad plugged in again starts with nothing held.
+            held[pad] = 0;
+            continue;
+        }
+        padData data;
+        // A pad without a new report keeps what it held.
+        if (ioPadGetData(pad, &data) != 0 || data.len == 0)
+        {
+            continue;
+        }
+        const unsigned int now = heldButtons(data);
+        for (const auto &press : presses)
+        {
+            if ((now & press.bit) != 0 && (held[pad] & press.bit) == 0)
+            {
+                menu.Press(press.button);
+            }
+        }
+        held[pad] = now;
+    }
 }
 
 int main(int argc, char **argv)
 {
-    padInfo padinfo;
-    padData paddata;
-    SDL_Thread *thread = NULL;
-
     std::string imagePath;
     char FontPath[] = APP_DIR "font.ttf";
 
@@ -424,50 +509,36 @@ int main(int argc, char **argv)
         SDL_SetVideoMode(appWidth, appHeight, 32, SDL_SWSURFACE | SDL_DOUBLEBUF | SDL_FULLSCREEN);
 
     image = Load_Image(imagePath);
-    draw_surface(screen, image, 0, 0);
 
     Sans = TTF_OpenFont(FontPath, 20.0);
 
-    messageLock = SDL_CreateMutex();
-    thread = SDL_CreateThread(initCloudDrive, NULL);
-
     sysUtilRegisterCallback(SYSUTIL_EVENT_SLOT0, sysevent_callback, NULL);
-
     ioPadInit(7);
-
-    while (exitapp == 0)
     {
-        sysUtilCheckCallback();
+        // Gone before SDL shuts down, which the screen's surfaces need.
+        Screen appScreen(screen, image, Sans);
+        Menu menu(appScreen, exitapp);
+        SDL_Thread *thread = SDL_CreateThread(runApp, &menu);
+        unsigned int held[MAX_PADS] = {};
 
-        if (xmbopen != 1)
+        while (exitapp == 0)
         {
-            ioPadGetInfo(&padinfo);
-            for (int i = 0; i < MAX_PADS; i++)
+            sysUtilCheckCallback();
+
+            if (xmbopen != 1)
             {
-                if (padinfo.status[i])
-                {
-                    ioPadGetData(i, &paddata);
-                    if (paddata.BTN_CROSS)
-                    {
-                        debugPrintf("Quit Called\n");
-                        if (syncing == 0)
-                        {
-                            exitapp = 1; // Quit application
-                        }
-                    }
-                }
+                readPads(menu, held);
             }
+            appScreen.Draw();
+            SDL_Flip(screen);
         }
-        drawPendingMessage();
-        SDL_Flip(screen);
+
+        debugPrintf("The application exited...%d\n", exitapp.load());
+
+        syncDialog.Close();
+
+        SDL_KillThread(thread);
     }
-
-    debugPrintf("The application exited...%d\n", exitapp.load());
-
-    syncDialog.Close();
-
-    SDL_KillThread(thread);
-    SDL_DestroyMutex(messageLock);
     SDL_FreeSurface(image);
     SDL_FreeSurface(screen);
     TTF_CloseFont(Sans);
