@@ -110,8 +110,8 @@ std::atomic<int> syncing(0);
 
 // Set when Drive refuses an upload for lack of room; the sync then stops. Sync thread only.
 bool driveFull = false;
-const char driveFullMessage[] = "Your Google Drive is full, so some saves were not backed up. "
-                                "Free up space in Drive, then run Own Storage again.";
+const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
+                                "Free up space in Google Drive, then run Own Storage again.";
 const unsigned int dialogPollMicroseconds = 100000;
 
 int xmbopen = 0;
