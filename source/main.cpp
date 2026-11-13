@@ -74,6 +74,7 @@ const std::string queryFields =
 const std::string driveFolderName = "Own Storage";
 // remote.json status of an entry whose creation on Drive started but was not recorded.
 const std::string creatingStatus = "creating";
+const unsigned int microsecondsPerSecond = 1000000;
 
 HttpClient http;
 GoogleDeviceAuth googleAuth(http);
@@ -1350,24 +1351,13 @@ std::string authenticateUser()
     showMessage("Your User Code is: " + usercode + "\n\n Please visit " +
                 googleAuth.VerificationUrl() + " for approval");
 
-    u64 epochTime;
-    u64 nsec;
-    u64 previousCallTime;
-
-    sysGetCurrentTime(&epochTime, &nsec);
-    previousCallTime = epochTime;
-
     GoogleDeviceAuth::Status status =
         usercode.empty() ? GoogleDeviceAuth::Failed : GoogleDeviceAuth::Pending;
     while (status == GoogleDeviceAuth::Pending)
     {
-        sysGetCurrentTime(&epochTime, &nsec);
-        if (epochTime - previousCallTime > 10)
-        {
-            debugPrintf("Polling for user authentication....\n");
-            status = googleAuth.Poll();
-            previousCallTime = epochTime;
-        }
+        sysUsleep(googleAuth.PollIntervalSeconds() * microsecondsPerSecond);
+        debugPrintf("Polling for user authentication....\n");
+        status = googleAuth.Poll();
     }
     if (status == GoogleDeviceAuth::Approved)
     {

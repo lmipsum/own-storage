@@ -32,6 +32,8 @@ class GoogleDeviceAuth
     const std::string &VerificationUrl() const;
     /** Asks whether the user has approved the code yet; on approval the tokens are kept. */
     Status Poll();
+    /** How long to wait before the next Poll(), as the server asks (RFC 8628 3.5). */
+    unsigned int PollIntervalSeconds() const;
     /** Gets a new access token with the refresh token; false when it is no longer valid. */
     bool Refresh();
 
@@ -44,6 +46,7 @@ class GoogleDeviceAuth
     ClientCredentials m_client;
     std::string m_deviceCode;
     std::string m_verificationUrl;
+    unsigned int m_pollIntervalSeconds;
     std::string m_accessToken;
     std::string m_refreshToken;
 };

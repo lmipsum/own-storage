@@ -5,6 +5,8 @@
 #include "json/Json.h"
 #include "app/DebugLog.h"
 
+#include <cstdlib>
+
 namespace
 {
 const char kCodeUrl[] = "https://oauth2.googleapis.com/device/code";
@@ -12,9 +14,15 @@ const char kTokenUrl[] = "https://oauth2.googleapis.com/token";
 // Only the files the app creates itself.
 const char kScope[] = "https://www.googleapis.com/auth/drive.file";
 const char kFormHeader[] = "Content-Type: application/x-www-form-urlencoded";
+// RFC 8628 3.2: the interval when the server names none; 3.5: what slow_down adds to it.
+const unsigned int kDefaultPollIntervalSeconds = 5;
+const unsigned int kSlowDownSeconds = 5;
 } // namespace
 
-GoogleDeviceAuth::GoogleDeviceAuth(HttpClient &http) : m_http(http) {}
+GoogleDeviceAuth::GoogleDeviceAuth(HttpClient &http)
+    : m_http(http), m_pollIntervalSeconds(kDefaultPollIntervalSeconds)
+{
+}
 
 void GoogleDeviceAuth::SetClient(const ClientCredentials &client)
 {
@@ -35,6 +43,8 @@ std::string GoogleDeviceAuth::Start()
     }
     m_deviceCode = reply["device_code"].Str();
     m_verificationUrl = reply["verification_url"].Str();
+    const int interval = std::atoi(reply["interval"].Str().c_str());
+    m_pollIntervalSeconds = interval > 0 ? interval : kDefaultPollIntervalSeconds;
     return reply["user_code"].Str();
 }
 
@@ -60,12 +70,22 @@ GoogleDeviceAuth::Status GoogleDeviceAuth::Poll()
     }
     const std::string error = reply["error"].Str();
     // RFC 8628 3.5: these two only mean the user has not answered yet.
-    if (error == "authorization_pending" || error == "slow_down")
+    if (error == "slow_down")
+    {
+        m_pollIntervalSeconds += kSlowDownSeconds;
+        return Pending;
+    }
+    if (error == "authorization_pending")
     {
         return Pending;
     }
     debugPrintf("Device sign-in failed: %ld %s\n", status, error.c_str());
     return Failed;
+}
+
+unsigned int GoogleDeviceAuth::PollIntervalSeconds() const
+{
+    return m_pollIntervalSeconds;
 }
 
 bool GoogleDeviceAuth::Refresh()
