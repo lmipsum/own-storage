@@ -44,7 +44,7 @@ class HttpClient
     static bool Succeeded(long status);
     /**
      * Gives a fresh curl handle the settings every request shares: the URL, the user agent,
-     * certificate checks against the shipped CA bundle, and the connect timeout.
+     * certificate checks against the shipped CA bundle, and the timeouts.
      */
     static void ApplyDefaults(CURL *curl, const std::string &url);
     /** curl write callback that appends the received data to the std::string at body. */

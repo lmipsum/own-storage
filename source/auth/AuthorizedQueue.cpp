@@ -180,7 +180,7 @@ void AuthorizedQueue::Finish(Slot &slot, long status)
             return;
         }
     }
-    if (IsRetryable(status, item.request.retry) && item.attempt < kSendAttempts)
+    if (IsRetryable(status, slot.reply, item.request.retry) && item.attempt < kSendAttempts)
     {
         debugPrintf("Request failed with %ld, retrying in %llu ms\n", status, item.wait / 1000);
         item.notBefore = NowMicroseconds() + item.wait;

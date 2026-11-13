@@ -10,6 +10,11 @@
 namespace
 {
 const char kUserAgent[] = "Own Storage";
+const long kConnectTimeoutSeconds = 30;
+// A transfer that moves less than this many bytes a second for this long has stalled, and fails
+// instead of holding up the sync; Drive's own pauses, such as checking an upload, are shorter.
+const long kStalledBytesPerSecond = 1;
+const long kStalledSeconds = 60;
 
 size_t WriteTo(char *data, size_t size, size_t count, void *file)
 {
@@ -56,7 +61,9 @@ void HttpClient::ApplyDefaults(CURL *curl, const std::string &url)
     curl_easy_setopt(curl, CURLOPT_CAINFO, APP_DIR "cacert.pem");
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, kConnectTimeoutSeconds);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, kStalledBytesPerSecond);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, kStalledSeconds);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
 }

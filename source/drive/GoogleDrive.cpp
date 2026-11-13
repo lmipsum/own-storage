@@ -42,16 +42,10 @@ std::string QuoteQueryValue(const std::string &value)
     return quoted + "'";
 }
 
-/** The first reason in a Drive error object, or "" when there is none. */
-std::string ReadFirstErrorReason(const Json &error)
-{
-    return error["errors"][0u]["reason"].Str();
-}
-
 /** True when Drive refused a request because the user's Drive has no room left. */
 bool IsDriveFullError(const std::string &reply)
 {
-    const std::string reason = ReadFirstErrorReason(Json::Parse(reply)["error"]);
+    const std::string reason = ReadErrorReason(reply);
     return reason == "quotaExceeded" || reason == "storageQuotaExceeded";
 }
 } // namespace
@@ -67,9 +61,9 @@ bool GoogleDrive::FindFirst(const std::string &query, Json &item)
     const std::string url = std::string(kFilesUrl) + "?q=" + m_http.Escape(query) +
                             "&fields=" + m_http.Escape(kFoundItemFields);
     std::string reply;
-    const long status =
-        SendAuthorized(m_auth, HttpClient::Headers(), [&](const HttpClient::Headers &withToken)
-                       { return m_http.Get(url, withToken, reply); });
+    const long status = SendAuthorized(
+        m_auth, HttpClient::Headers(), [&](const HttpClient::Headers &withToken, std::string &body)
+        { return m_http.Get(url, withToken, body); }, reply);
     if (!HttpClient::Succeeded(status))
     {
         debugPrintf("FindFirst: HTTP Server Error...%ld %s\n", status,
@@ -105,8 +99,8 @@ Json GoogleDrive::CreateFolder(const std::string &title, const std::string &pare
     std::string reply;
     // A create sent twice makes two folders; the next run looks for the folder instead.
     const long status = SendAuthorized(
-        m_auth, headers, [&](const HttpClient::Headers &withToken)
-        { return m_http.Post(url, meta, withToken, reply); }, Retry::OnlyRefused);
+        m_auth, headers, [&](const HttpClient::Headers &withToken, std::string &body)
+        { return m_http.Post(url, meta, withToken, body); }, reply, Retry::OnlyRefused);
     if (!HttpClient::Succeeded(status))
     {
         debugPrintf("CreateFolder: Could not create folder..%ld %s\n", status,
@@ -175,13 +169,13 @@ Json GoogleDrive::UploadInOneRequest(const std::string &path, const std::string 
     std::string reply;
     const long status = SendAuthorized(
         m_auth, request.headers,
-        [&](const HttpClient::Headers &withToken)
+        [&](const HttpClient::Headers &withToken, std::string &body)
         {
             return request.method == "PUT"
-                       ? m_http.Put(request.url, request.body, withToken, reply)
-                       : m_http.Post(request.url, request.body, withToken, reply);
+                       ? m_http.Put(request.url, request.body, withToken, body)
+                       : m_http.Post(request.url, request.body, withToken, body);
         },
-        request.retry);
+        reply, request.retry);
     if (!HttpClient::Succeeded(status))
     {
         NoteFailure("UploadInOneRequest: Could not upload file", status, reply);
@@ -210,14 +204,14 @@ Json GoogleDrive::UploadResumable(const std::string &path, const std::string &me
         "?uploadType=resumable&fields=" + m_http.Escape(kStoredFileFields);
 
     std::string sessionReply;
-    const long sessionStatus =
-        SendAuthorized(m_auth, sessionHeaders,
-                       [&](const HttpClient::Headers &withToken)
-                       {
-                           return fileId.empty()
-                                      ? m_http.Post(sessionUrl, meta, withToken, sessionReply)
-                                      : m_http.Put(sessionUrl, meta, withToken, sessionReply);
-                       });
+    const long sessionStatus = SendAuthorized(
+        m_auth, sessionHeaders,
+        [&](const HttpClient::Headers &withToken, std::string &body)
+        {
+            return fileId.empty() ? m_http.Post(sessionUrl, meta, withToken, body)
+                                  : m_http.Put(sessionUrl, meta, withToken, body);
+        },
+        sessionReply);
     if (!HttpClient::Succeeded(sessionStatus))
     {
         NoteFailure("UploadResumable: Could not pose meta data", sessionStatus, sessionReply);
@@ -238,8 +232,8 @@ Json GoogleDrive::UploadResumable(const std::string &path, const std::string &me
     m_display.begin(path);
     std::string reply;
     const long status = SendAuthorized(
-        m_auth, contentHeaders, [&](const HttpClient::Headers &withToken)
-        { return m_http.Upload(contentUrl, withToken, path, m_display.progress, reply); });
+        m_auth, contentHeaders, [&](const HttpClient::Headers &withToken, std::string &body)
+        { return m_http.Upload(contentUrl, withToken, path, m_display.progress, body); }, reply);
     if (!HttpClient::Succeeded(status))
     {
         NoteFailure("UploadResumable: Could not upload file", status, reply);
@@ -262,9 +256,9 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
 {
     const std::string url = std::string(kFilesUrl) + "/" + fileId + "?fields=downloadUrl";
     std::string reply;
-    long status =
-        SendAuthorized(m_auth, HttpClient::Headers(), [&](const HttpClient::Headers &withToken)
-                       { return m_http.Get(url, withToken, reply); });
+    long status = SendAuthorized(
+        m_auth, HttpClient::Headers(), [&](const HttpClient::Headers &withToken, std::string &body)
+        { return m_http.Get(url, withToken, body); }, reply);
     if (!HttpClient::Succeeded(status))
     {
         debugPrintf("DownloadFile: Could not get downloadUrl...%ld %s\n", status,
@@ -281,8 +275,8 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
 
     m_display.begin(localPath);
     status = SendAuthorized(
-        m_auth, HttpClient::Headers(), [&](const HttpClient::Headers &withToken)
-        { return m_http.Download(downloadUrl, withToken, localPath, m_display.progress); });
+        m_auth, HttpClient::Headers(), [&](const HttpClient::Headers &withToken, std::string &)
+        { return m_http.Download(downloadUrl, withToken, localPath, m_display.progress); }, reply);
     debugPrintf("Return Code for file download is %ld\n", status);
     if (!HttpClient::Succeeded(status))
     {
@@ -334,5 +328,5 @@ std::string DescribeDriveError(const std::string &reply)
     {
         return reply.substr(0, kMaxLoggedReplyLength);
     }
-    return ReadFirstErrorReason(error) + ": " + error["message"].Str();
+    return ReadErrorReason(reply) + ": " + error["message"].Str();
 }
