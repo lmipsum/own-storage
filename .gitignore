@@ -4,3 +4,6 @@ build/
 *.self
 *.pkg
 *.map
+
+# make -C tests output
+tests/run-tests

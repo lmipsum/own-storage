@@ -1,0 +1,247 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "TestCloud.h"
+
+#include "ContentDigest.h"
+
+#include <cstdio>
+#include <ctime>
+#include <fstream>
+#include <sstream>
+#include <utility>
+
+namespace
+{
+/** Now, in the form Drive gives modifiedDate. */
+std::string Now()
+{
+    const std::time_t now = std::time(nullptr);
+    char text[32];
+    std::strftime(text, sizeof text, "%Y-%m-%dT%H:%M:%S.000Z", std::gmtime(&now));
+    return text;
+}
+
+/** Whether an item is of the kind a search asks for. */
+bool IsKind(const TestCloudItem &item, ItemKind kind)
+{
+    return (item.mimeType == folderMime) == (kind == ItemKind::Folder);
+}
+} // namespace
+
+TestCloud::TestCloud(const PathMap &map)
+    : m_map(map), m_failSearches(false), m_createsUntilLostAnswer(-1), m_creates(0), m_updates(0),
+      m_nextId(1)
+{
+}
+
+void TestCloud::FailSearches(bool fail)
+{
+    m_failSearches = fail;
+}
+
+void TestCloud::LoseAnswerOfCreate(int createsBefore)
+{
+    m_createsUntilLostAnswer = createsBefore;
+}
+
+int TestCloud::Creates() const
+{
+    return m_creates;
+}
+
+int TestCloud::Updates() const
+{
+    return m_updates;
+}
+
+const std::map<std::string, TestCloudItem> &TestCloud::Items() const
+{
+    return m_items;
+}
+
+std::string TestCloud::Tree(const std::string &parentId) const
+{
+    std::map<std::string, std::string> children;
+    for (const std::pair<const std::string, TestCloudItem> &item : m_items)
+    {
+        if (item.second.parentId == parentId)
+        {
+            children.insert(std::make_pair(item.second.title, item.first));
+        }
+    }
+    std::string tree;
+    for (const std::pair<const std::string, std::string> &child : children)
+    {
+        const TestCloudItem &item = m_items.at(child.second);
+        if (item.mimeType == folderMime)
+        {
+            tree += item.title + "/\n";
+            std::istringstream inner(Tree(child.second));
+            for (std::string line; std::getline(inner, line);)
+            {
+                tree += "  " + line + "\n";
+            }
+        }
+        else
+        {
+            tree += item.title + "\n";
+        }
+    }
+    return tree;
+}
+
+std::string TestCloud::Store(const TestCloudItem &item)
+{
+    char id[16];
+    std::snprintf(id, sizeof id, "id%04d", m_nextId++);
+    m_items[id] = item;
+    return id;
+}
+
+bool TestCloud::FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
+                             Json &item)
+{
+    item = Json();
+    if (m_failSearches)
+    {
+        return false;
+    }
+    for (const std::pair<const std::string, TestCloudItem> &stored : m_items)
+    {
+        if (stored.second.title == title && stored.second.parentId == parentId &&
+            IsKind(stored.second, kind))
+        {
+            item = Describe(stored.first);
+            break;
+        }
+    }
+    return true;
+}
+
+Json TestCloud::CreateFolder(const std::string &title, const std::string &parentId)
+{
+    return Create(TestCloudItem{title, parentId, folderMime, ""});
+}
+
+Json TestCloud::UploadFile(const std::string &path, const std::string &title,
+                           const std::string &mimeType, const std::string &parentId,
+                           const std::string &fileId)
+{
+    std::ifstream file(m_map(path).c_str(), std::ios::binary);
+    if (!file)
+    {
+        return Json();
+    }
+    std::ostringstream content;
+    content << file.rdbuf();
+    if (fileId.empty())
+    {
+        return Create(TestCloudItem{title, parentId, mimeType, content.str()});
+    }
+    if (m_items.count(fileId) == 0)
+    {
+        return Json();
+    }
+    m_items[fileId].content = content.str();
+    ++m_updates;
+    return Describe(fileId);
+}
+
+bool TestCloud::DownloadFile(const std::string &fileId, const std::string &localPath)
+{
+    if (m_items.count(fileId) == 0)
+    {
+        return false;
+    }
+    std::ofstream(m_map(localPath).c_str(), std::ios::binary) << m_items[fileId].content;
+    return true;
+}
+
+void TestCloud::QueueFolder(const PrepareFolder &prepare, const Done &done)
+{
+    m_queue.push_back(
+        [this, prepare, done]
+        {
+            FolderToCreate folder;
+            if (prepare(folder))
+            {
+                done(CreateFolder(folder.title, folder.parentId));
+            }
+        });
+}
+
+void TestCloud::QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done)
+{
+    m_queue.push_back(
+        [this, path, prepare, done]
+        {
+            FileToStore file;
+            if (prepare(file))
+            {
+                done(UploadFile(path, file.title, octetMime, file.parentId, file.fileId));
+            }
+        });
+}
+
+void TestCloud::RunQueue(const Stop &stop)
+{
+    std::vector<std::function<void()>> queue;
+    queue.swap(m_queue);
+    for (const std::function<void()> &request : queue)
+    {
+        if (stop())
+        {
+            break;
+        }
+        request();
+    }
+}
+
+unsigned int TestCloud::Running() const
+{
+    return 0;
+}
+
+bool TestCloud::IsFull() const
+{
+    return false;
+}
+
+Failure TestCloud::LastFailure() const
+{
+    return Failure::Refused;
+}
+
+Json TestCloud::Describe(const std::string &id) const
+{
+    const TestCloudItem &item = m_items.at(id);
+    Json parent;
+    parent.Add("id", Json(item.parentId));
+    Json described;
+    described.Add("id", Json(id));
+    described.Add("title", Json(item.title));
+    described.Add("mimeType", Json(item.mimeType));
+    described.Add("parents", Json(Json::Array{parent}));
+    described.Add("modifiedDate", Json(Now()));
+    if (item.mimeType != folderMime)
+    {
+        described.Add("md5Checksum", Json(ContentDigest(item.content)));
+        described.Add("fileSize", Json(std::to_string(item.content.size())));
+    }
+    return described;
+}
+
+Json TestCloud::Create(const TestCloudItem &item)
+{
+    const std::string id = Store(item);
+    ++m_creates;
+    if (m_createsUntilLostAnswer == 0)
+    {
+        m_createsUntilLostAnswer = -1;
+        return Json();
+    }
+    if (m_createsUntilLostAnswer > 0)
+    {
+        --m_createsUntilLostAnswer;
+    }
+    return Describe(id);
+}

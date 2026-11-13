@@ -31,6 +31,51 @@ jobs:
       contents: read
     uses: ./.github/workflows/package.yml
 
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Sync tests on the PC
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libjson-c-dev
+          make -C tests test
+
+  big-endian-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      # json-c for the big-endian build, pinned by hash.
+      JSON_C_URL: https://github.com/json-c/json-c/archive/refs/tags/json-c-0.18-20240915.tar.gz
+      JSON_C_SHA256: 3112c1f25d39eca661fe3fc663431e130cc6e2f900c081738317fba49d29e298
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Big-endian compiler and qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-powerpc64-linux-gnu qemu-user
+      - name: json-c for big-endian
+        run: |
+          curl -fsSL "$JSON_C_URL" -o /tmp/json-c.tar.gz
+          echo "$JSON_C_SHA256  /tmp/json-c.tar.gz" | sha256sum -c -
+          mkdir /tmp/json-c && tar xzf /tmp/json-c.tar.gz -C /tmp/json-c --strip-components=1
+          cmake -S /tmp/json-c -B /tmp/json-c/build -DCMAKE_C_COMPILER=powerpc64-linux-gnu-gcc \
+            -DCMAKE_SYSTEM_NAME=Linux -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF \
+            -DDISABLE_EXTRA_LIBS=ON -DDISABLE_WERROR=ON -DBUILD_APPS=OFF \
+            -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX=/tmp/json-c-ppc64
+          cmake --build /tmp/json-c/build --target install
+      - name: Sync tests on a big-endian CPU (the PS3's byte order)
+        run: make -C tests test CROSS=powerpc64-linux-gnu- RUN=qemu-ppc64 JSON_C=/tmp/json-c-ppc64
+
   actionlint:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
