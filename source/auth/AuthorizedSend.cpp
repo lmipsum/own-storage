@@ -11,11 +11,11 @@ namespace
 const int kAttempts = 5;
 const unsigned long long kFirstWaitMicroseconds = 1000000;
 
-/** True for a status that may pass on a later attempt. */
-bool IsTransient(long status)
+/** True for a status that may pass on a later attempt, as retry allows. */
+bool IsTransient(long status, Retry retry)
 {
     // Google asks clients to retry rate limits and server errors with exponential backoff.
-    return status == -1 || status == 429 || status >= 500;
+    return (status == -1 && retry == Retry::AlsoUnanswered) || status == 429 || status >= 500;
 }
 
 HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::string &token)
@@ -27,7 +27,7 @@ HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::stri
 } // namespace
 
 long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
-                    const Request &request)
+                    const Request &request, Retry retry)
 {
     bool refreshed = false;
     unsigned long long wait = kFirstWaitMicroseconds;
@@ -44,7 +44,7 @@ long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
             }
             continue;
         }
-        if (!IsTransient(status) || attempt == kAttempts)
+        if (!IsTransient(status, retry) || attempt == kAttempts)
         {
             return status;
         }

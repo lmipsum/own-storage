@@ -74,6 +74,13 @@ const std::string remoteJournal = APP_DIR "remote.journal";
 const std::string userClientFile = APP_DIR "client.json";
 const std::string queryFields =
     "items(fileSize,id,md5Checksum,mimeType,modifiedDate,parents/id,title)";
+// What Drive answers about a file it has just stored.
+const std::string uploadedFileFields = "fileSize,id,md5Checksum,modifiedDate,parents/id";
+// Drive takes metadata and content in one request up to 5 MB; bigger files go up in a
+// resumable session.
+const long multipartUploadLimit = 5 * 1024 * 1024;
+// Separates metadata and content in a multipart upload; a file that holds it goes up resumable.
+const std::string multipartBoundary = "own_storage_part_7d1c4f0b9a2e";
 // The folder in the user's Drive that holds every backup.
 const std::string driveFolderName = "Own Storage";
 // remote.json status of an entry whose creation on Drive started but was not recorded.
@@ -800,6 +807,74 @@ void showDriveFullDialog()
 }
 
 /**
+ * Reads a whole file.
+ * @param path the file
+ * @param text receives the content
+ * @return false when the file cannot be read
+ */
+bool readWholeFile(const std::string &path, std::string &text)
+{
+    std::ifstream file(path.c_str(), std::ios::binary);
+    if (!file)
+    {
+        return false;
+    }
+    std::ostringstream content;
+    content << file.rdbuf();
+    text = content.str();
+    return true;
+}
+
+/**
+ * Creates or updates a file on Drive with its metadata and content in one request.
+ * @param meta the file's metadata as JSON
+ * @param mimeType the content's type
+ * @param content the whole file
+ * @param fileId the Drive file to update; empty to create a new one
+ * @param path the local file, for the progress bar
+ * @return the stored file; without "id" when the request failed
+ */
+Json uploadMultipart(const std::string &meta, const std::string &mimeType,
+                     const std::string &content, const std::string &fileId, const std::string &path)
+{
+    const std::string body = "--" + multipartBoundary +
+                             "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + meta +
+                             "\r\n--" + multipartBoundary + "\r\nContent-Type: " + mimeType +
+                             "\r\n\r\n" + content + "\r\n--" + multipartBoundary + "--\r\n";
+    HttpClient::Headers headers;
+    headers.push_back("Content-Type: multipart/related; boundary=" + multipartBoundary);
+    headers.push_back("Expect:");
+    const std::string url = "https://www.googleapis.com/upload/drive/v2/files" +
+                            (fileId.empty() ? std::string() : "/" + fileId) +
+                            "?uploadType=multipart&fields=" + http.Escape(uploadedFileFields);
+
+    msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
+    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, path.c_str());
+
+    std::string reply;
+    // A create sent twice makes two files, so it is not sent again when its answer is lost;
+    // the entry stays in creatingStatus and the next run looks for the file instead.
+    const long ret = SendAuthorized(
+        googleAuth, headers,
+        [&](const HttpClient::Headers &all)
+        {
+            return fileId.empty() ? http.Post(url, body, all, reply)
+                                  : http.Put(url, body, all, reply);
+        },
+        fileId.empty() ? Retry::OnlyAnswered : Retry::AlsoUnanswered);
+    if (!HttpClient::Succeeded(ret))
+    {
+        recordUploadFailure("uploadMultipart: Could not upload file", ret, reply);
+        return Json();
+    }
+    msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, 100);
+
+    const Json obj = Json::Parse(reply);
+    debugPrintf("Resource id is %s\n", obj["id"].Str().c_str());
+    return obj;
+}
+
+/**
  * Uploads a file to Google Drive
  * @param path the local file path
  * @param filename the name of the file with extension
@@ -832,6 +907,13 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
 
     std::string meta = constructMetaData(filename, mimeType, parentId);
 
+    std::string content;
+    if (entry.st_size <= multipartUploadLimit && readWholeFile(path, content) &&
+        content.find(multipartBoundary) == std::string::npos)
+    {
+        return uploadMultipart(meta, mimeType, content, fileId, path);
+    }
+
     std::string resp;
 
     std::string postUrl;
@@ -839,15 +921,14 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
     if (fileId == "")
     {
         postUrl = "https://www.googleapis.com/upload/drive/v2/files?uploadType=resumable&fields=" +
-                  http.Escape("fileSize,id,md5Checksum,modifiedDate,parents/id");
+                  http.Escape(uploadedFileFields);
         ret = SendAuthorized(googleAuth, hdr, [&](const HttpClient::Headers &headers)
                              { return http.Post(postUrl, meta, headers, resp); });
     }
     else
     {
         postUrl = "https://www.googleapis.com/upload/drive/v2/files/" + fileId +
-                  "?uploadType=resumable&fields=" +
-                  http.Escape("fileSize,id,md5Checksum,modifiedDate,parents/id");
+                  "?uploadType=resumable&fields=" + http.Escape(uploadedFileFields);
         ret = SendAuthorized(googleAuth, hdr, [&](const HttpClient::Headers &headers)
                              { return http.Put(postUrl, meta, headers, resp); });
     }
