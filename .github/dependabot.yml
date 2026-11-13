@@ -7,6 +7,9 @@ updates:
     target-branch: "dev"
     schedule:
       interval: "weekly"
+    # The repository's commit types; scripts/check-commits.py lets these through.
+    commit-message:
+      prefix: "build"
     groups:
       github-actions:
         patterns: ["*"]
