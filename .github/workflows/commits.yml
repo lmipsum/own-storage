@@ -1,0 +1,56 @@
+name: commits
+
+# Apart from ci, so that editing a pull request's title or description checks it again without
+# rebuilding the package.
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions: {}
+
+# A pull request's newer run makes the older one moot; every push gets a run of its own.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  commits:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Commit messages and authors follow the repository's rules
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          FORCED: ${{ github.event.forced }}
+          AFTER: ${{ github.sha }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            if [ "$BASE_REF" = master ] && [ "$HEAD_REF" = dev ]; then
+              # A release merges commits that dev has checked already; only their authors count.
+              python3 scripts/check-commits.py --authors-only "$BASE_SHA..$HEAD_SHA"
+            elif [ "$PR_AUTHOR" != "dependabot[bot]" ]; then
+              # The title and description become the squashed commit.
+              printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" | python3 scripts/check-commits.py --message -
+            fi
+          elif [ "$FORCED" != true ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            python3 scripts/check-commits.py "$BEFORE..$AFTER"
+          else
+            # A new branch, or a history rewritten on purpose: the pushed commit alone.
+            python3 scripts/check-commits.py -1 "$AFTER"
+          fi
