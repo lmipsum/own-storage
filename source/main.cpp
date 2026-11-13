@@ -531,35 +531,31 @@ bool isPendingCreation(const Json &resource)
 }
 
 /**
- * Finds the Drive id of the folder that holds an entry.
- * @param folderName the parent folder's title
+ * Finds the Drive id of the folder that holds an entry: the Own Storage folder, or the folder
+ * entry of the directory the entry is in. A title alone is not enough, as two profiles can hold
+ * a save of the same name.
+ * @param entry the remote.json entry
  * @return the folder's id; "not_found" while the folder does not exist on Drive yet
  */
-std::string getParentIdByFolderName(const std::string &folderName)
+std::string getParentId(const Json &entry)
 {
-    std::string result = "not_found";
-    if (folderName == driveFolderName)
+    if (entry["parentFolder"].Str() == driveFolderName)
     {
-        result = config.rootFolderId;
+        return config.rootFolderId;
     }
-    else
+    const std::string path = entry["path"].Str();
+    const std::string directory = path.substr(0, path.rfind('/'));
+    const u32 remSize = remoteResourceRoot["data"].AsArray().size();
+    for (u32 i = 0; i < remSize; i++)
     {
-        const u32 remSize = remoteResourceRoot["data"].AsArray().size();
-        for (u32 i = 0; i < remSize; i++)
+        const Json resource = remoteResourceRoot["data"][i];
+        if (resource["mimeType"].Str() == folderMime && resource["path"].Str() == directory &&
+            !isPendingCreation(resource))
         {
-            const Json resource = remoteResourceRoot["data"][i];
-            if (resource["mimeType"].Str() == folderMime && resource["title"].Str() == folderName &&
-                !isPendingCreation(resource))
-            {
-                result = resource["id"].Str();
-            }
+            return resource["id"].Str();
         }
     }
-
-    debugPrintf("getParentIdByFolderName: Returning Parent id %s for folder %s\n", result.c_str(),
-                folderName.c_str());
-
-    return result;
+    return "not_found";
 }
 
 /**
@@ -1050,7 +1046,7 @@ void uploadChanges()
             {
                 continue;
             }
-            const std::string parentId = getParentIdByFolderName(resource["parentFolder"].Str());
+            const std::string parentId = getParentId(resource);
             if (parentId != "not_found")
             {
                 queueFolder(queue, i, parentId, progress);
@@ -1072,7 +1068,7 @@ void uploadChanges()
         if ((isPendingCreation(resource) || resource["status"].Str() == "update") &&
             resource["mimeType"].Str() != folderMime)
         {
-            const std::string parentId = getParentIdByFolderName(resource["parentFolder"].Str());
+            const std::string parentId = getParentId(resource);
             if (parentId != "not_found")
             {
                 files.push_back(std::make_pair(i, parentId));
