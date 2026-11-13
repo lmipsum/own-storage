@@ -42,18 +42,20 @@ class GoogleDrive
     /**
      * The first item a search finds.
      * @param query the search, in the Drive v2 query language
-     * @return the item; without "id" when nothing matches or the request fails
+     * @param item receives the item; without "id" when nothing matches
+     * @return false when the search failed, so whether the item exists is not known
      */
-    Json FindFirst(const std::string &query);
+    bool FindFirst(const std::string &query, Json &item);
     /**
      * The item of a title and type in a folder, unless it is trashed.
      * @param title the item's title
      * @param mimeType the item's type
      * @param parentId the folder that holds it
-     * @return the item; without "id" when there is none
+     * @param item receives the item; without "id" when there is none
+     * @return false when the search failed, so whether the item exists is not known
      */
-    Json FindInFolder(const std::string &title, const std::string &mimeType,
-                      const std::string &parentId);
+    bool FindInFolder(const std::string &title, const std::string &mimeType,
+                      const std::string &parentId, Json &item);
     /**
      * Creates a folder.
      * @param title the folder's name

@@ -28,7 +28,7 @@ class HttpClient
               std::string &body);
     long Put(const std::string &url, const std::string &data, const Headers &headers,
              std::string &body);
-    /** Saves the response body to path; follows redirects. */
+    /** Saves the response body to path; follows redirects. A failed download leaves no file. */
     long Download(const std::string &url, const Headers &headers, const std::string &path,
                   Progress progress);
     /** Sends the file at path as the body of a PUT, read as it goes. */

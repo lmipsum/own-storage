@@ -146,6 +146,11 @@ long HttpClient::Download(const std::string &url, const Headers &headers, const 
     ReportProgress(m_curl, progress);
     const long status = Perform(headers);
     std::fclose(file);
+    // The file holds an error page or a part of the content, which must not pass for the file.
+    if (!Succeeded(status))
+    {
+        std::remove(path.c_str());
+    }
     return status;
 }
 

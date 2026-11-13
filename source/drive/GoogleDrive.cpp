@@ -23,6 +23,25 @@ const char kCreatedFolderFields[] = "id,modifiedDate,parents/id";
 // Enough of an unexpected reply to recognise it in the debug log.
 const std::size_t kMaxLoggedReplyLength = 200;
 
+/**
+ * Quotes a value for the Drive query language, where ' ends a string and \ escapes.
+ * @param value the text to search for
+ * @return the value between single quotes, with \ and ' escaped
+ */
+std::string QuoteQueryValue(const std::string &value)
+{
+    std::string quoted = "'";
+    for (const char c : value)
+    {
+        if (c == '\\' || c == '\'')
+        {
+            quoted += '\\';
+        }
+        quoted += c;
+    }
+    return quoted + "'";
+}
+
 /** The first reason in a Drive error object, or "" when there is none. */
 std::string ReadFirstErrorReason(const Json &error)
 {
@@ -42,8 +61,9 @@ GoogleDrive::GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, const Transfe
 {
 }
 
-Json GoogleDrive::FindFirst(const std::string &query)
+bool GoogleDrive::FindFirst(const std::string &query, Json &item)
 {
+    item = Json();
     const std::string url = std::string(kFilesUrl) + "?q=" + m_http.Escape(query) +
                             "&fields=" + m_http.Escape(kFoundItemFields);
     std::string reply;
@@ -54,16 +74,22 @@ Json GoogleDrive::FindFirst(const std::string &query)
     {
         debugPrintf("FindFirst: HTTP Server Error...%ld %s\n", status,
                     DescribeDriveError(reply).c_str());
-        return Json();
+        return false;
     }
     const Json::Array items = Json::Parse(reply)["items"].AsArray();
-    return items.empty() ? Json() : items.front();
+    if (!items.empty())
+    {
+        item = items.front();
+    }
+    return true;
 }
 
-Json GoogleDrive::FindInFolder(const std::string &title, const std::string &mimeType,
-                               const std::string &parentId)
+bool GoogleDrive::FindInFolder(const std::string &title, const std::string &mimeType,
+                               const std::string &parentId, Json &item)
 {
-    return FindFirst("mimeType='" + mimeType + "' and " + BuildTitleInFolderQuery(title, parentId));
+    return FindFirst("mimeType=" + QuoteQueryValue(mimeType) + " and " +
+                         BuildTitleInFolderQuery(title, parentId),
+                     item);
 }
 
 Json GoogleDrive::CreateFolder(const std::string &title, const std::string &parentId)
@@ -280,7 +306,8 @@ bool GoogleDrive::IsFull() const
 
 std::string BuildTitleInFolderQuery(const std::string &title, const std::string &parentId)
 {
-    return "trashed=false and title='" + title + "' and '" + parentId + "' in parents";
+    return "trashed=false and title=" + QuoteQueryValue(title) + " and " +
+           QuoteQueryValue(parentId) + " in parents";
 }
 
 std::string BuildMetadata(const std::string &title, const std::string &mimeType,

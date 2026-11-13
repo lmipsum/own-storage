@@ -115,6 +115,7 @@ std::atomic<int> syncing(0);
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then run Own Storage again.";
+const char driveUnreachableMessage[] = "Cannot reach Google Drive. Check the network.";
 const unsigned int dialogPollMicroseconds = 100000;
 
 // A full remote.json save costs about 0.2 s on the console, so changes go to the journal and
@@ -307,26 +308,40 @@ void downloadDirectory(std::string path)
 
 /**
  * Downloads remote.json, the state of the backup on Drive, and reads it.
- * @return the state; empty when Drive has no remote.json or it cannot be read
+ * @param state receives the state; empty when Drive has no remote.json
+ * @return false when Drive could not be asked, or its remote.json could not be downloaded or read
  */
-Json downloadRemoteState()
+bool downloadRemoteState(Json &state)
 {
-    const Json remoteJson = drive.FindInFolder("remote.json", jsonMime, config.rootFolderId);
+    state = Json();
+    Json remoteJson;
+    if (!drive.FindInFolder("remote.json", jsonMime, config.rootFolderId, remoteJson))
+    {
+        return false;
+    }
     if (!remoteJson.Has("id"))
     {
         debugPrintf("downloadRemoteState: there is no remote.json on Google Drive\n");
-        return Json();
+        return true;
     }
     config.remoteJsonId = remoteJson["id"].Str();
     debugPrintf("Downloading remote.json from Google Drive with id %s\n",
                 config.remoteJsonId.c_str());
     if (!drive.DownloadFile(config.remoteJsonId, remoteResourceFile))
     {
-        return Json();
+        return false;
     }
     // A journal left on disk belongs to the state the download has just replaced.
     std::remove(remoteJournal.c_str());
-    return Json::Load(remoteResourceFile);
+    state = Json::Load(remoteResourceFile);
+    if (!state.Has("data"))
+    {
+        // Left on disk, the next run would take it for its own state.
+        std::remove(remoteResourceFile.c_str());
+        state = Json();
+        return false;
+    }
+    return true;
 }
 
 void downloadChanges()
@@ -493,6 +508,16 @@ void showDriveFullDialog()
 }
 
 /**
+ * Ends the sync early because Drive did not answer, and tells the user, who quits with X.
+ */
+void stopSyncUnreachable()
+{
+    msgDialogAbort();
+    showMessage(driveUnreachableMessage);
+    syncing = 0;
+}
+
+/**
  * Whether an entry still has to be created on Drive, including one whose creation an earlier
  * run started but did not record.
  * @param resource the remote.json entry
@@ -637,30 +662,39 @@ void markCreating(u32 index)
 }
 
 /**
- * The Drive item an earlier, interrupted run created for an entry.
+ * Looks for the Drive item an earlier, interrupted run created for an entry.
  * @param resource the remote.json entry
  * @param parentId the Drive folder that holds the item
- * @return the item; without "id" when the entry is not in creatingStatus or Drive has no such item
+ * @param item receives the item; without "id" when the entry is not in creatingStatus or Drive
+ * has no such item
+ * @return false when Drive could not be asked, so the entry must not be created now
  */
-Json findInterruptedCreation(const Json &resource, const std::string &parentId)
+bool findInterruptedCreation(const Json &resource, const std::string &parentId, Json &item)
 {
+    item = Json();
     if (resource["status"].Str() != creatingStatus)
     {
-        return Json();
+        return true;
     }
     // Drive may store an uploaded file under another type than the one sent, so a file is found
     // by not being a folder.
     const std::string typeCondition = resource["mimeType"].Str() == folderMime
                                           ? "mimeType='" + folderMime + "'"
                                           : "mimeType!='" + folderMime + "'";
-    const Json item = drive.FindFirst(typeCondition + " and " +
-                                      BuildTitleInFolderQuery(resource["title"].Str(), parentId));
+    if (!drive.FindFirst(typeCondition + " and " +
+                             BuildTitleInFolderQuery(resource["title"].Str(), parentId),
+                         item))
+    {
+        debugPrintf("findInterruptedCreation: %s left for the next run\n",
+                    resource["path"].Str().c_str());
+        return false;
+    }
     if (item.Has("id"))
     {
         debugPrintf("findInterruptedCreation: %s is already on Drive from an interrupted run\n",
                     resource["path"].Str().c_str());
     }
-    return item;
+    return true;
 }
 
 /**
@@ -724,14 +758,19 @@ void recordFile(u32 index, const std::string &parentId, const Json &file)
  * @param parentId the Drive folder that holds it
  * @param progress the bar to move when the stored file is taken over as it is
  * @param fileId receives the Drive file to update, or "" when a new one is to be created
- * @return true when Drive holds the file as it is now, so nothing needs to be sent
+ * @return true when nothing is to be sent: Drive holds the file as it is now, or Drive could not
+ * be asked whether it does
  */
 bool adoptInterruptedFile(u32 index, const std::string &parentId, UploadProgress &progress,
                           std::string &fileId)
 {
     const Json resource = remoteResourceRoot["data"][index];
     fileId = resource["status"].Str() == "update" ? resource["id"].Str() : std::string();
-    const Json found = findInterruptedCreation(resource, parentId);
+    Json found;
+    if (!findInterruptedCreation(resource, parentId, found))
+    {
+        return true;
+    }
     if (!found.Has("id"))
     {
         return false;
@@ -767,7 +806,8 @@ void showRequestsInProgress(unsigned int running, const char *kind, const std::s
  * @param progress the bar to move when the folder is taken over
  * @param running how many requests the queue is sending, for the lower progress bar
  * @param request receives the request
- * @return false when the folder exists already and nothing needs to be sent
+ * @return false when nothing is to be sent: the folder exists already, or Drive could not be
+ * asked whether it does
  */
 bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress &progress,
                           unsigned int running, QueuedRequest &request)
@@ -775,7 +815,11 @@ bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress
     const Json resource = remoteResourceRoot["data"][index];
     debugPrintf("prepareFolderRequest: Syncing directory %s under %s\n",
                 resource["title"].Str().c_str(), parentId.c_str());
-    const Json found = findInterruptedCreation(resource, parentId);
+    Json found;
+    if (!findInterruptedCreation(resource, parentId, found))
+    {
+        return false;
+    }
     if (found.Has("id"))
     {
         recordFolder(index, parentId, found);
@@ -1477,7 +1521,12 @@ int initCloudDrive(void *arg)
     msgDialogOpen2(dialog_type, "Performing Sync...", dialog_handler, NULL, NULL);
 
     // If user new but remote data exists
-    Json rootResource = drive.FindInFolder(driveFolderName, folderMime, "root");
+    Json rootResource;
+    if (!drive.FindInFolder(driveFolderName, folderMime, "root", rootResource))
+    {
+        stopSyncUnreachable();
+        return 0;
+    }
     if (rootResource.Has("id"))
     {
         config.rootFolderId = rootResource["id"].Str();
@@ -1502,6 +1551,8 @@ int initCloudDrive(void *arg)
         else
         {
             debugPrintf("Error creating root folder on Google Drive\n");
+            stopSyncUnreachable();
+            return 0;
         }
     }
 
@@ -1538,13 +1589,14 @@ int initCloudDrive(void *arg)
     if (userType == "two")
     {
         remoteResourceRoot = LoadWithBackup(remoteResourceFile, remoteBackup);
-        if (remoteResourceRoot.IsEmpty())
-        {
-            remoteResourceRoot = downloadRemoteState();
-        }
-        else
+        if (!remoteResourceRoot.IsEmpty())
         {
             replayJournal();
+        }
+        else if (!downloadRemoteState(remoteResourceRoot))
+        {
+            stopSyncUnreachable();
+            return 0;
         }
         // Without a data array, detectChanges has nowhere to add the new entries.
         if (!remoteResourceRoot.Has("data"))
@@ -1564,7 +1616,11 @@ int initCloudDrive(void *arg)
     // TODO: Revert to Second Time scenario
     if (userType == "three")
     {
-        remoteResourceRoot = downloadRemoteState();
+        if (!downloadRemoteState(remoteResourceRoot))
+        {
+            stopSyncUnreachable();
+            return 0;
+        }
         if (!remoteResourceRoot.IsEmpty())
         {
             downloadChanges();
