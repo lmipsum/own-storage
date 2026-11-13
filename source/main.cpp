@@ -105,8 +105,6 @@ const char driveRefusedMessage[] = "Google Drive refused a request. Run Own Stor
 const char localFileMessage[] =
     "Own Storage cannot write to the PS3 hard disk. Check the free space.";
 const char unknownUserMessage[] = "Own Storage cannot tell which user is logged in.";
-const char remoteStateDamagedMessage[] =
-    "The Own Storage state on Google Drive (remote.json) cannot be read.";
 const unsigned int dialogPollMicroseconds = 100000;
 
 int xmbopen = 0;
@@ -115,8 +113,6 @@ double progFuncLastProgress = 0.0;
 
 int appWidth = 1280;
 int appHeight = 720;
-
-std::string userType = "one";
 
 typedef struct
 {
@@ -356,22 +352,6 @@ void stopSyncAfterFailure()
 }
 
 /**
- * Ends the sync early when remote.json could not be read from Drive.
- * @param fetched how reading it ended; not RemoteStateFetch::Done
- */
-void stopSyncAfterFetch(RemoteStateFetch fetched)
-{
-    if (fetched == RemoteStateFetch::Damaged)
-    {
-        stopSync(remoteStateDamagedMessage);
-    }
-    else
-    {
-        stopSyncAfterFailure();
-    }
-}
-
-/**
  * Initiates the user authentication and is also responsible for getting device id
  * @return "authorization_complete" if authenticated and "not_found" if it fails
  */
@@ -444,7 +424,6 @@ int initCloudDrive(void *arg)
     }
     else
     {
-        userType = "two";
         debugPrintf("Refresh token read from the config file\n");
 
         googleAuth.SetRefreshToken(config.refreshToken);
@@ -467,7 +446,7 @@ int initCloudDrive(void *arg)
 
     // If user new but remote data exists
     Json rootResource;
-    if (!drive.FindInFolder(driveFolderName, ItemKind::Folder, "root", rootResource))
+    if (!drive.FindFolder(driveFolderName, "root", rootResource))
     {
         stopSyncAfterFailure();
         return 0;
@@ -477,8 +456,6 @@ int initCloudDrive(void *arg)
         config.rootFolderId = rootResource["id"].Str();
         debugPrintf("User has previous data on Google Drive with id %s\n",
                     config.rootFolderId.c_str());
-        if (userType == "one")
-            userType = "three";
     }
     else
     {
@@ -501,47 +478,16 @@ int initCloudDrive(void *arg)
         }
     }
 
-    SyncState remoteState(profile + "/remote.json", profile + "/remote.backup",
-                          profile + "/remote.journal");
+    // Without a state of its own every save starts without a base; the sync works it out.
+    SyncState state(profile + "/state.json", profile + "/state.backup");
+    state.Load();
     ProgressDialog progressDialog;
-    Sync sync(drive, remoteState, consoleStorage, progressDialog, config.rootFolderId, savedata);
-    const Json::Array localEntries =
-        SaveScanner(consoleStorage, savedata, profileMarkerSave).Scan();
-
-    // The first run, with nothing on Drive yet: everything the scan found goes up.
-    if (userType == "one")
+    Sync sync(drive, state, consoleStorage, progressDialog, config.rootFolderId, savedata,
+              profileMarkerSave, profile);
+    if (!sync.Run())
     {
-        remoteState.Reset(localEntries);
-        sync.Upload();
-    }
-
-    // A later run: what changed on the console goes up, and what is missing here comes down.
-    if (userType == "two")
-    {
-        if (!remoteState.Load())
-        {
-            const RemoteStateFetch fetched = sync.FetchState();
-            if (fetched != RemoteStateFetch::Done)
-            {
-                stopSyncAfterFetch(fetched);
-                return 0;
-            }
-        }
-        sync.DetectChanges(localEntries);
-        sync.Upload();
-        sync.Download();
-    }
-
-    // The first run on a console whose user has a backup on Drive: the backup comes down.
-    if (userType == "three")
-    {
-        const RemoteStateFetch fetched = sync.FetchState();
-        if (fetched != RemoteStateFetch::Done)
-        {
-            stopSyncAfterFetch(fetched);
-            return 0;
-        }
-        sync.Download();
+        stopSyncAfterFailure();
+        return 0;
     }
 
     msgDialogAbort();

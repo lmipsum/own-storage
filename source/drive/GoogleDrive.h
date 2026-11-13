@@ -40,8 +40,8 @@ class GoogleDrive : public CloudStorage
     GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, unsigned int parallel,
                 const TransferDisplay &display);
 
-    bool FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
-                      Json &item) override;
+    bool FindFolder(const std::string &title, const std::string &parentId, Json &folder) override;
+    bool ListFiles(const std::string &folderId, Json::Array &files) override;
     Json CreateFolder(const std::string &title, const std::string &parentId) override;
     /**
      * Uploads up to 5 MB in one request, a bigger file (or one that holds the multipart boundary)
@@ -51,10 +51,9 @@ class GoogleDrive : public CloudStorage
                     const std::string &parentId, const std::string &fileId) override;
     bool DownloadFile(const std::string &fileId, const std::string &localPath) override;
 
-    void QueueFolder(const PrepareFolder &prepare, const Done &done) override;
     /**
      * Sends the file as octetMime. A file that cannot go in one request waits until the queue is
-     * through and then goes up the resumable way; prepare runs only then.
+     * through and then goes up the resumable way.
      */
     void QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done) override;
     void RunQueue(const Stop &stop) override;
@@ -69,7 +68,7 @@ class GoogleDrive : public CloudStorage
     GoogleDrive &operator=(const GoogleDrive &) = delete;
 
     /**
-     * Builds the request that creates a folder, for the queue.
+     * Builds the request that creates a folder.
      * @param title the folder's name
      * @param parentId the folder to create it in
      * @return the request, without the bearer token
@@ -127,7 +126,7 @@ class GoogleDrive : public CloudStorage
     struct ResumableFile
     {
         std::string path;
-        PrepareFile prepare;
+        FileToStore file;
         Done done;
     };
 

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "json/Json.h"
 #include "sync/LocalStorage.h"
 
 #include <string>
+#include <vector>
 
 /** Where every user of the console is a directory, named by the user's number. */
 const std::string usersDirectory = "/dev_hdd0/home";
@@ -16,7 +16,21 @@ const std::string usersDirectory = "/dev_hdd0/home";
  */
 std::string SavedataDirectory(const std::string &user);
 
-/** Finds what there is to back up of one user: the save folders and their files. */
+/** A save folder on the console. */
+struct LocalSave
+{
+    /** The folder's name in the savedata directory. */
+    std::string name;
+    /** The files in it, sorted by name. */
+    std::vector<std::string> files;
+    /**
+     * Every file's name, size and time of change: it stays the same while the save does, so
+     * the save needs no reading to tell that.
+     */
+    std::string fingerprint;
+};
+
+/** Finds what there is to back up of one user: the save folders. */
 class SaveScanner
 {
   public:
@@ -28,13 +42,14 @@ class SaveScanner
     SaveScanner(const LocalStorage &storage, const std::string &savedata,
                 const std::string &ownSave);
 
+    /** The user's save folders, sorted by name. */
+    std::vector<LocalSave> Scan() const;
     /**
-     * Lists the user's saves as remote.json entries that are still to be uploaded: the save
-     * folders first, then the files in those. Their paths are relative to the savedata directory,
-     * so a backup belongs to the person, whatever number the user has on a console.
-     * @return the entries
+     * One save folder as it is now.
+     * @param name the folder's name in the savedata directory
+     * @return the save; without files when the folder is empty or not there
      */
-    Json::Array Scan() const;
+    LocalSave ScanSave(const std::string &name) const;
 
   private:
     const LocalStorage &m_storage;

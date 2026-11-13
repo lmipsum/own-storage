@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/ConsoleStorage.h"
 
-#include <stdio.h>
+#include "app/Files.h"
+
 #include <cstring>
+#include <fstream>
+#include <stdio.h>
 
 #include <mbedtls/md.h>
 #include <sys/file.h>
@@ -11,6 +14,8 @@ namespace
 {
 // The access a created directory gets: the owner writes, everyone reads.
 const s32 kDirectoryMode = 0755;
+// The access a written file gets: the owner writes, everyone reads.
+const s32 kFileMode = 0644;
 } // namespace
 
 std::vector<std::string> ConsoleStorage::List(const std::string &directory) const
@@ -34,20 +39,15 @@ std::vector<std::string> ConsoleStorage::List(const std::string &directory) cons
     return names;
 }
 
-bool ConsoleStorage::Exists(const std::string &path) const
-{
-    sysFSStat entry;
-    return sysFsStat(path.c_str(), &entry) == 0;
-}
-
-bool ConsoleStorage::ModifiedTime(const std::string &path, std::time_t &time) const
+bool ConsoleStorage::Status(const std::string &path, FileStatus &status) const
 {
     sysFSStat entry;
     if (sysFsStat(path.c_str(), &entry) != 0)
     {
         return false;
     }
-    time = entry.st_mtime;
+    status.size = entry.st_size;
+    status.modified = entry.st_mtime;
     return true;
 }
 
@@ -67,6 +67,29 @@ std::string ConsoleStorage::Md5(const std::string &path) const
         hex += digits;
     }
     return hex;
+}
+
+bool ConsoleStorage::Read(const std::string &path, std::string &content) const
+{
+    return ReadWholeFile(path, content);
+}
+
+bool ConsoleStorage::Write(const std::string &path, const std::string &content)
+{
+    std::ofstream file(path.c_str(), std::ios::binary | std::ios::trunc);
+    file.write(content.data(), content.size());
+    file.close();
+    if (!file)
+    {
+        return false;
+    }
+    sysFsChmod(path.c_str(), kFileMode);
+    return true;
+}
+
+void ConsoleStorage::Remove(const std::string &path)
+{
+    sysFsUnlink(path.c_str());
 }
 
 void ConsoleStorage::MakeDirectory(const std::string &path)

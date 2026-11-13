@@ -2,32 +2,9 @@
 #include "sync/SaveScanner.h"
 
 #include "app/DebugLog.h"
-#include "sync/CloudStorage.h"
-#include "sync/SyncState.h"
 
-#include <string>
-
-namespace
-{
-/**
- * An entry that is still to be uploaded; Drive's id and details are added once it is there.
- * @param title its name
- * @param path where it is in the savedata directory
- * @param mimeType folderMime for a directory, octetMime for a file
- * @param parentFolder the title of the folder that holds it on Drive
- */
-Json NewEntry(const std::string &title, const std::string &path, const std::string &mimeType,
-              const std::string &parentFolder)
-{
-    Json entry;
-    entry.Add("title", Json(title));
-    entry.Add("path", Json(path));
-    entry.Add("mimeType", Json(mimeType));
-    entry.Add("parentFolder", Json(parentFolder));
-    entry.Add("status", Json(uploadStatus));
-    return entry;
-}
-} // namespace
+#include <algorithm>
+#include <sstream>
 
 std::string SavedataDirectory(const std::string &user)
 {
@@ -40,24 +17,36 @@ SaveScanner::SaveScanner(const LocalStorage &storage, const std::string &savedat
 {
 }
 
-Json::Array SaveScanner::Scan() const
+std::vector<LocalSave> SaveScanner::Scan() const
 {
-    Json::Array entries;
-    Json::Array files;
-    for (const std::string &save : m_storage.List(m_savedata))
+    std::vector<std::string> names = m_storage.List(m_savedata);
+    std::sort(names.begin(), names.end());
+    std::vector<LocalSave> saves;
+    for (const std::string &name : names)
     {
-        if (save == m_ownSave)
+        if (name != m_ownSave)
         {
-            continue;
-        }
-        entries.push_back(NewEntry(save, save, folderMime, driveFolderName));
-        for (const std::string &file : m_storage.List(m_savedata + "/" + save))
-        {
-            files.push_back(NewEntry(file, save + "/" + file, octetMime, save));
+            saves.push_back(ScanSave(name));
         }
     }
-    debugPrintf("SaveScanner::Scan: %u save folders, %u files\n",
-                static_cast<unsigned>(entries.size()), static_cast<unsigned>(files.size()));
-    entries.insert(entries.end(), files.begin(), files.end());
-    return entries;
+    debugPrintf("SaveScanner::Scan: %u save folders\n", static_cast<unsigned int>(saves.size()));
+    return saves;
+}
+
+LocalSave SaveScanner::ScanSave(const std::string &name) const
+{
+    LocalSave save;
+    save.name = name;
+    const std::string folder = m_savedata + "/" + name;
+    save.files = m_storage.List(folder);
+    std::sort(save.files.begin(), save.files.end());
+    std::ostringstream fingerprint;
+    for (const std::string &file : save.files)
+    {
+        FileStatus status = {0, 0};
+        m_storage.Status(folder + "/" + file, status);
+        fingerprint << file << ' ' << status.size << ' ' << status.modified << '\n';
+    }
+    save.fingerprint = fingerprint.str();
+    return save;
 }

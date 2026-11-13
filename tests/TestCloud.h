@@ -25,13 +25,12 @@ struct TestCloudItem
 class TestCloud : public CloudStorage
 {
   public:
-    /** Reads and writes local files where the sync names them. */
-    typedef std::function<std::string(const std::string &path)> PathMap;
+    TestCloud();
 
-    explicit TestCloud(const PathMap &map);
-
-    /** Makes every search fail from now on, or work again. */
+    /** Makes every search and listing fail from now on, or work again. */
     void FailSearches(bool fail);
+    /** Makes every download from now on arrive with a byte too many, or whole again. */
+    void DamageDownloads(bool damage);
     /** The create after this many more creates is done, but its answer is lost. */
     void LoseAnswerOfCreate(int createsBefore);
     /** How many folders and files were created. */
@@ -48,14 +47,17 @@ class TestCloud : public CloudStorage
     std::string Tree(const std::string &parentId) const;
     /** Stores a file directly, as another program would. */
     std::string Store(const TestCloudItem &item);
+    /** Stores a file directly under an id, as an item that was there before would be. */
+    void Store(const std::string &id, const TestCloudItem &item);
+    /** Deletes an item directly, as the user would on the Drive website. */
+    void Delete(const std::string &id);
 
-    bool FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
-                      Json &item) override;
+    bool FindFolder(const std::string &title, const std::string &parentId, Json &folder) override;
+    bool ListFiles(const std::string &folderId, Json::Array &files) override;
     Json CreateFolder(const std::string &title, const std::string &parentId) override;
     Json UploadFile(const std::string &path, const std::string &title, const std::string &mimeType,
                     const std::string &parentId, const std::string &fileId) override;
     bool DownloadFile(const std::string &fileId, const std::string &localPath) override;
-    void QueueFolder(const PrepareFolder &prepare, const Done &done) override;
     void QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done) override;
     void RunQueue(const Stop &stop) override;
     unsigned int Running() const override;
@@ -68,10 +70,10 @@ class TestCloud : public CloudStorage
     /** Adds an item; its answer is lost when LoseAnswerOfCreate() says so. */
     Json Create(const TestCloudItem &item);
 
-    PathMap m_map;
     std::map<std::string, TestCloudItem> m_items;
     std::vector<std::function<void()>> m_queue;
     bool m_failSearches;
+    bool m_damageDownloads;
     int m_createsUntilLostAnswer;
     int m_creates;
     int m_updates;

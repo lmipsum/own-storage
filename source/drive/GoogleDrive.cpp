@@ -20,6 +20,11 @@ const char kFoundItemFields[] =
 // What Drive answers about a file it has just stored.
 const char kStoredFileFields[] = "fileSize,id,md5Checksum,modifiedDate,parents/id";
 const char kCreatedFolderFields[] = "id,modifiedDate,parents/id";
+// What a listing gives of each file, and how many files one request may give.
+const char kListedFields[] = "kind,items(id,md5Checksum,title),nextPageToken";
+// What a listing reply says it is; any other reply is not a listing, however it ends.
+const char kFileListKind[] = "drive#fileList";
+const char kListPageSize[] = "1000";
 // Enough of an unexpected reply to recognise it in the debug log.
 const std::size_t kMaxLoggedReplyLength = 200;
 // Drive takes metadata and content in one request up to 5 MB; bigger files go up in a
@@ -121,17 +126,50 @@ bool GoogleDrive::FindFirst(const std::string &query, Json &item)
     return true;
 }
 
-bool GoogleDrive::FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
-                               Json &item)
+bool GoogleDrive::FindFolder(const std::string &title, const std::string &parentId, Json &folder)
 {
-    // Drive may store an uploaded file under another type than the one sent, so a file is found
-    // by not being a folder.
-    const std::string typeCondition =
-        std::string(kind == ItemKind::Folder ? "mimeType=" : "mimeType!=") +
-        QuoteQueryValue(folderMime);
-    return FindFirst(typeCondition + " and trashed=false and title=" + QuoteQueryValue(title) +
-                         " and " + QuoteQueryValue(parentId) + " in parents",
-                     item);
+    return FindFirst("mimeType=" + QuoteQueryValue(folderMime) +
+                         " and trashed=false and title=" + QuoteQueryValue(title) + " and " +
+                         QuoteQueryValue(parentId) + " in parents",
+                     folder);
+}
+
+bool GoogleDrive::ListFiles(const std::string &folderId, Json::Array &files)
+{
+    files.clear();
+    const std::string query = QuoteQueryValue(folderId) + " in parents and trashed=false and " +
+                              "mimeType!=" + QuoteQueryValue(folderMime);
+    const std::string firstPage = std::string(kFilesUrl) + "?maxResults=" + kListPageSize +
+                                  "&q=" + m_http.Escape(query) +
+                                  "&fields=" + m_http.Escape(kListedFields);
+    std::string pageToken;
+    do
+    {
+        const std::string url =
+            pageToken.empty() ? firstPage : firstPage + "&pageToken=" + m_http.Escape(pageToken);
+        std::string reply;
+        const long status = SendAuthorized(
+            m_auth, HttpClient::Headers(),
+            [&](const HttpClient::Headers &withToken, std::string &body)
+            { return m_http.Get(url, withToken, body); }, reply);
+        if (!HttpClient::Succeeded(status))
+        {
+            NoteFailure("ListFiles: Could not list", status, reply);
+            return false;
+        }
+        const Json page = Json::Parse(reply);
+        if (page["kind"].Str() != kFileListKind)
+        {
+            NoteFailure("ListFiles: The answer is not a listing", status, reply);
+            return false;
+        }
+        for (const Json &file : page["items"].AsArray())
+        {
+            files.push_back(file);
+        }
+        pageToken = page["nextPageToken"].Str();
+    } while (!pageToken.empty());
+    return true;
 }
 
 Json GoogleDrive::CreateFolder(const std::string &title, const std::string &parentId)
@@ -160,7 +198,7 @@ QueuedRequest GoogleDrive::BuildFolderRequest(const std::string &title, const st
     request.headers.push_back("Expect:");
     request.body = BuildMetadata(title, folderMime, parentId);
     // A create sent twice makes two folders, so a lost answer is left to the next run, which
-    // looks up a folder in creatingStatus, and the Own Storage folder at every start.
+    // looks up the Own Storage folder at every start.
     request.retry = Retry::OnlyRefused;
     return request;
 }
@@ -334,40 +372,23 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
     return true;
 }
 
-void GoogleDrive::QueueFolder(const PrepareFolder &prepare, const Done &done)
-{
-    m_queue.Add(
-        [this, prepare](QueuedRequest &request)
-        {
-            FolderToCreate folder;
-            if (!prepare(folder))
-            {
-                return false;
-            }
-            request = BuildFolderRequest(folder.title, folder.parentId);
-            return true;
-        },
-        [this, done](long status, const std::string &reply)
-        { FinishQueued("QueueFolder: Could not create folder", status, reply, done); });
-}
-
 void GoogleDrive::QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done)
 {
     m_queue.Add(
         [this, path, prepare, done](QueuedRequest &request)
         {
+            FileToStore file;
+            if (!prepare(file))
+            {
+                return false;
+            }
             sysFSStat entry;
             std::string content;
             if (sysFsStat(path.c_str(), &entry) != 0 || entry.st_size > kMultipartUploadLimit ||
                 !ReadWholeFile(path, content) ||
                 content.find(kMultipartBoundary) != std::string::npos)
             {
-                m_resumable.push_back(ResumableFile{path, prepare, done});
-                return false;
-            }
-            FileToStore file;
-            if (!prepare(file))
-            {
+                m_resumable.push_back(ResumableFile{path, file, done});
                 return false;
             }
             request = BuildMultipartRequest(BuildMetadata(file.title, octetMime, file.parentId),
@@ -390,11 +411,8 @@ void GoogleDrive::RunQueue(const Stop &stop)
         {
             break;
         }
-        FileToStore file;
-        if (queued.prepare(file))
-        {
-            queued.done(UploadFile(queued.path, file.title, octetMime, file.parentId, file.fileId));
-        }
+        const FileToStore &file = queued.file;
+        queued.done(UploadFile(queued.path, file.title, octetMime, file.parentId, file.fileId));
     }
 }
 
