@@ -42,7 +42,7 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update -qq
-          # autoconf and patch rebuild SDL in the next steps.
+          # autoconf and patch rebuild SDL in the "SDL with room for flips" step.
           apt-get install -y -qq --no-install-recommends ca-certificates curl make libelf1t64 \
             autoconf patch
       - name: PSL1GHT SDK

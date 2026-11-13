@@ -303,18 +303,29 @@ Json findFirstRemoteItem(const std::string &query)
 }
 
 /**
+ * Builds the Drive search for an item that is not trashed, by its title and folder.
+ * @param title the item's title
+ * @param parentId the Drive folder that holds the item
+ * @return the query, in the Drive v2 query language
+ */
+std::string buildTitleInFolderQuery(const std::string &title, const std::string &parentId)
+{
+    return "trashed=false and title='" + title + "' and '" + parentId + "' in parents";
+}
+
+/**
  * The function checks if a resource exists on google drive and returns the item
  * @param resourceTitle the title of the resource to find
  * @param mimeType the mimetype of the resource
  * @param parentId the parentid of the resource's parent (if you don't know this, this function is
  * useless, unless you're searching under root)
- * @return the resource object, otherwise null
+ * @return the item; without "id" when there is none
  */
 Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType,
                                  std::string parentId)
 {
-    return findFirstRemoteItem("mimeType='" + mimeType + "' and trashed=false and title='" +
-                               resourceTitle + "' and '" + parentId + "' in parents");
+    return findFirstRemoteItem("mimeType='" + mimeType + "' and " +
+                               buildTitleInFolderQuery(resourceTitle, parentId));
 }
 
 /**
@@ -325,7 +336,7 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
  */
 Json loadWithBackup(const std::string &path, const std::string &backupPath)
 {
-    Json content = Json::Load(path);
+    const Json content = Json::Load(path);
     if (!content.IsEmpty())
     {
         return content;
@@ -887,17 +898,16 @@ Json findInterruptedCreation(const Json &resource, const std::string &parentId)
     {
         return Json();
     }
-    // Drive may store an uploaded file under another type than the one sent (an interrupted
-    // SND0.AT3 was not found by its type), so a file is found by not being a folder.
+    // Drive may store an uploaded file under another type than the one sent, so a file is found
+    // by not being a folder.
     const std::string typeCondition = resource["mimeType"].Str() == folderMime
                                           ? "mimeType='" + folderMime + "'"
                                           : "mimeType!='" + folderMime + "'";
-    Json item =
-        findFirstRemoteItem(typeCondition + " and trashed=false and title='" +
-                            resource["title"].Str() + "' and '" + parentId + "' in parents");
+    const Json item = findFirstRemoteItem(
+        typeCondition + " and " + buildTitleInFolderQuery(resource["title"].Str(), parentId));
     if (item.Has("id"))
     {
-        debugPrintf("uploadChanges: %s is already on Drive from an interrupted run\n",
+        debugPrintf("findInterruptedCreation: %s is already on Drive from an interrupted run\n",
                     resource["path"].Str().c_str());
     }
     return item;
@@ -956,7 +966,7 @@ void uploadChanges()
 
                 if (result != "not_found")
                 {
-                    debugPrintf("uploadChanges: Creating Directory with name %s under %s\n",
+                    debugPrintf("uploadChanges: Syncing directory %s under %s\n",
                                 resource["title"].Str().c_str(), result.c_str());
 
                     msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
@@ -1035,7 +1045,7 @@ void uploadChanges()
 
                 if (result != "not_found")
                 {
-                    debugPrintf("uploadChanges: Creating file with name %s under %s\n",
+                    debugPrintf("uploadChanges: Syncing file %s under %s\n",
                                 resource["title"].Str().c_str(), result.c_str());
 
                     const std::string path = resource["path"].Str();
@@ -1821,7 +1831,7 @@ int main(int argc, char **argv)
                     ioPadGetData(i, &paddata);
                     if (paddata.BTN_CROSS)
                     {
-                        debugPrintf("Quit Called...%d\n", exitapp.load());
+                        debugPrintf("Quit Called\n");
                         if (syncing == 0)
                         {
                             dialog_action = 2;
