@@ -56,6 +56,7 @@
 #include "auth/ClientCredentials.h"
 #include "drive/GoogleDrive.h"
 #include "app/Files.h"
+#include "app/Config.h"
 #include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
 #include "json/Json.h"
@@ -63,8 +64,6 @@
 #include "app/Paths.h"
 
 const std::string appPath = APP_DIR;
-const std::string appFile = APP_DIR "config.json";
-const std::string appFileBackup = APP_DIR "config.backup";
 const std::string localResourceFile = APP_DIR "local.json";
 const std::string remoteResourceFile = APP_DIR "remote.json";
 const std::string remoteBackup = APP_DIR "remote.backup";
@@ -245,88 +244,6 @@ void drawPendingMessage()
     draw_surface(screen, rendered, (appWidth - rendered->w) / 2,
                  (messageTopPercent * appHeight) / 100);
     SDL_FreeSurface(rendered);
-}
-
-/**
- * Writes a state file and makes it readable to all (0644).
- * @param content the state to write
- * @param path the file to write it to
- * @return false when the file could not be written
- */
-bool saveStateFile(const Json &content, const std::string &path)
-{
-    if (!content.Save(path))
-    {
-        debugPrintf("saveStateFile: could not write %s\n", path.c_str());
-        return false;
-    }
-    sysFsChmod(path.c_str(), 0644);
-    return true;
-}
-
-/**
- * Reads a state file, or its backup when the file is missing or cannot be parsed, and then
- * writes the backup's content over the spoiled file.
- * @param path the state file
- * @param backupPath the copy that every save writes next to it
- * @return the content; empty when neither can be read
- */
-Json loadWithBackup(const std::string &path, const std::string &backupPath)
-{
-    const Json content = Json::Load(path);
-    if (!content.IsEmpty())
-    {
-        return content;
-    }
-    // Every save writes the two files one after the other, so a power cut spoils at most one.
-    debugPrintf("%s is missing or damaged, reading %s\n", path.c_str(), backupPath.c_str());
-    const Json backup = Json::Load(backupPath);
-    if (!backup.IsEmpty())
-    {
-        // Left spoiled until the next save, the file would leave the backup as the only copy.
-        saveStateFile(backup, path);
-    }
-    return backup;
-}
-
-/**
- * Stores the current application configuration in the application config json
- */
-void storeConfig()
-{
-    Json appConfig;
-    appConfig.Add("refresh_token", Json(googleAuth.RefreshToken()));
-    appConfig.Add("root_id", Json(rootFolderId));
-    appConfig.Add("last_sync", Json(last_sync));
-    appConfig.Add("remote_fid", Json(remoteJsonId));
-
-    saveStateFile(appConfig, appFile);
-    saveStateFile(appConfig, appFileBackup);
-}
-
-/**
- * Utility function that reads the config file for refresh token etc
- * @return "not_found" if file not found or corrupt else the refresh_token
- */
-std::string isUserAuthenticated()
-{
-    std::string result = "not_found";
-    Json config = loadWithBackup(appFile, appFileBackup);
-
-    if (!config.IsEmpty())
-    {
-        debugPrintf("Config file not empty, returning refresh token...\n");
-        result = config["refresh_token"].Str();
-        rootFolderId = config.Has("root_id") ? config["root_id"].Str() : "root";
-        last_sync = config.Has("last_sync") ? config["last_sync"].Str() : "0";
-        remoteJsonId = config.Has("remote_fid") ? config["remote_fid"].Str() : "root";
-    }
-    else
-    {
-        debugPrintf("No readable config file, returning empty handed...\n");
-    }
-
-    return result;
 }
 
 int transferProgress(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow)
