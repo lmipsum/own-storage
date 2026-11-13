@@ -264,23 +264,17 @@ Json::Array getResourcesUnderFolder(std::string parentId)
 }
 
 /**
- * The function checks if a resource exists on google drive and returns the item
- * @param resourceTitle the title of the resource to find
- * @param mimeType the mimetype of the resource
- * @param parentId the parentid of the resource's parent (if you don't know this, this function is
- * useless, unless you're searching under root)
- * @return the resource object, otherwise null
+ * The first Drive item that a search finds.
+ * @param query the search, in the Drive v2 query language
+ * @return the item; without "id" when nothing matches or the request fails
  */
-Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType,
-                                 std::string parentId)
+Json findFirstRemoteItem(const std::string &query)
 {
     long ret;
     Json resourceObject;
 
     HttpClient::Headers hdr;
 
-    std::string query = "mimeType='" + mimeType + "' and trashed=false and title='" +
-                        resourceTitle + "' and '" + parentId + "' in parents";
     std::string resp;
 
     std::string url = "https://www.googleapis.com/drive/v2/files?q=" + http.Escape(query) +
@@ -291,7 +285,7 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("checkIfRemoteResourceExists: HTTP Server Error...%l\n", ret);
+        debugPrintf("findFirstRemoteItem: HTTP Server Error...%l\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
     }
@@ -306,6 +300,21 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
     }
 
     return resourceObject;
+}
+
+/**
+ * The function checks if a resource exists on google drive and returns the item
+ * @param resourceTitle the title of the resource to find
+ * @param mimeType the mimetype of the resource
+ * @param parentId the parentid of the resource's parent (if you don't know this, this function is
+ * useless, unless you're searching under root)
+ * @return the resource object, otherwise null
+ */
+Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType,
+                                 std::string parentId)
+{
+    return findFirstRemoteItem("mimeType='" + mimeType + "' and trashed=false and title='" +
+                               resourceTitle + "' and '" + parentId + "' in parents");
 }
 
 /**
@@ -858,18 +867,23 @@ void markCreating(u32 index)
 /**
  * The Drive item an earlier, interrupted run created for an entry.
  * @param resource the remote.json entry
- * @param mimeType the item's type on Drive
  * @param parentId the Drive folder that holds the item
  * @return the item; without "id" when the entry is not in creatingStatus or Drive has no such item
  */
-Json findInterruptedCreation(const Json &resource, const std::string &mimeType,
-                             const std::string &parentId)
+Json findInterruptedCreation(const Json &resource, const std::string &parentId)
 {
     if (resource["status"].Str() != creatingStatus)
     {
         return Json();
     }
-    Json item = checkIfRemoteResourceExists(resource["title"].Str(), mimeType, parentId);
+    // Drive may store an uploaded file under another type than the one sent (an interrupted
+    // SND0.AT3 was not found by its type), so a file is found by not being a folder.
+    const std::string typeCondition = resource["mimeType"].Str() == folderMime
+                                          ? "mimeType='" + folderMime + "'"
+                                          : "mimeType!='" + folderMime + "'";
+    Json item =
+        findFirstRemoteItem(typeCondition + " and trashed=false and title='" +
+                            resource["title"].Str() + "' and '" + parentId + "' in parents");
     if (item.Has("id"))
     {
         debugPrintf("uploadChanges: %s is already on Drive from an interrupted run\n",
@@ -939,7 +953,7 @@ void uploadChanges()
                     msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1,
                                                resource["path"].Str().c_str());
 
-                    Json obj = findInterruptedCreation(resource, folderMime, result);
+                    Json obj = findInterruptedCreation(resource, result);
                     if (!obj.Has("id"))
                     {
                         markCreating(i);
@@ -1014,7 +1028,7 @@ void uploadChanges()
                                 resource["title"].Str().c_str(), result.c_str());
 
                     const std::string path = resource["path"].Str();
-                    Json obj = findInterruptedCreation(resource, octetMime, result);
+                    Json obj = findInterruptedCreation(resource, result);
                     if (!obj.Has("id"))
                     {
                         markCreating(i);
