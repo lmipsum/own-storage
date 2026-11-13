@@ -40,6 +40,7 @@
 #include <net/netctl.h>
 #include <netinet/in.h>
 #include <algorithm>
+#include <atomic>
 
 #include <SDL/SDL.h>
 #include <SDL/SDL_image.h>
@@ -88,12 +89,21 @@ SDL_Surface *image = NULL;
 TTF_Font *Sans;
 SDL_Color GREY = {57, 57, 57};
 
-msgType dialog_type;
-static int dialog_action = 0;
+// The line the main loop draws over the background; the sync thread sets it through
+// showMessage, because SDL is not thread-safe and only the main thread may draw.
+const int messageTopPercent = 70;
+SDL_mutex *messageLock = NULL;
+std::string pendingMessage;
+bool messageChanged = false;
 
-int exitapp = 0;
+msgType dialog_type;
+
+// The sync thread and the main thread both use these flags.
+static std::atomic<int> dialog_action(0);
+std::atomic<int> exitapp(0);
+std::atomic<int> syncing(0);
+
 int xmbopen = 0;
-int syncing = 0;
 
 double progFuncLastProgress = 0.0;
 
@@ -174,6 +184,45 @@ void draw_surface(SDL_Surface *destination, SDL_Surface *source, int x, int y)
     offset.x = x;
     offset.y = y;
     SDL_BlitSurface(source, NULL, destination, &offset);
+}
+
+/**
+ * Hands a line of text to the main loop, which draws it over the background on its next frame.
+ * Safe to call from any thread.
+ * @param text the line to show in place of the previous one
+ */
+void showMessage(const std::string &text)
+{
+    SDL_LockMutex(messageLock);
+    pendingMessage = text;
+    messageChanged = true;
+    SDL_UnlockMutex(messageLock);
+}
+
+/**
+ * Redraws the background and the latest line from showMessage, if it changed. Main thread only.
+ */
+void drawPendingMessage()
+{
+    SDL_LockMutex(messageLock);
+    const bool changed = messageChanged;
+    const std::string text = pendingMessage;
+    messageChanged = false;
+    SDL_UnlockMutex(messageLock);
+
+    if (!changed)
+    {
+        return;
+    }
+    draw_surface(screen, image, 0, 0);
+    SDL_Surface *rendered = TTF_RenderText_Blended(Sans, text.c_str(), GREY);
+    if (rendered == NULL)
+    {
+        return;
+    }
+    draw_surface(screen, rendered, (appWidth - rendered->w) / 2,
+                 (messageTopPercent * appHeight) / 100);
+    SDL_FreeSurface(rendered);
 }
 
 /**
@@ -1175,12 +1224,8 @@ std::string authenticateUser()
 
     debugPrintf("Your User Code is:  %s \n", usercode.c_str());
 
-    std::string userCodePrint = "Your User Code is: " + usercode + "\n\n Please visit " +
-                                googleAuth.VerificationUrl() + " for approval";
-
-    SDL_Surface *codeAuthText = NULL;
-    codeAuthText = TTF_RenderText_Blended(Sans, userCodePrint.c_str(), GREY);
-    draw_surface(screen, codeAuthText, (appWidth - codeAuthText->w) / 2, (72 * appHeight) / 100);
+    showMessage("Your User Code is: " + usercode + "\n\n Please visit " +
+                googleAuth.VerificationUrl() + " for approval");
 
     u64 epochTime;
     u64 nsec;
@@ -1205,7 +1250,6 @@ std::string authenticateUser()
     {
         authStatus = "authorization_complete";
     }
-    SDL_FreeSurface(codeAuthText);
     return authStatus;
 }
 
@@ -1457,12 +1501,7 @@ int initCloudDrive(void *arg)
     if (!client.IsComplete())
     {
         // Without a client there is no sign-in; the user reads this and quits with X.
-        SDL_Surface *noClientText = TTF_RenderText_Blended(
-            Sans, "Cannot reach the Own Storage configuration. Check the network.", GREY);
-        draw_surface(screen, image, 0, 0);
-        draw_surface(screen, noClientText, (appWidth - noClientText->w) / 2,
-                     (70 * appHeight) / 100);
-        SDL_FreeSurface(noClientText);
+        showMessage("Cannot reach the Own Storage configuration. Check the network.");
         return 0;
     }
     googleAuth.SetClient(client);
@@ -1470,11 +1509,7 @@ int initCloudDrive(void *arg)
     debugPrintf("Checking if User is Authenticated...\n");
     std::string authStatus = isUserAuthenticated();
 
-    SDL_Surface *checkingAuthText = NULL;
-    checkingAuthText = TTF_RenderText_Blended(Sans, "Checking if User is authenticated...", GREY);
-    draw_surface(screen, image, 0, 0);
-    draw_surface(screen, checkingAuthText, (appWidth - checkingAuthText->w) / 2,
-                 (70 * appHeight) / 100);
+    showMessage("Checking if User is authenticated...");
 
     if (authStatus == "not_found")
     {
@@ -1499,14 +1534,7 @@ int initCloudDrive(void *arg)
 
     syncing = 1;
 
-    SDL_FreeSurface(checkingAuthText);
-
-    SDL_Surface *userAuthedText = NULL;
-    userAuthedText =
-        TTF_RenderText_Blended(Sans, "Syncing...Please DO NOT Quit or Shutdown the PS3!", GREY);
-    draw_surface(screen, image, 0, 0);
-    draw_surface(screen, userAuthedText, (appWidth - userAuthedText->w) / 2,
-                 (70 * appHeight) / 100);
+    showMessage("Syncing...Please DO NOT Quit or Shutdown the PS3!");
 
     msgDialogOpen2(dialog_type, "Performing Sync...", dialog_handler, NULL, NULL);
 
@@ -1619,8 +1647,6 @@ int initCloudDrive(void *arg)
 
     msgDialogAbort();
 
-    SDL_FreeSurface(userAuthedText);
-
     exitapp = 1;
 
     return 0;
@@ -1679,6 +1705,7 @@ int main(int argc, char **argv)
 
     Sans = TTF_OpenFont(FontPath, 20.0);
 
+    messageLock = SDL_CreateMutex();
     thread = SDL_CreateThread(initCloudDrive, NULL);
 
     sysUtilRegisterCallback(SYSUTIL_EVENT_SLOT0, sysevent_callback, NULL);
@@ -1702,7 +1729,7 @@ int main(int argc, char **argv)
                     ioPadGetData(i, &paddata);
                     if (paddata.BTN_CROSS)
                     {
-                        debugPrintf("Quit Called...%d\n", exitapp);
+                        debugPrintf("Quit Called...%d\n", exitapp.load());
                         if (syncing == 0)
                         {
                             dialog_action = 2;
@@ -1712,14 +1739,16 @@ int main(int argc, char **argv)
                 }
             }
         }
+        drawPendingMessage();
         SDL_Flip(screen);
     }
 
-    debugPrintf("The application exited...%d\n", exitapp);
+    debugPrintf("The application exited...%d\n", exitapp.load());
 
     msgDialogAbort();
 
     SDL_KillThread(thread);
+    SDL_DestroyMutex(messageLock);
     SDL_FreeSurface(image);
     SDL_FreeSurface(screen);
     TTF_CloseFont(Sans);
