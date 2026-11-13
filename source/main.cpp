@@ -72,6 +72,8 @@ const std::string queryFields =
     "items(fileSize,id,md5Checksum,mimeType,modifiedDate,parents/id,title)";
 // The folder in the user's Drive that holds every backup.
 const std::string driveFolderName = "Own Storage";
+// remote.json status of an entry whose creation on Drive started but was not recorded.
+const std::string creatingStatus = "creating";
 
 HttpClient http;
 GoogleDeviceAuth googleAuth(http);
@@ -827,6 +829,55 @@ void writeChangesToFile()
     debugPrintf("writeChangesToFile: Changes to remote.json written successfully\n");
 }
 
+std::string calculateMD5Checksum(const std::string &path);
+
+/**
+ * Whether an entry still has to be created on Drive, including one whose creation an earlier
+ * run started but did not record.
+ * @param resource the remote.json entry
+ * @return true when its status is "upload" or creatingStatus
+ */
+bool isPendingCreation(const Json &resource)
+{
+    const std::string status = resource["status"].Str();
+    return status == "upload" || status == creatingStatus;
+}
+
+/**
+ * Saves that an entry's creation on Drive is about to start. A run that ends before it records
+ * the answer leaves the entry in creatingStatus, so the next run looks for the item before
+ * creating it again.
+ * @param index the entry's position in remote.json
+ */
+void markCreating(u32 index)
+{
+    remoteResourceRoot["data"][index].Add("status", Json(creatingStatus));
+    writeChangesToFile();
+}
+
+/**
+ * The Drive item an earlier, interrupted run created for an entry.
+ * @param resource the remote.json entry
+ * @param mimeType the item's type on Drive
+ * @param parentId the Drive folder that holds the item
+ * @return the item; without "id" when the entry is not in creatingStatus or Drive has no such item
+ */
+Json findInterruptedCreation(const Json &resource, const std::string &mimeType,
+                             const std::string &parentId)
+{
+    if (resource["status"].Str() != creatingStatus)
+    {
+        return Json();
+    }
+    Json item = checkIfRemoteResourceExists(resource["title"].Str(), mimeType, parentId);
+    if (item.Has("id"))
+    {
+        debugPrintf("uploadChanges: %s is already on Drive from an interrupted run\n",
+                    resource["path"].Str().c_str());
+    }
+    return item;
+}
+
 /**
  * Uploads everything marked in remote resource Tree
  */
@@ -847,7 +898,7 @@ void uploadChanges()
     for (i = 0; i < remSize; i++)
     {
         Json resource = remoteResourceRoot["data"][i];
-        if (resource["status"].Str() == "upload" || resource["status"].Str() == "update")
+        if (isPendingCreation(resource) || resource["status"].Str() == "update")
         {
             totalProgress++;
         }
@@ -872,7 +923,7 @@ void uploadChanges()
 
         Json resource = remoteResourceRoot["data"][i];
 
-        if (resource["status"].Str() == "upload")
+        if (isPendingCreation(resource))
         {
             if (resource["mimeType"].Str() == folderMime)
             {
@@ -888,7 +939,12 @@ void uploadChanges()
                     msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1,
                                                resource["path"].Str().c_str());
 
-                    Json obj = uploadDirectory(resource["title"].Str(), result);
+                    Json obj = findInterruptedCreation(resource, folderMime, result);
+                    if (!obj.Has("id"))
+                    {
+                        markCreating(i);
+                        obj = uploadDirectory(resource["title"].Str(), result);
+                    }
 
                     if (!obj.Has("id"))
                     {
@@ -946,7 +1002,7 @@ void uploadChanges()
 
         Json resource = remoteResourceRoot["data"][i];
 
-        if (resource["status"].Str() == "upload")
+        if (isPendingCreation(resource))
         {
             if (resource["mimeType"].Str() != folderMime)
             {
@@ -957,8 +1013,19 @@ void uploadChanges()
                     debugPrintf("uploadChanges: Creating file with name %s under %s\n",
                                 resource["title"].Str().c_str(), result.c_str());
 
-                    Json obj = uploadFile(resource["path"].Str(), resource["title"].Str(),
-                                          octetMime, result);
+                    const std::string path = resource["path"].Str();
+                    Json obj = findInterruptedCreation(resource, octetMime, result);
+                    if (!obj.Has("id"))
+                    {
+                        markCreating(i);
+                        obj = uploadFile(path, resource["title"].Str(), octetMime, result);
+                    }
+                    else if (obj["md5Checksum"].Str() != calculateMD5Checksum(path))
+                    {
+                        // The interrupted upload may not hold the file's current content.
+                        obj = uploadFile(path, resource["title"].Str(), octetMime, result,
+                                         obj["id"].Str());
+                    }
 
                     if (!obj.Has("id"))
                     {
