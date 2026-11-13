@@ -66,6 +66,8 @@
 const std::string appPath = APP_DIR;
 const std::string localResourceFile = APP_DIR "local.json";
 const std::string remoteResourceFile = APP_DIR "remote.json";
+// remote.json's title on Drive.
+const std::string remoteStateTitle = "remote.json";
 const std::string remoteBackup = APP_DIR "remote.backup";
 // The remote.json entries changed since its last full save, one JSON object per line.
 const std::string remoteJournal = APP_DIR "remote.journal";
@@ -315,7 +317,7 @@ bool downloadRemoteState(Json &state)
 {
     state = Json();
     Json remoteJson;
-    if (!drive.FindInFolder("remote.json", jsonMime, config.rootFolderId, remoteJson))
+    if (!drive.FindInFolder(remoteStateTitle, ItemKind::File, config.rootFolderId, remoteJson))
     {
         return false;
     }
@@ -675,14 +677,9 @@ bool findInterruptedCreation(const Json &resource, const std::string &parentId, 
     {
         return true;
     }
-    // Drive may store an uploaded file under another type than the one sent, so a file is found
-    // by not being a folder.
-    const std::string typeCondition = resource["mimeType"].Str() == folderMime
-                                          ? "mimeType='" + folderMime + "'"
-                                          : "mimeType!='" + folderMime + "'";
-    if (!drive.FindFirst(typeCondition + " and " +
-                             BuildTitleInFolderQuery(resource["title"].Str(), parentId),
-                         item))
+    const ItemKind kind =
+        resource["mimeType"].Str() == folderMime ? ItemKind::Folder : ItemKind::File;
+    if (!drive.FindInFolder(resource["title"].Str(), kind, parentId, item))
     {
         debugPrintf("findInterruptedCreation: %s left for the next run\n",
                     resource["path"].Str().c_str());
@@ -826,14 +823,7 @@ bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress
         return false;
     }
     markCreating(index);
-    request.method = "POST";
-    request.url = "https://www.googleapis.com/drive/v2/files?fields=" +
-                  http.Escape("id,modifiedDate,parents/id");
-    request.headers.push_back("Content-Type: application/json");
-    request.headers.push_back("Expect:");
-    request.body = BuildMetadata(resource["title"].Str(), folderMime, parentId);
-    // A create sent twice makes two folders; see GoogleDrive::BuildMultipartRequest.
-    request.retry = Retry::OnlyRefused;
+    request = drive.BuildFolderRequest(resource["title"].Str(), parentId);
     showRequestsInProgress(running, "folders", resource["title"].Str());
     return true;
 }
@@ -856,7 +846,7 @@ void finishFolderRequest(u32 index, const std::string &parentId, UploadProgress 
                     DescribeDriveError(reply).c_str());
         return;
     }
-    debugPrintf("Folder id is %ld, %s\n", status, folder["id"].Str().c_str());
+    debugPrintf("finishFolderRequest: created %s\n", folder["id"].Str().c_str());
     recordFolder(index, parentId, folder);
     progress.Advance();
 }
@@ -942,7 +932,7 @@ void finishFileRequest(u32 index, const std::string &parentId, UploadProgress &p
         drive.NoteFailure("finishFileRequest: Could not upload file", status, reply);
         return;
     }
-    debugPrintf("Resource id is %s\n", file["id"].Str().c_str());
+    debugPrintf("finishFileRequest: stored %s\n", file["id"].Str().c_str());
     recordFile(index, parentId, file);
     progress.Advance();
 }
@@ -1006,7 +996,7 @@ void uploadFileOutsideQueue(u32 index, const std::string &parentId, UploadProgre
 void pushRemoteState()
 {
     Json stored;
-    if (!drive.FindInFolder("remote.json", jsonMime, config.rootFolderId, stored))
+    if (!drive.FindInFolder(remoteStateTitle, ItemKind::File, config.rootFolderId, stored))
     {
         debugPrintf("pushRemoteState: remote.json left for the next run\n");
         return;
@@ -1017,7 +1007,7 @@ void pushRemoteState()
     }
     debugPrintf("pushRemoteState: Uploading remote.json to Google Drive\n");
     // Without an id this creates remote.json; when the answer is lost, the next run finds it here.
-    drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, config.rootFolderId,
+    drive.UploadFile(remoteResourceFile, remoteStateTitle, jsonMime, config.rootFolderId,
                      stored["id"].Str());
 }
 
@@ -1525,7 +1515,7 @@ int initCloudDrive(void *arg)
 
     // If user new but remote data exists
     Json rootResource;
-    if (!drive.FindInFolder(driveFolderName, folderMime, "root", rootResource))
+    if (!drive.FindInFolder(driveFolderName, ItemKind::Folder, "root", rootResource))
     {
         stopSyncUnreachable();
         return 0;

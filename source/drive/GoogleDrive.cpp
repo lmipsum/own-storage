@@ -78,45 +78,49 @@ bool GoogleDrive::FindFirst(const std::string &query, Json &item)
     return true;
 }
 
-bool GoogleDrive::FindInFolder(const std::string &title, const std::string &mimeType,
-                               const std::string &parentId, Json &item)
+bool GoogleDrive::FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
+                               Json &item)
 {
-    return FindFirst("mimeType=" + QuoteQueryValue(mimeType) + " and " +
-                         BuildTitleInFolderQuery(title, parentId),
+    // Drive may store an uploaded file under another type than the one sent, so a file is found
+    // by not being a folder.
+    const std::string typeCondition =
+        std::string(kind == ItemKind::Folder ? "mimeType=" : "mimeType!=") +
+        QuoteQueryValue(folderMime);
+    return FindFirst(typeCondition + " and trashed=false and title=" + QuoteQueryValue(title) +
+                         " and " + QuoteQueryValue(parentId) + " in parents",
                      item);
 }
 
 Json GoogleDrive::CreateFolder(const std::string &title, const std::string &parentId)
 {
-    HttpClient::Headers headers;
-    headers.push_back("Content-Type: application/json");
-    headers.push_back("Expect:");
-    const std::string url =
-        std::string(kFilesUrl) + "?fields=" + m_http.Escape(kCreatedFolderFields);
-    const std::string meta = BuildMetadata(title, folderMime, parentId);
-
-    debugPrintf("Attempting folder creation on GDrive...\n");
+    const QueuedRequest request = BuildFolderRequest(title, parentId);
     std::string reply;
-    // A create sent twice makes two folders; the next run looks for the folder instead.
     const long status = SendAuthorized(
-        m_auth, headers, [&](const HttpClient::Headers &withToken, std::string &body)
-        { return m_http.Post(url, meta, withToken, body); }, reply, Retry::OnlyRefused);
-    if (!HttpClient::Succeeded(status))
+        m_auth, request.headers, [&](const HttpClient::Headers &withToken, std::string &body)
+        { return m_http.Post(request.url, request.body, withToken, body); }, reply, request.retry);
+    const Json folder = Json::Parse(reply);
+    if (!HttpClient::Succeeded(status) || !folder.Has("id"))
     {
         debugPrintf("CreateFolder: Could not create folder..%ld %s\n", status,
                     DescribeDriveError(reply).c_str());
         return Json();
     }
-    const Json folder = Json::Parse(reply);
-    if (folder.Has("id"))
-    {
-        debugPrintf("Folder id is %ld, %s\n", status, folder["id"].Str().c_str());
-    }
-    else
-    {
-        debugPrintf("Folder creation failed with status %ld\n", status);
-    }
+    debugPrintf("CreateFolder: created %s\n", folder["id"].Str().c_str());
     return folder;
+}
+
+QueuedRequest GoogleDrive::BuildFolderRequest(const std::string &title, const std::string &parentId)
+{
+    QueuedRequest request;
+    request.method = "POST";
+    request.url = std::string(kFilesUrl) + "?fields=" + m_http.Escape(kCreatedFolderFields);
+    request.headers.push_back("Content-Type: " + jsonMime);
+    request.headers.push_back("Expect:");
+    request.body = BuildMetadata(title, folderMime, parentId);
+    // A create sent twice makes two folders, so a lost answer is left to the next run, which
+    // looks up a folder in creatingStatus, and the Own Storage folder at every start.
+    request.retry = Retry::OnlyRefused;
+    return request;
 }
 
 Json GoogleDrive::UploadFile(const std::string &path, const std::string &title,
@@ -155,7 +159,7 @@ QueuedRequest GoogleDrive::BuildMultipartRequest(const std::string &meta,
                    multipartBoundary + "\r\nContent-Type: " + mimeType + "\r\n\r\n" + content +
                    "\r\n--" + multipartBoundary + "--\r\n";
     // A create sent twice makes two files, so it is not sent again when it may have been done;
-    // the entry stays in creatingStatus and the next run looks for the file instead.
+    // the caller looks for the file on the next run instead.
     request.retry = fileId.empty() ? Retry::OnlyRefused : Retry::AnyTransient;
     return request;
 }
@@ -184,7 +188,7 @@ Json GoogleDrive::UploadInOneRequest(const std::string &path, const std::string 
     m_display.end();
 
     const Json file = Json::Parse(reply);
-    debugPrintf("Resource id is %s\n", file["id"].Str().c_str());
+    debugPrintf("UploadInOneRequest: stored %s\n", file["id"].Str().c_str());
     return file;
 }
 
@@ -214,7 +218,8 @@ Json GoogleDrive::UploadResumable(const std::string &path, const std::string &me
         sessionReply);
     if (!HttpClient::Succeeded(sessionStatus))
     {
-        NoteFailure("UploadResumable: Could not pose meta data", sessionStatus, sessionReply);
+        NoteFailure("UploadResumable: Could not start the upload session", sessionStatus,
+                    sessionReply);
         return Json();
     }
 
@@ -243,7 +248,7 @@ Json GoogleDrive::UploadResumable(const std::string &path, const std::string &me
     const Json file = Json::Parse(reply);
     if (file.Has("id"))
     {
-        debugPrintf("Resource id is %s\n", file["id"].Str().c_str());
+        debugPrintf("UploadResumable: stored %s\n", file["id"].Str().c_str());
     }
     else
     {
@@ -271,13 +276,14 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
         return false;
     }
     const std::string downloadUrl = file["downloadUrl"].Str();
-    debugPrintf("Downlink is %s\n", downloadUrl.c_str());
 
     m_display.begin(localPath);
+    // The content goes to the file, so this reply stays empty.
+    std::string unusedReply;
     status = SendAuthorized(
         m_auth, HttpClient::Headers(), [&](const HttpClient::Headers &withToken, std::string &)
-        { return m_http.Download(downloadUrl, withToken, localPath, m_display.progress); }, reply);
-    debugPrintf("Return Code for file download is %ld\n", status);
+        { return m_http.Download(downloadUrl, withToken, localPath, m_display.progress); },
+        unusedReply);
     if (!HttpClient::Succeeded(status))
     {
         debugPrintf("DownloadFile: Could not download File..%ld\n", status);
@@ -298,12 +304,6 @@ void GoogleDrive::NoteFailure(const char *what, long status, const std::string &
 bool GoogleDrive::IsFull() const
 {
     return m_full;
-}
-
-std::string BuildTitleInFolderQuery(const std::string &title, const std::string &parentId)
-{
-    return "trashed=false and title=" + QuoteQueryValue(title) + " and " +
-           QuoteQueryValue(parentId) + " in parents";
 }
 
 std::string BuildMetadata(const std::string &title, const std::string &mimeType,

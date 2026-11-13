@@ -58,7 +58,7 @@ long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
         {
             return status;
         }
-        debugPrintf("Request failed with %ld, retrying in %llu ms\n", status, wait / 1000);
+        debugPrintf("SendAuthorized: status %ld, retrying in %llu ms\n", status, wait / 1000);
         sysUsleep(wait);
         wait *= 2;
     }

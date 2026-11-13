@@ -19,6 +19,13 @@ const long multipartUploadLimit = 5 * 1024 * 1024;
 // Separates metadata and content in a multipart upload; a file that holds it goes up resumable.
 const std::string multipartBoundary = "own_storage_part_7d1c4f0b9a2e";
 
+/** What FindInFolder looks for. */
+enum class ItemKind
+{
+    Folder,
+    File
+};
+
 /** What the app shows while GoogleDrive moves a file by itself. */
 struct TransferDisplay
 {
@@ -31,31 +38,30 @@ struct TransferDisplay
 };
 
 /**
- * Google Drive v2 for the signed-in user: searches, folders, and files sent and fetched one at
- * a time. Remembers when Drive refused an upload for lack of room.
+ * Google Drive v2 for the signed-in user: searches, folders, and files sent and fetched, or the
+ * requests for them built for AuthorizedQueue. Remembers when Drive refused an upload for lack
+ * of room.
  */
 class GoogleDrive
 {
   public:
+    /**
+     * @param http the connection for requests sent one by one
+     * @param auth the sign-in whose token every request carries
+     * @param display what the app shows while a file moves
+     */
     GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, const TransferDisplay &display);
 
     /**
-     * The first item a search finds.
-     * @param query the search, in the Drive v2 query language
-     * @param item receives the item; without "id" when nothing matches
-     * @return false when the search failed, so whether the item exists is not known
-     */
-    bool FindFirst(const std::string &query, Json &item);
-    /**
-     * The item of a title and type in a folder, unless it is trashed.
+     * The folder or file of a title in a folder, unless it is trashed.
      * @param title the item's title
-     * @param mimeType the item's type
+     * @param kind whether a folder or a file is looked for
      * @param parentId the folder that holds it
      * @param item receives the item; without "id" when there is none
      * @return false when the search failed, so whether the item exists is not known
      */
-    bool FindInFolder(const std::string &title, const std::string &mimeType,
-                      const std::string &parentId, Json &item);
+    bool FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
+                      Json &item);
     /**
      * Creates a folder.
      * @param title the folder's name
@@ -63,6 +69,13 @@ class GoogleDrive
      * @return the folder; without "id" when the request failed
      */
     Json CreateFolder(const std::string &title, const std::string &parentId);
+    /**
+     * Builds the request that creates a folder, for AuthorizedQueue.
+     * @param title the folder's name
+     * @param parentId the folder to create it in
+     * @return the request, without the bearer token
+     */
+    QueuedRequest BuildFolderRequest(const std::string &title, const std::string &parentId);
     /**
      * Uploads a local file: up to multipartUploadLimit bytes in one request, a bigger one (or one
      * that holds the multipart boundary) in a resumable session.
@@ -107,6 +120,14 @@ class GoogleDrive
     GoogleDrive(const GoogleDrive &) = delete;
     GoogleDrive &operator=(const GoogleDrive &) = delete;
 
+    /**
+     * The first item a search finds.
+     * @param query the search, in the Drive v2 query language
+     * @param item receives the item; without "id" when nothing matches
+     * @return false when the search failed, so whether the item exists is not known
+     */
+    bool FindFirst(const std::string &query, Json &item);
+
     /** Sends a file of up to multipartUploadLimit bytes with its metadata in one request. */
     Json UploadInOneRequest(const std::string &path, const std::string &meta,
                             const std::string &mimeType, const std::string &content,
@@ -120,14 +141,6 @@ class GoogleDrive
     TransferDisplay m_display;
     bool m_full;
 };
-
-/**
- * Builds the Drive search for an item that is not trashed, by its title and folder.
- * @param title the item's title
- * @param parentId the Drive folder that holds the item
- * @return the query, in the Drive v2 query language
- */
-std::string BuildTitleInFolderQuery(const std::string &title, const std::string &parentId);
 
 /**
  * Builds the metadata Drive needs to create an item.

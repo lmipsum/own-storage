@@ -4,6 +4,7 @@
 #include "net/HttpClient.h"
 
 #include <functional>
+#include <string>
 
 class GoogleDeviceAuth;
 

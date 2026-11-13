@@ -5,6 +5,7 @@
 #include "app/DebugLog.h"
 
 #include <algorithm>
+#include <utility>
 
 #include <sys/systime.h>
 
@@ -95,7 +96,7 @@ void AuthorizedQueue::Run(const Stop &stop)
                     }
                     else
                     {
-                        debugPrintf("HTTP request failed: %s\n",
+                        debugPrintf("AuthorizedQueue::Run: request failed: %s\n",
                                     curl_easy_strerror(message->data.result));
                     }
                     Finish(slot, status);
@@ -121,12 +122,12 @@ void AuthorizedQueue::StartReady()
                          [now](const Item &item) { return item.notBefore <= now; });
         while (next != m_waiting.end())
         {
-            Item item = *next;
+            Item item = std::move(*next);
             m_waiting.erase(next);
             if (item.prepared || item.prepare(item.request))
             {
                 item.prepared = true;
-                Start(slot, item);
+                Start(slot, std::move(item));
                 break;
             }
             next = std::find_if(m_waiting.begin(), m_waiting.end(),
@@ -135,21 +136,21 @@ void AuthorizedQueue::StartReady()
     }
 }
 
-void AuthorizedQueue::Start(Slot &slot, const Item &item)
+void AuthorizedQueue::Start(Slot &slot, Item &&item)
 {
-    slot.item = item;
+    slot.item = std::move(item);
     ++slot.item.attempt;
     slot.reply.clear();
     curl_slist_free_all(slot.headers);
     slot.headers = NULL;
-    const HttpClient::Headers headers = AddToken(item.request.headers, m_auth.AccessToken());
+    const HttpClient::Headers headers = AddToken(slot.item.request.headers, m_auth.AccessToken());
     for (const std::string &header : headers)
     {
         slot.headers = curl_slist_append(slot.headers, header.c_str());
     }
 
     const QueuedRequest &request = slot.item.request;
-    // A reset keeps the open connections, so the next request on this slot can reuse them.
+    // A reset clears the options only; the multi handle keeps the open connections for reuse.
     curl_easy_reset(slot.curl);
     HttpClient::ApplyDefaults(slot.curl, request.url);
     curl_easy_setopt(slot.curl, CURLOPT_HTTPHEADER, slot.headers);
@@ -169,23 +170,24 @@ void AuthorizedQueue::Finish(Slot &slot, long status)
 {
     curl_multi_remove_handle(m_multi, slot.curl);
     slot.busy = false;
-    Item item = slot.item;
+    Item item = std::move(slot.item);
 
     if (status == 401 && !item.refreshed)
     {
         item.refreshed = true;
         if (m_auth.Refresh())
         {
-            m_waiting.push_front(item);
+            m_waiting.push_front(std::move(item));
             return;
         }
     }
     if (IsRetryable(status, slot.reply, item.request.retry) && item.attempt < kSendAttempts)
     {
-        debugPrintf("Request failed with %ld, retrying in %llu ms\n", status, item.wait / 1000);
+        debugPrintf("AuthorizedQueue::Finish: status %ld, retrying in %llu ms\n", status,
+                    item.wait / 1000);
         item.notBefore = NowMicroseconds() + item.wait;
         item.wait *= 2;
-        m_waiting.push_front(item);
+        m_waiting.push_front(std::move(item));
         return;
     }
     item.done(status, slot.reply);

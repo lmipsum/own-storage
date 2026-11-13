@@ -39,6 +39,10 @@ class AuthorizedQueue
     /** Asked between requests; true lets the running ones finish and drops the rest. */
     typedef std::function<bool()> Stop;
 
+    /**
+     * @param auth the sign-in whose token every request carries
+     * @param parallel how many requests are sent at once at most
+     */
     AuthorizedQueue(GoogleDeviceAuth &auth, unsigned int parallel);
     ~AuthorizedQueue();
 
@@ -76,7 +80,7 @@ class AuthorizedQueue
     /** Fills idle slots with the queued items that may be sent now. */
     void StartReady();
     /** Sends item on slot, with a fresh token. */
-    void Start(Slot &slot, const Item &item);
+    void Start(Slot &slot, Item &&item);
     /** Hands a finished request to its callback, or queues it again by the retry rules. */
     void Finish(Slot &slot, long status);
 
