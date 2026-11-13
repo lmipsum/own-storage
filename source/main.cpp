@@ -42,6 +42,7 @@
 #include <net/netctl.h>
 #include <netinet/in.h>
 #include <algorithm>
+#include <optional>
 #include <atomic>
 
 #include <SDL/SDL.h>
@@ -66,6 +67,10 @@
 
 const std::string appPath = APP_DIR;
 const std::string localResourceFile = APP_DIR "local.json";
+const std::string remoteResourceFile = APP_DIR "remote.json";
+const std::string remoteBackup = APP_DIR "remote.backup";
+// The remote.json entries changed since its last full save, one JSON object per line.
+const std::string remoteJournal = APP_DIR "remote.journal";
 // remote.json's title on Drive.
 const std::string remoteStateTitle = "remote.json";
 // A Google client of the user's own, which takes the place of the published one.
@@ -73,8 +78,6 @@ const std::string userClientFile = APP_DIR "client.json";
 // Uploads that run at once; Drive takes about a second to answer each, and these waits
 // overlap. Eight went 1.5 times as fast as four, with no request refused.
 const unsigned int parallelUploads = 8;
-// The folder in the user's Drive that holds every backup.
-const std::string driveFolderName = "Own Storage";
 const unsigned int microsecondsPerSecond = 1000000;
 
 HttpClient http;
@@ -88,6 +91,8 @@ GoogleDrive drive(http, googleAuth, TransferDisplay{beginTransfer, transferProgr
 Config config;
 
 Json localResourceRoot;
+// The sync thread's view of the backup on Drive.
+SyncState remoteState(remoteResourceFile, remoteBackup, remoteJournal);
 
 SDL_Event event;
 SDL_Surface *screen = NULL;
@@ -352,7 +357,7 @@ RemoteStateFetch downloadRemoteState(Json &state)
 
 void downloadChanges()
 {
-    u32 remSize = remoteResourceRoot["data"].AsArray().size();
+    u32 remSize = remoteState.Size();
     u32 i = 0;
     u32 progressCounter = 0;
     u32 totalProgress = 0;
@@ -363,8 +368,8 @@ void downloadChanges()
 
     for (i = 0; i < remSize; i++)
     {
-        Json resource = remoteResourceRoot["data"][i];
-        if (resource["status"].Str() == "synced")
+        Json resource = remoteState.Entry(i);
+        if (resource["status"].Str() == syncedStatus)
         {
             sysFSStat entry;
 
@@ -386,9 +391,9 @@ void downloadChanges()
         if (dialog_action != 0)
             break;
 
-        Json resource = remoteResourceRoot["data"][i];
+        Json resource = remoteState.Entry(i);
 
-        if (resource["status"].Str() == "synced")
+        if (resource["status"].Str() == syncedStatus)
         {
             if (resource["mimeType"].Str() == folderMime)
             {
@@ -445,9 +450,9 @@ void downloadChanges()
         if (dialog_action != 0)
             break;
 
-        Json resource = remoteResourceRoot["data"][i];
+        Json resource = remoteState.Entry(i);
 
-        if (resource["status"].Str() == "synced")
+        if (resource["status"].Str() == syncedStatus)
         {
             if (resource["mimeType"].Str() != folderMime)
             {
@@ -556,34 +561,6 @@ void stopSyncAfterFetch(RemoteStateFetch fetched)
     }
 }
 
-/**
- * Finds the Drive id of the folder that holds an entry: the Own Storage folder, or the folder
- * entry of the directory the entry is in. A title alone is not enough, as two profiles can hold
- * a save of the same name.
- * @param entry the remote.json entry
- * @return the folder's id; "not_found" while the folder does not exist on Drive yet
- */
-std::string getParentId(const Json &entry)
-{
-    if (entry["parentFolder"].Str() == driveFolderName)
-    {
-        return config.rootFolderId;
-    }
-    const std::string path = entry["path"].Str();
-    const std::string directory = path.substr(0, path.rfind('/'));
-    const u32 remSize = remoteResourceRoot["data"].AsArray().size();
-    for (u32 i = 0; i < remSize; i++)
-    {
-        const Json resource = remoteResourceRoot["data"][i];
-        if (resource["mimeType"].Str() == folderMime && resource["path"].Str() == directory &&
-            !isPendingCreation(resource))
-        {
-            return resource["id"].Str();
-        }
-    }
-    return "not_found";
-}
-
 std::string calculateMD5Checksum(const std::string &path);
 
 /**
@@ -652,8 +629,8 @@ struct UploadProgress
 bool adoptInterruptedFile(u32 index, const std::string &parentId, UploadProgress &progress,
                           std::string &fileId)
 {
-    const Json resource = remoteResourceRoot["data"][index];
-    fileId = resource["status"].Str() == "update" ? resource["id"].Str() : std::string();
+    const Json resource = remoteState.Entry(index);
+    fileId = resource["status"].Str() == updateStatus ? resource["id"].Str() : std::string();
     Json found;
     if (!findInterruptedCreation(resource, parentId, found))
     {
@@ -665,7 +642,7 @@ bool adoptInterruptedFile(u32 index, const std::string &parentId, UploadProgress
     }
     if (found["md5Checksum"].Str() == calculateMD5Checksum(resource["path"].Str()))
     {
-        recordFile(index, parentId, found);
+        remoteState.RecordFile(index, parentId, found);
         progress.Advance();
         return true;
     }
@@ -700,7 +677,7 @@ void showRequestsInProgress(unsigned int running, const char *kind, const std::s
 bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress &progress,
                           unsigned int running, QueuedRequest &request)
 {
-    const Json resource = remoteResourceRoot["data"][index];
+    const Json resource = remoteState.Entry(index);
     debugPrintf("prepareFolderRequest: Syncing directory %s under %s\n",
                 resource["title"].Str().c_str(), parentId.c_str());
     Json found;
@@ -710,11 +687,11 @@ bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress
     }
     if (found.Has("id"))
     {
-        recordFolder(index, parentId, found);
+        remoteState.RecordFolder(index, parentId, found);
         progress.Advance();
         return false;
     }
-    markCreating(index);
+    remoteState.MarkCreating(index);
     request = drive.BuildFolderRequest(resource["title"].Str(), parentId);
     showRequestsInProgress(running, "folders", resource["title"].Str());
     return true;
@@ -738,7 +715,7 @@ void finishFolderRequest(u32 index, const std::string &parentId, UploadProgress 
         return;
     }
     debugPrintf("finishFolderRequest: created %s\n", folder["id"].Str().c_str());
-    recordFolder(index, parentId, folder);
+    remoteState.RecordFolder(index, parentId, folder);
     progress.Advance();
 }
 
@@ -773,7 +750,7 @@ bool prepareFileRequest(u32 index, const std::string &parentId, UploadProgress &
                         std::vector<u32> &outsideQueue, unsigned int running,
                         QueuedRequest &request)
 {
-    const Json resource = remoteResourceRoot["data"][index];
+    const Json resource = remoteState.Entry(index);
     const std::string path = resource["path"].Str();
     const std::string title = resource["title"].Str();
     sysFSStat entry;
@@ -797,7 +774,7 @@ bool prepareFileRequest(u32 index, const std::string &parentId, UploadProgress &
     }
     if (fileId.empty())
     {
-        markCreating(index);
+        remoteState.MarkCreating(index);
     }
     request = drive.BuildMultipartRequest(BuildMetadata(title, octetMime, parentId), octetMime,
                                           content, fileId);
@@ -824,7 +801,7 @@ void finishFileRequest(u32 index, const std::string &parentId, UploadProgress &p
         return;
     }
     debugPrintf("finishFileRequest: stored %s\n", file["id"].Str().c_str());
-    recordFile(index, parentId, file);
+    remoteState.RecordFile(index, parentId, file);
     progress.Advance();
 }
 
@@ -857,7 +834,7 @@ void queueFile(AuthorizedQueue &queue, u32 index, const std::string &parentId,
  */
 void uploadFileOutsideQueue(u32 index, const std::string &parentId, UploadProgress &progress)
 {
-    const Json resource = remoteResourceRoot["data"][index];
+    const Json resource = remoteState.Entry(index);
     const std::string path = resource["path"].Str();
     const std::string title = resource["title"].Str();
     debugPrintf("uploadFileOutsideQueue: Syncing file %s under %s\n", title.c_str(),
@@ -870,12 +847,12 @@ void uploadFileOutsideQueue(u32 index, const std::string &parentId, UploadProgre
     }
     if (fileId.empty())
     {
-        markCreating(index);
+        remoteState.MarkCreating(index);
     }
     const Json file = drive.UploadFile(path, title, octetMime, parentId, fileId);
     if (file.Has("id"))
     {
-        recordFile(index, parentId, file);
+        remoteState.RecordFile(index, parentId, file);
         progress.Advance();
     }
 }
@@ -907,12 +884,12 @@ void pushRemoteState()
  */
 void uploadChanges()
 {
-    const u32 remSize = remoteResourceRoot["data"].AsArray().size();
+    const u32 remSize = remoteState.Size();
     UploadProgress progress = {"Uploading Parent Entries", 0};
     for (u32 i = 0; i < remSize; i++)
     {
-        const Json resource = remoteResourceRoot["data"][i];
-        if (isPendingCreation(resource) || resource["status"].Str() == "update")
+        const Json resource = remoteState.Entry(i);
+        if (SyncState::IsPendingCreation(resource) || resource["status"].Str() == updateStatus)
         {
             progress.total++;
         }
@@ -935,16 +912,17 @@ void uploadChanges()
         added = 0;
         for (u32 i = 0; i < remSize; i++)
         {
-            const Json resource = remoteResourceRoot["data"][i];
-            if (queued[i] || !isPendingCreation(resource) ||
+            const Json resource = remoteState.Entry(i);
+            if (queued[i] || !SyncState::IsPendingCreation(resource) ||
                 resource["mimeType"].Str() != folderMime)
             {
                 continue;
             }
-            const std::string parentId = getParentId(resource);
-            if (parentId != "not_found")
+            const std::optional<std::string> parentId =
+                remoteState.ParentId(resource, config.rootFolderId);
+            if (parentId)
             {
-                queueFolder(queue, i, parentId, progress);
+                queueFolder(queue, i, *parentId, progress);
                 queued[i] = true;
                 ++added;
             }
@@ -959,14 +937,15 @@ void uploadChanges()
     std::vector<std::pair<u32, std::string>> files;
     for (u32 i = 0; i < remSize; i++)
     {
-        const Json resource = remoteResourceRoot["data"][i];
-        if ((isPendingCreation(resource) || resource["status"].Str() == "update") &&
+        const Json resource = remoteState.Entry(i);
+        if ((SyncState::IsPendingCreation(resource) || resource["status"].Str() == updateStatus) &&
             resource["mimeType"].Str() != folderMime)
         {
-            const std::string parentId = getParentId(resource);
-            if (parentId != "not_found")
+            const std::optional<std::string> parentId =
+                remoteState.ParentId(resource, config.rootFolderId);
+            if (parentId)
             {
-                files.push_back(std::make_pair(i, parentId));
+                files.push_back(std::make_pair(i, *parentId));
             }
         }
     }
@@ -989,7 +968,7 @@ void uploadChanges()
     }
 
     // The upload below sends remote.json as it is on disk, so it must hold every change.
-    writeChangesToFile();
+    remoteState.SaveAll();
 
     pushRemoteState();
 }
@@ -1025,7 +1004,7 @@ void detectChanges()
     // ignored)
 
     u32 lrtSize = localResourceRoot["data"].AsArray().size();
-    u32 rrtSize = remoteResourceRoot.Has("data") ? remoteResourceRoot["data"].AsArray().size() : 0;
+    u32 rrtSize = remoteState.Size();
     u32 i = 0;
     u32 j = 0;
     u32 prevProgress = 0;
@@ -1047,14 +1026,14 @@ void detectChanges()
 
         for (j = 0; j < rrtSize; j++)
         {
-            Json rres = remoteResourceRoot["data"][j];
+            Json rres = remoteState.Entry(j);
 
             if (lres["path"].Str() == rres["path"].Str())
             {
                 found = true;
                 if (lres["mimeType"].Str() != folderMime)
                 {
-                    if (rres["status"].Str() == "synced")
+                    if (rres["status"].Str() == syncedStatus)
                     {
                         sysFSStat lstat;
                         sysFsStat(lres["path"].Str().c_str(), &lstat);
@@ -1086,7 +1065,7 @@ void detectChanges()
                                     debugPrintf("Local file MD5 has been changed %s,%s,%s\n",
                                                 rres["path"].Str().c_str(), md5c.c_str(),
                                                 rres["md5Checksum"].Str().c_str());
-                                    remoteResourceRoot["data"][j].Add("status", Json("update"));
+                                    remoteState.MarkChanged(j);
                                 }
                             }
                         }
@@ -1099,7 +1078,7 @@ void detectChanges()
         {
             debugPrintf("Found New Entry in Local Resource, Adding for sync %s",
                         lres["path"].Str().c_str());
-            remoteResourceRoot["data"].Append(lres);
+            remoteState.Append(lres);
         }
 
         std::stringstream ss;
@@ -1197,7 +1176,7 @@ void buildLocalResourceTree()
                 resource.Add("parentid", Json(config.rootFolderId));
                 resource.Add("parentFolder", Json(driveFolderName));
                 resource.Add("modifiedDate", Json("0"));
-                resource.Add("status", Json("upload"));
+                resource.Add("status", Json(uploadStatus));
 
                 resourceTree.push_back(Json(resource));
             }
@@ -1246,7 +1225,7 @@ void buildLocalResourceTree()
                     resource.Add("parentid", Json("nill"));
                     resource.Add("parentFolder", Json(k->c_str()));
                     resource.Add("modifiedDate", Json("0"));
-                    resource.Add("status", Json("upload"));
+                    resource.Add("status", Json(uploadStatus));
 
                     resourceTree.push_back(Json(resource));
                 }
@@ -1293,7 +1272,7 @@ void buildLocalResourceTree()
                     resource.Add("modifiedDate", Json("0"));
                     resource.Add("fileSize", Json("0"));
                     resource.Add("md5Checksum", Json("0"));
-                    resource.Add("status", Json("upload"));
+                    resource.Add("status", Json(uploadStatus));
 
                     resourceTree.push_back(Json(resource));
                 }
@@ -1333,7 +1312,7 @@ void buildLocalResourceTree()
                         resource.Add("parentid", Json(config.rootFolderId));
                         resource.Add("parentFolder", Json(driveFolderName));
                         resource.Add("modifiedDate", Json("0"));
-                        resource.Add("status", Json("upload"));
+                        resource.Add("status", Json(uploadStatus));
 
                         resourceTree.push_back(Json(resource));
                     }
@@ -1454,8 +1433,7 @@ int initCloudDrive(void *arg)
     // DONE: Upload remote.json to Google Drive
     if (userType == "one")
     {
-        remoteResourceRoot = Json::Load(localResourceFile);
-        writeChangesToFile();
+        remoteState.Reset(Json::Load(localResourceFile));
 
         uploadChanges();
     }
@@ -1472,24 +1450,16 @@ int initCloudDrive(void *arg)
     // TODO: Upload RRT to Google Drive
     if (userType == "two")
     {
-        remoteResourceRoot = LoadWithBackup(remoteResourceFile, remoteBackup);
-        if (!remoteResourceRoot.IsEmpty())
+        if (!remoteState.Load())
         {
-            replayJournal();
-        }
-        else
-        {
-            const RemoteStateFetch fetched = downloadRemoteState(remoteResourceRoot);
+            Json downloaded;
+            const RemoteStateFetch fetched = downloadRemoteState(downloaded);
             if (fetched != RemoteStateFetch::Done)
             {
                 stopSyncAfterFetch(fetched);
                 return 0;
             }
-        }
-        // Without a data array, detectChanges has nowhere to add the new entries.
-        if (!remoteResourceRoot.Has("data"))
-        {
-            remoteResourceRoot.Add("data", Json(Json::Array()));
+            remoteState.Reset(downloaded);
         }
 
         detectChanges();
@@ -1504,14 +1474,16 @@ int initCloudDrive(void *arg)
     // TODO: Revert to Second Time scenario
     if (userType == "three")
     {
-        const RemoteStateFetch fetched = downloadRemoteState(remoteResourceRoot);
+        Json downloaded;
+        const RemoteStateFetch fetched = downloadRemoteState(downloaded);
         if (fetched != RemoteStateFetch::Done)
         {
             stopSyncAfterFetch(fetched);
             return 0;
         }
-        if (!remoteResourceRoot.IsEmpty())
+        if (!downloaded.IsEmpty())
         {
+            remoteState.Reset(downloaded);
             downloadChanges();
             debugPrintf(
                 "Data from Google Drive downloaded, Please restart app to upload changes\n");
