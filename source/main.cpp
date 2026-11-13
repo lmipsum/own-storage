@@ -108,6 +108,12 @@ static std::atomic<int> dialog_action(0);
 std::atomic<int> exitapp(0);
 std::atomic<int> syncing(0);
 
+// Set when Drive refuses an upload for lack of room; the sync then stops. Sync thread only.
+bool driveFull = false;
+const char driveFullMessage[] = "Your Google Drive is full, so some saves were not backed up. "
+                                "Free up space in Drive, then run Own Storage again.";
+const unsigned int dialogPollMicroseconds = 100000;
+
 int xmbopen = 0;
 
 double progFuncLastProgress = 0.0;
@@ -231,6 +237,16 @@ void drawPendingMessage()
 }
 
 /**
+ * The first reason in a Drive error object.
+ * @param error the "error" member of a Drive reply
+ * @return the reason, or "" when there is none
+ */
+std::string readFirstErrorReason(const Json &error)
+{
+    return error["errors"][0u]["reason"].Str();
+}
+
+/**
  * Describes a failed Drive request for the debug log, from its JSON error reply.
  * @param reply the body Drive answered with
  * @return "reason: message", or the start of the body when it is not a Drive error
@@ -242,7 +258,18 @@ std::string describeDriveError(const std::string &reply)
     {
         return reply.substr(0, maxLoggedReplyLength);
     }
-    return error["errors"][0u]["reason"].Str() + ": " + error["message"].Str();
+    return readFirstErrorReason(error) + ": " + error["message"].Str();
+}
+
+/**
+ * Whether Drive refused a request because the user's Drive has no room left.
+ * @param reply the body Drive answered with
+ * @return true for the quotaExceeded and storageQuotaExceeded reasons
+ */
+bool isDriveFullError(const std::string &reply)
+{
+    const std::string reason = readFirstErrorReason(Json::Parse(reply)["error"]);
+    return reason == "quotaExceeded" || reason == "storageQuotaExceeded";
 }
 
 /**
@@ -706,6 +733,41 @@ void downloadChanges()
 }
 
 /**
+ * Logs a failed upload request, and stops the sync when Drive has no room left.
+ * @param what what failed, as the debug log names it
+ * @param status the HTTP status, or -1 when there was no answer
+ * @param reply the body Drive answered with
+ */
+void recordUploadFailure(const char *what, long status, const std::string &reply)
+{
+    debugPrintf("%s..%ld %s\n", what, status, describeDriveError(reply).c_str());
+    if (isDriveFullError(reply))
+    {
+        driveFull = true;
+    }
+}
+
+/**
+ * Tells the user that Drive has no room left, and waits until the message is closed.
+ */
+void showDriveFullDialog()
+{
+    dialog_action = 0;
+    // msgDialogOpen2 refuses while another dialog is open, and the aborted sync dialog may
+    // still be closing.
+    while (msgDialogOpen2(static_cast<msgType>(MSG_DIALOG_ERROR | MSG_DIALOG_BTN_TYPE_OK),
+                          driveFullMessage, dialog_handler, NULL, NULL) != 0 &&
+           exitapp == 0)
+    {
+        sysUsleep(dialogPollMicroseconds);
+    }
+    while (dialog_action == 0 && exitapp == 0)
+    {
+        sysUsleep(dialogPollMicroseconds);
+    }
+}
+
+/**
  * Uploads a file to Google Drive
  * @param path the local file path
  * @param filename the name of the file with extension
@@ -760,8 +822,7 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("uploadFile: Could not pose meta data..%ld %s\n", ret,
-                    describeDriveError(resp).c_str());
+        recordUploadFailure("uploadFile: Could not pose meta data", ret, resp);
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
         return obj;
@@ -792,8 +853,7 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("uploadFile: Could not upload file..%ld %s\n", ret,
-                    describeDriveError(resp2).c_str());
+        recordUploadFailure("uploadFile: Could not upload file", ret, resp2);
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
         return obj;
@@ -1075,7 +1135,7 @@ void uploadChanges()
 
     for (i = 0; i < remSize; i++)
     {
-        if (dialog_action != 0)
+        if (dialog_action != 0 || driveFull)
         {
             break;
         }
@@ -1778,9 +1838,13 @@ int initCloudDrive(void *arg)
 
     last_sync = new std::string(epochTime);*/
 
-    syncing = 0;
-
     msgDialogAbort();
+    if (driveFull)
+    {
+        showDriveFullDialog();
+    }
+
+    syncing = 0;
 
     exitapp = 1;
 
