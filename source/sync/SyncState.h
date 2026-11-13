@@ -48,6 +48,12 @@ class SyncState
      * @param state the state; one without a data array gets an empty one
      */
     void Reset(const Json &state);
+    /**
+     * Starts over with the given entries, such as the first scan of the console, and saves them.
+     * The entries are shared, not copied, so the caller should not change them afterwards.
+     * @param entries the entries
+     */
+    void Reset(const Json::Array &entries);
     /** Saves remote.json in full, with its backup, and empties the journal it now contains. */
     void SaveAll();
 

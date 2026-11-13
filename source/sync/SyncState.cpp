@@ -55,6 +55,13 @@ void SyncState::Reset(const Json &state)
     SaveAll();
 }
 
+void SyncState::Reset(const Json::Array &entries)
+{
+    Json state;
+    state.Add(kEntries, Json(entries));
+    Reset(state);
+}
+
 void SyncState::SaveAll()
 {
     const bool backupSaved = SaveStateFile(m_root, m_backup);

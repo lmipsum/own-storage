@@ -2,217 +2,72 @@
 #include "sync/SaveScanner.h"
 
 #include "app/DebugLog.h"
-#include "app/Files.h"
 #include "drive/GoogleDrive.h"
 #include "sync/SyncState.h"
 
-#include <sstream>
-#include <string.h>
-#include <vector>
+#include <string>
 
-#include <sys/file.h>
-
-bool pathExists(std::string pathToCheck)
+namespace
 {
-    sysFSStat entry;
-    return sysFsStat(pathToCheck.c_str(), &entry) == 0;
-}
+// Every user profile is a directory here, with its saves in <profile>/savedata.
+const char kProfilesDirectory[] = "/dev_hdd0/home";
+const char kSavesDirectory[] = "/savedata";
+// The PS1 and PS2 memory cards, one file each.
+const char kMemoryCardsDirectory[] = "/dev_hdd0/savedata/vmc";
 
 /**
- * Builds a local resource tree given the path of a local profile folder
+ * An entry that is still to be uploaded; Drive's id and details are added once it is there.
+ * @param title its name
+ * @param path where it is on the console
+ * @param mimeType folderMime for a directory, octetMime for a file
+ * @param parentFolder the title of the folder that holds it on Drive
  */
-void buildLocalResourceTree()
+Json NewEntry(const std::string &title, const std::string &path, const std::string &mimeType,
+              const std::string &parentFolder)
 {
-    std::vector<Json> resourceTree;
+    Json entry;
+    entry.Add("title", Json(title));
+    entry.Add("path", Json(path));
+    entry.Add("mimeType", Json(mimeType));
+    entry.Add("parentFolder", Json(parentFolder));
+    entry.Add("status", Json(uploadStatus));
+    return entry;
+}
+} // namespace
 
-    debugPrintf("Building Resource Tree....\n");
+SaveScanner::SaveScanner(const LocalStorage &storage) : m_storage(storage) {}
 
-    sysFSDirent entry;
-    s32 fd;
-    u64 read;
-    std::vector<std::string> profileList;
-    std::vector<std::string> profilePaths;
-
-    std::string entryName = "";
-    std::string path = "/dev_hdd0/home";
-
-    // Check how many profiles exists in user's HDD 0000001 etc
-    if (sysFsOpendir(path.c_str(), &fd) == 0)
+Json::Array SaveScanner::Scan() const
+{
+    Json::Array profiles;
+    Json::Array saveFolders;
+    Json::Array files;
+    for (const std::string &profile : m_storage.List(kProfilesDirectory))
     {
-        while (!sysFsReaddir(fd, &entry, &read) && strlen(entry.d_name) > 0)
+        const std::string savesPath =
+            std::string(kProfilesDirectory) + "/" + profile + kSavesDirectory;
+        profiles.push_back(NewEntry(profile, savesPath, folderMime, driveFolderName));
+        for (const std::string &save : m_storage.List(savesPath))
         {
-            if (strcmp(entry.d_name, ".") == 0 || strcmp(entry.d_name, "..") == 0)
+            const std::string savePath = savesPath + "/" + save;
+            saveFolders.push_back(NewEntry(save, savePath, folderMime, profile));
+            for (const std::string &file : m_storage.List(savePath))
             {
-                continue;
-            }
-            else
-            {
-                entryName.clear();
-                entryName.assign(entry.d_name, strlen(entry.d_name));
-
-                profileList.push_back(entryName);
-                profilePaths.push_back(path + "/" + entryName + "/savedata");
-
-                Json resource;
-                resource.Add("id", Json("nill"));
-                resource.Add("title", Json(entryName));
-                resource.Add("path", Json(path + "/" + entryName + "/savedata"));
-                resource.Add("mimeType", Json(folderMime));
-                resource.Add("parentid", Json(config.rootFolderId));
-                resource.Add("parentFolder", Json(driveFolderName));
-                resource.Add("modifiedDate", Json("0"));
-                resource.Add("status", Json(uploadStatus));
-
-                resourceTree.push_back(Json(resource));
-            }
-        }
-        sysFsClosedir(fd);
-        fd = -1;
-    }
-
-    std::vector<std::string>::const_iterator k = profileList.begin();
-    std::vector<std::string>::const_iterator l = profilePaths.begin();
-    std::vector<std::string> folderList;
-    std::vector<std::string> pathList;
-
-    // Recursively list all saves under every profile
-    while (k != profileList.end())
-    {
-        debugPrintf("Entering Save Path...%s\n", l->c_str());
-
-        if (sysFsOpendir(l->c_str(), &fd) == 0)
-        {
-            while (!sysFsReaddir(fd, &entry, &read) && strlen(entry.d_name) > 0)
-            {
-                if (strcmp(entry.d_name, ".") == 0 || strcmp(entry.d_name, "..") == 0)
-                {
-                    continue;
-                }
-                else
-                {
-                    folderList.push_back(entry.d_name);
-
-                    entryName.clear();
-                    entryName.assign(entry.d_name, strlen(entry.d_name));
-
-                    std::stringstream fPath;
-                    fPath << *l << "/" << entryName;
-
-                    pathList.push_back(fPath.str());
-
-                    // debugPrintf("Save Path Entry...%s\n",entryName.c_str());
-
-                    Json resource;
-                    resource.Add("id", Json("nill"));
-                    resource.Add("title", Json(entryName));
-                    resource.Add("path", Json(fPath.str()));
-                    resource.Add("mimeType", Json(folderMime));
-                    resource.Add("parentid", Json("nill"));
-                    resource.Add("parentFolder", Json(k->c_str()));
-                    resource.Add("modifiedDate", Json("0"));
-                    resource.Add("status", Json(uploadStatus));
-
-                    resourceTree.push_back(Json(resource));
-                }
-            }
-            sysFsClosedir(fd);
-            fd = -1;
-        }
-        ++k, ++l;
-    }
-
-    debugPrintf("Directory enumeration complete...listing files inside them...\n");
-
-    std::vector<std::string>::const_iterator i = pathList.begin();
-    std::vector<std::string>::const_iterator j = folderList.begin();
-
-    // Recursively list all files under every save directory
-    while (i != pathList.end())
-    {
-        if (sysFsOpendir(i->c_str(), &fd) == 0)
-        {
-            while (!sysFsReaddir(fd, &entry, &read) && strlen(entry.d_name) > 0)
-            {
-                if (strcmp(entry.d_name, ".") == 0 || strcmp(entry.d_name, "..") == 0)
-                {
-                    continue;
-                }
-                else
-                {
-                    entryName.clear();
-                    entryName.assign(entry.d_name, strlen(entry.d_name));
-
-                    std::stringstream fPath;
-                    fPath << *i << "/" << entryName;
-
-                    // debugPrintf("Entry Path...%s\n",fPath.str().c_str());
-
-                    Json resource;
-                    resource.Add("id", Json("nill"));
-                    resource.Add("title", Json(entryName));
-                    resource.Add("path", Json(fPath.str()));
-                    resource.Add("mimeType", Json(octetMime));
-                    resource.Add("parentFolder", Json(j->c_str()));
-                    resource.Add("parentid", Json("nill"));
-                    resource.Add("modifiedDate", Json("0"));
-                    resource.Add("fileSize", Json("0"));
-                    resource.Add("md5Checksum", Json("0"));
-                    resource.Add("status", Json(uploadStatus));
-
-                    resourceTree.push_back(Json(resource));
-                }
-            }
-            sysFsClosedir(fd);
-            fd = -1;
-        }
-        ++i;
-        ++j;
-    }
-
-    // Check for Existence of PS1 and PS2 memory cards
-    if (pathExists("/dev_hdd0/savedata"))
-    {
-        if (pathExists("/dev_hdd0/savedata/vmc"))
-        {
-            if (sysFsOpendir("/dev_hdd0/savedata/vmc", &fd) == 0)
-            {
-                while (!sysFsReaddir(fd, &entry, &read) && strlen(entry.d_name) > 0)
-                {
-                    if (strcmp(entry.d_name, ".") == 0 || strcmp(entry.d_name, "..") == 0)
-                    {
-                        continue;
-                    }
-                    else
-                    {
-                        entryName.clear();
-                        entryName.assign(entry.d_name, strlen(entry.d_name));
-
-                        debugPrintf("Memcard%s\n", entryName.c_str());
-
-                        Json resource;
-                        resource.Add("id", Json("nill"));
-                        resource.Add("title", Json(entryName));
-                        resource.Add("path", Json("/dev_hdd0/savedata/vmc/" + entryName));
-                        resource.Add("mimeType", Json(octetMime));
-                        resource.Add("parentid", Json(config.rootFolderId));
-                        resource.Add("parentFolder", Json(driveFolderName));
-                        resource.Add("modifiedDate", Json("0"));
-                        resource.Add("status", Json(uploadStatus));
-
-                        resourceTree.push_back(Json(resource));
-                    }
-                }
-                sysFsClosedir(fd);
-                fd = -1;
+                files.push_back(NewEntry(file, savePath + "/" + file, octetMime, save));
             }
         }
     }
 
-    debugPrintf("Resource Tree built, writing to Resource Json\n");
-
-    // Overwrite local.json every time
-    localResourceRoot.Add("data", Json(resourceTree));
-    SaveStateFile(localResourceRoot, localResourceFile);
-
-    debugPrintf("Resource file has been written successfully...\n");
+    Json::Array entries = profiles;
+    entries.insert(entries.end(), saveFolders.begin(), saveFolders.end());
+    entries.insert(entries.end(), files.begin(), files.end());
+    for (const std::string &card : m_storage.List(kMemoryCardsDirectory))
+    {
+        entries.push_back(NewEntry(card, std::string(kMemoryCardsDirectory) + "/" + card, octetMime,
+                                   driveFolderName));
+    }
+    debugPrintf("SaveScanner::Scan: %u profiles, %u save folders, %u files\n",
+                static_cast<unsigned>(profiles.size()), static_cast<unsigned>(saveFolders.size()),
+                static_cast<unsigned>(files.size()));
+    return entries;
 }

@@ -60,6 +60,7 @@
 #include "app/Config.h"
 #include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
+#include "app/ConsoleStorage.h"
 #include "sync/SaveScanner.h"
 #include "sync/SyncState.h"
 #include "json/Json.h"
@@ -67,7 +68,6 @@
 #include "app/Paths.h"
 
 const std::string appPath = APP_DIR;
-const std::string localResourceFile = APP_DIR "local.json";
 const std::string remoteResourceFile = APP_DIR "remote.json";
 const std::string remoteBackup = APP_DIR "remote.backup";
 // The remote.json entries changed since its last full save, one JSON object per line.
@@ -91,7 +91,9 @@ GoogleDrive drive(http, googleAuth, TransferDisplay{beginTransfer, transferProgr
 
 Config config;
 
-Json localResourceRoot;
+// The console's hard disk, and what it holds now as the save scan found it.
+const ConsoleStorage consoleStorage{};
+Json::Array localEntries;
 // The sync thread's view of the backup on Drive.
 SyncState remoteState(remoteResourceFile, remoteBackup, remoteJournal);
 
@@ -998,7 +1000,7 @@ void detectChanges()
     // 2 - If an entry exists in local and in remote, check if it's changed by size (folder can be
     // ignored)
 
-    u32 lrtSize = localResourceRoot["data"].AsArray().size();
+    u32 lrtSize = localEntries.size();
     u32 rrtSize = remoteState.Size();
     u32 i = 0;
     u32 j = 0;
@@ -1017,7 +1019,7 @@ void detectChanges()
             break;
         }
 
-        Json lres = localResourceRoot["data"][i];
+        Json lres = localEntries[i];
 
         for (j = 0; j < rrtSize; j++)
         {
@@ -1215,35 +1217,17 @@ int initCloudDrive(void *arg)
         }
     }
 
-    buildLocalResourceTree();
+    localEntries = SaveScanner(consoleStorage).Scan();
 
-    // NOTE: LRT = Local Resource Tree and RRT= Remote Resource Tree
-
-    // First Time: App never run AND no data on Google Drive
-    // DONE: Build Local Resource Tree and write to local.json
-    // DONE: Copy Local Resource Tree to Remote Resource Tree
-    // DONE: Write remote.json
-    // DONE: Upload all entries in remote.json to Google Drive
-    // DONE: Update remote.json with all changes during uploading
-    // DONE: Write remote.json to hard drive during changes
-    // DONE: Upload remote.json to Google Drive
+    // The first run, with nothing on Drive yet: everything the scan found goes up.
     if (userType == "one")
     {
-        remoteState.Reset(Json::Load(localResourceFile));
+        remoteState.Reset(localEntries);
 
         uploadChanges();
     }
 
-    // Second Time: App ran before AND data possibly exists on Google Drive
-    // DONE: Build Local Resource Tree and write to local.json
-    // DONE: Read Remote Resource Tree
-    // TODO: Go through all entries in LRT and search for them in RRT
-    // TODO: If any entry does not exist in RRT, insert it into RRT
-    // TODO: If any entry exists in RRT, match size, if size different mark as dirty
-    // TODO: Upload all changes marked as dirty in RRT to Google Drive
-    // TODO: Write all changes or uploads back to RRT and save to HDD
-    // TODO: Write RRT to HDD
-    // TODO: Upload RRT to Google Drive
+    // A later run: what changed on the console goes up, and what is missing here comes down.
     if (userType == "two")
     {
         if (!remoteState.Load())
@@ -1264,10 +1248,7 @@ int initCloudDrive(void *arg)
         downloadChanges();
     }
 
-    // First Time: App is installed on a new system but Data exists on Google Drive
-    // TODO: Build LRT and write to local.json
-    // TODO: Download Remote Resource Tree and write to remote.json
-    // TODO: Revert to Second Time scenario
+    // The first run on a console whose user has a backup on Drive: the backup comes down.
     if (userType == "three")
     {
         Json downloaded;
