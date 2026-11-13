@@ -318,6 +318,24 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
 }
 
 /**
+ * Reads a state file, or its backup when the file is missing or cannot be parsed.
+ * @param path the state file
+ * @param backupPath the copy that every save writes next to it
+ * @return the content; empty when neither can be read
+ */
+Json loadWithBackup(const std::string &path, const std::string &backupPath)
+{
+    Json content = Json::Load(path);
+    if (!content.IsEmpty())
+    {
+        return content;
+    }
+    // Every save writes the two files one after the other, so a power cut spoils at most one.
+    debugPrintf("%s is missing or damaged, reading %s\n", path.c_str(), backupPath.c_str());
+    return Json::Load(backupPath);
+}
+
+/**
  * Stores the current application configuration in the application config json
  */
 void storeConfig()
@@ -342,26 +360,19 @@ void storeConfig()
 std::string isUserAuthenticated()
 {
     std::string result = "not_found";
-    sysFSStat entry;
+    Json config = loadWithBackup(appFile, appFileBackup);
 
-    if (sysFsStat(appFile.c_str(), &entry) == 0)
+    if (!config.IsEmpty())
     {
-        debugPrintf("Config file found, parsing...\n");
-
-        Json config = Json::Load(appFile);
-
-        if (!config.IsEmpty())
-        {
-            debugPrintf("Config file not empty, returning refresh token...\n");
-            result = config["refresh_token"].Str();
-            rootFolderId = config.Has("root_id") ? config["root_id"].Str() : "root";
-            last_sync = config.Has("last_sync") ? config["last_sync"].Str() : "0";
-            remoteJsonId = config.Has("remote_fid") ? config["remote_fid"].Str() : "root";
-        }
+        debugPrintf("Config file not empty, returning refresh token...\n");
+        result = config["refresh_token"].Str();
+        rootFolderId = config.Has("root_id") ? config["root_id"].Str() : "root";
+        last_sync = config.Has("last_sync") ? config["last_sync"].Str() : "0";
+        remoteJsonId = config.Has("remote_fid") ? config["remote_fid"].Str() : "root";
     }
     else
     {
-        debugPrintf("Config file not found, returning empty handed...\n");
+        debugPrintf("No readable config file, returning empty handed...\n");
     }
 
     return result;
@@ -1679,7 +1690,7 @@ int initCloudDrive(void *arg)
     // TODO: Upload RRT to Google Drive
     if (userType == "two")
     {
-        remoteResourceRoot = Json::Load(remoteResourceFile);
+        remoteResourceRoot = loadWithBackup(remoteResourceFile, remoteBackup);
 
         detectChanges();
 
