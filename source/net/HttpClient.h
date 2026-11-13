@@ -10,12 +10,16 @@
  * HTTPS requests over one reused curl handle, so later requests to the same host skip the TLS
  * handshake. Server certificates are checked against the CA bundle shipped with the app.
  *
- * Every request returns the HTTP status, or -1 when no response arrived.
+ * Every request returns the HTTP status, or kNoAnswer or kNotSent when no response arrived.
  */
 class HttpClient
 {
   public:
     typedef std::vector<std::string> Headers;
+    /** The status of a request that got no answer; the server may have done it. */
+    static constexpr long kNoAnswer = -1;
+    /** The status of a request that never left: its host could not be resolved or reached. */
+    static constexpr long kNotSent = -2;
     /** curl's progress callback: totals and amounts done so far, down and up. */
     typedef int (*Progress)(void *data, double downTotal, double downNow, double upTotal,
                             double upNow);
@@ -43,6 +47,12 @@ class HttpClient
     /** True for a 2xx status. */
     static bool Succeeded(long status);
     /**
+     * The status of a request that curl could not complete.
+     * @param result curl's error
+     * @return kNotSent when the request never left, kNoAnswer otherwise
+     */
+    static long FailedStatus(CURLcode result);
+    /**
      * Gives a fresh curl handle the settings every request shares: the URL, the user agent,
      * certificate checks against the shipped CA bundle, and the timeouts.
      */
@@ -56,7 +66,7 @@ class HttpClient
 
     /** Resets the handle to the settings every request shares. */
     void Prepare(const std::string &url);
-    /** Runs the prepared request with headers; the status, or -1. */
+    /** Runs the prepared request with headers; the status, or FailedStatus(). */
     long Perform(const Headers &headers);
 
     static size_t KeepHeader(char *data, size_t size, size_t count, void *client);

@@ -34,7 +34,7 @@ class AuthorizedQueue
   public:
     /** Builds the request when its turn comes; false when nothing needs to be sent. */
     typedef std::function<bool(QueuedRequest &request)> Prepare;
-    /** Takes the result: the HTTP status, or -1 when no answer came, and the reply body. */
+    /** Takes the result: the HTTP status, or below zero when no answer came, and the reply body. */
     typedef std::function<void(long status, const std::string &reply)> Done;
     /** Asked between requests; true lets the running ones finish and drops the rest. */
     typedef std::function<bool()> Stop;

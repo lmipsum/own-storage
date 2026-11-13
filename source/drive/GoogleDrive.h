@@ -110,7 +110,7 @@ class GoogleDrive
      * Logs a failed request, and remembers whether it got an answer and whether Drive refused it
      * for lack of room.
      * @param what what failed, as the debug log names it
-     * @param status the HTTP status, or -1 when no answer came
+     * @param status the HTTP status, or below zero when no answer came
      * @param reply the body Drive answered with
      */
     void NoteFailure(const char *what, long status, const std::string &reply);

@@ -68,6 +68,14 @@ void HttpClient::ApplyDefaults(CURL *curl, const std::string &url)
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
 }
 
+long HttpClient::FailedStatus(CURLcode result)
+{
+    // These fail before the request is sent: no name, no connection, or no TLS session.
+    const bool notSent = result == CURLE_COULDNT_RESOLVE_HOST || result == CURLE_COULDNT_CONNECT ||
+                         result == CURLE_SSL_CONNECT_ERROR;
+    return notSent ? kNotSent : kNoAnswer;
+}
+
 size_t HttpClient::AppendToString(char *data, size_t size, size_t count, void *body)
 {
     static_cast<std::string *>(body)->append(data, size * count);
@@ -96,9 +104,9 @@ long HttpClient::Perform(const Headers &headers)
     if (result != CURLE_OK)
     {
         debugPrintf("HTTP request failed: %s\n", error[0] ? error : curl_easy_strerror(result));
-        return -1;
+        return FailedStatus(result);
     }
-    long status = -1;
+    long status = kNoAnswer;
     curl_easy_getinfo(m_curl, CURLINFO_RESPONSE_CODE, &status);
     return status;
 }

@@ -10,7 +10,7 @@ class GoogleDeviceAuth;
 
 /**
  * One HTTP request, sent with the headers it is given; writes the response body to reply and
- * returns the status, or -1.
+ * returns the status, or below zero when no answer came.
  */
 typedef std::function<long(const HttpClient::Headers &headers, std::string &reply)> Request;
 
@@ -19,7 +19,7 @@ enum class Retry
 {
     /** No answer, a rate limit or a server error: for requests that may be done twice. */
     AnyTransient,
-    /** Only a rate limit, which Google answers without doing the request: for creates. */
+    /** Only a rate limit, or a request that never left, as neither was done: for creates. */
     OnlyRefused
 };
 
@@ -46,7 +46,7 @@ std::string ReadErrorReason(const std::string &reply);
 
 /**
  * Whether a failed request may pass on a later attempt.
- * @param status the HTTP status, or -1 when no answer came
+ * @param status the HTTP status, or below zero when no answer came
  * @param reply the response body
  * @param retry which failures the request may be sent again after
  * @return true when it is worth sending the request again
@@ -61,7 +61,7 @@ HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::stri
  * An expired token is refreshed and the request sent again once; the failures retry names get
  * a few more attempts with a doubling wait.
  * @param reply receives the response body of the last attempt
- * @return the status of the last attempt, or -1 when no answer came
+ * @return the status of the last attempt, or below zero when no answer came
  */
 long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
                     const Request &request, std::string &reply, Retry retry = Retry::AnyTransient);

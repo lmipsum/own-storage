@@ -18,8 +18,8 @@ bool IsRetryable(long status, const std::string &reply, Retry retry)
 {
     // Google asks clients to retry rate limits and server errors with exponential backoff. A
     // rate limit comes as 429, or as 403 with one of these reasons; a server error or a lost
-    // answer may come after the request was done, though.
-    if (status == 429)
+    // answer may come after the request was done, though, while one that never left was not.
+    if (status == HttpClient::kNotSent || status == 429)
     {
         return true;
     }
@@ -28,7 +28,7 @@ bool IsRetryable(long status, const std::string &reply, Retry retry)
         const std::string reason = ReadErrorReason(reply);
         return reason == "rateLimitExceeded" || reason == "userRateLimitExceeded";
     }
-    return retry == Retry::AnyTransient && (status == -1 || status >= 500);
+    return retry == Retry::AnyTransient && (status == HttpClient::kNoAnswer || status >= 500);
 }
 
 unsigned long long AddJitter(unsigned long long wait)
@@ -48,7 +48,7 @@ long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
 {
     bool refreshed = false;
     unsigned long long wait = kFirstRetryWaitMicroseconds;
-    long status = -1;
+    long status = HttpClient::kNoAnswer;
     for (int attempt = 1; attempt <= kSendAttempts; ++attempt)
     {
         status = request(AddToken(headers, auth.AccessToken()), reply);

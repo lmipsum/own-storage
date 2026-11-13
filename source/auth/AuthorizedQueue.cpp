@@ -89,7 +89,7 @@ void AuthorizedQueue::Run(const Stop &stop)
             {
                 if (slot.busy && slot.curl == message->easy_handle)
                 {
-                    long status = -1;
+                    long status = HttpClient::kNoAnswer;
                     if (message->data.result == CURLE_OK)
                     {
                         curl_easy_getinfo(slot.curl, CURLINFO_RESPONSE_CODE, &status);
@@ -98,6 +98,7 @@ void AuthorizedQueue::Run(const Stop &stop)
                     {
                         debugPrintf("AuthorizedQueue::Run: request failed: %s\n",
                                     curl_easy_strerror(message->data.result));
+                        status = HttpClient::FailedStatus(message->data.result);
                     }
                     Finish(slot, status);
                     break;

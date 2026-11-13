@@ -868,7 +868,7 @@ bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress
  * @param index the folder's entry in remote.json
  * @param parentId the Drive folder it was created in
  * @param progress the bar to move when the folder exists
- * @param status the HTTP status, or -1 when no answer came
+ * @param status the HTTP status, or below zero when no answer came
  * @param reply Drive's answer
  */
 void finishFolderRequest(u32 index, const std::string &parentId, UploadProgress &progress,
@@ -954,7 +954,7 @@ bool prepareFileRequest(u32 index, const std::string &parentId, UploadProgress &
  * @param index the file's entry in remote.json
  * @param parentId the Drive folder that holds it
  * @param progress the bar to move when the file is stored
- * @param status the HTTP status, or -1 when no answer came
+ * @param status the HTTP status, or below zero when no answer came
  * @param reply Drive's answer
  */
 void finishFileRequest(u32 index, const std::string &parentId, UploadProgress &progress,
