@@ -8,6 +8,7 @@
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
 
+#include <cstdio>
 #include <ctime>
 #include <memory>
 #include <string>
@@ -208,6 +209,28 @@ TEST(NewConsoleGetsTheBackupBack)
     CHECK_EQUAL(std::string("data-other-profile"),
                 newConsole.Read(std::string(kSameSaveOtherProfile) + "/DATA.BIN"));
     CHECK_EQUAL(std::string("card"), newConsole.Read("/dev_hdd0/savedata/vmc/CARD1.VM2"));
+}
+
+TEST(LostLocalStateComesBackFromTheCloudWithoutDuplicates)
+{
+    Setup setup;
+    WriteSaves(setup.console);
+    setup.RunFirst();
+    const int creates = setup.cloud.Creates();
+    const std::string scratch = setup.console.Scratch();
+    std::remove((scratch + "/remote.json").c_str());
+    std::remove((scratch + "/remote.backup").c_str());
+
+    // What the app does when it finds no state of its own.
+    std::unique_ptr<SyncState> state = setup.NewState();
+    CHECK(!state->Load());
+    CHECK_EQUAL(std::size_t(0), state->Size());
+    Sync sync(setup.cloud, *state, setup.console, setup.display, setup.rootId);
+    CHECK(sync.FetchState() == RemoteStateFetch::Done);
+    sync.DetectChanges(SaveScanner(setup.console).Scan());
+    sync.Upload();
+    CHECK_EQUAL(creates, setup.cloud.Creates());
+    CHECK(AllSynced(setup));
 }
 
 TEST(DamagedStateInTheCloudIsNotTaken)

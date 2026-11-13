@@ -19,15 +19,19 @@ const std::size_t kChangesPerFullSave = 50;
 const char *const kRecordedFields[] = {"status",       "id",       "parentid",
                                        "modifiedDate", "fileSize", "md5Checksum"};
 
-/** The state with an empty entry array added when it has none. */
+/**
+ * The state itself when it has an entry array, otherwise a new one with an empty array. Never
+ * adds to the given state: a copy shares its node, so adding to a copy would change it too.
+ */
 Json WithEntries(const Json &state)
 {
-    Json withEntries = state;
-    if (!withEntries.Has(kEntries))
+    if (state.Has(kEntries))
     {
-        withEntries.Add(kEntries, Json(Json::Array()));
+        return state;
     }
-    return withEntries;
+    Json empty;
+    empty.Add(kEntries, Json(Json::Array()));
+    return empty;
 }
 } // namespace
 
@@ -41,7 +45,7 @@ bool SyncState::Load()
 {
     const Json loaded = LoadWithBackup(m_file, m_backup);
     m_root = WithEntries(loaded);
-    if (loaded.IsEmpty())
+    if (!loaded.Has(kEntries))
     {
         return false;
     }
