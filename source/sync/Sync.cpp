@@ -2,6 +2,7 @@
 #include "sync/Sync.h"
 
 #include "app/DebugLog.h"
+#include "sync/ParamSfo.h"
 #include "sync/Tar.h"
 
 #include <algorithm>
@@ -14,6 +15,38 @@ namespace
 // A save's archive in the cloud is named after the save folder.
 const char kArchiveSuffix[] = ".tar";
 const std::size_t kArchiveSuffixLength = sizeof kArchiveSuffix - 1;
+// A save folder's name starts with the ID of its game.
+const std::size_t kTitleIdLength = 9;
+// The longest title a PARAM.SFO holds; a title from the cloud may be anything, and the system
+// dialog refuses a text that is too long.
+const std::size_t kMaxTitleLength = 128;
+
+/**
+ * A title as the question shows it: no longer than a PARAM.SFO's, cut where a UTF-8 character
+ * starts, and without control characters.
+ */
+std::string ShownTitle(const std::string &title)
+{
+    std::string shown;
+    for (const char c : title)
+    {
+        if (static_cast<unsigned char>(c) >= ' ' && c != '\x7f')
+        {
+            shown += c;
+        }
+    }
+    if (shown.size() <= kMaxTitleLength)
+    {
+        return shown;
+    }
+    std::size_t end = kMaxTitleLength;
+    // Bytes 10xxxxxx continue a character; the cut goes before the byte that starts it.
+    while (end > 0 && (static_cast<unsigned char>(shown[end]) & 0xc0) == 0x80)
+    {
+        --end;
+    }
+    return shown.substr(0, end);
+}
 
 /**
  * The save an archive title names; empty when the title is not a save archive, or names a folder
@@ -85,111 +118,225 @@ bool Sync::Run()
         names.insert(name);
     }
 
-    std::vector<std::pair<const LocalSave *, std::string>> uploads;
-    std::vector<std::pair<std::string, CloudSave>> downloads;
+    Plan plan;
     for (const std::string &name : names)
     {
-        const SaveBase *base = m_state.Find(name);
         const auto local = localSaves.find(name);
         const auto cloud = cloudSaves.find(name);
-        const bool onConsole = local != localSaves.end();
-        const bool inCloud = cloud != cloudSaves.end();
-        if (!onConsole && !inCloud)
+        Decide(name, local == localSaves.end() ? nullptr : &local->second,
+               cloud == cloudSaves.end() ? nullptr : &cloud->second, plan);
+    }
+    Transfer(plan);
+    // The questions come once everything that needs none is done.
+    if (!plan.questions.empty() && !Stopped())
+    {
+        Transfer(Settle(plan.questions));
+    }
+    return true;
+}
+
+void Sync::Decide(const std::string &name, const LocalSave *local, const CloudSave *cloud,
+                  Plan &plan)
+{
+    const SaveBase *base = m_state.Find(name);
+    if (local == nullptr && cloud == nullptr)
+    {
+        m_state.Forget(name);
+    }
+    else if (base != nullptr && base->downloading)
+    {
+        // An earlier run ended while writing the save; the cloud's copy is the one to have.
+        if (cloud != nullptr)
         {
-            m_state.Forget(name);
-        }
-        else if (base != nullptr && base->downloading)
-        {
-            // An earlier run ended while writing the save; the cloud's copy is the one to have.
-            if (inCloud)
-            {
-                downloads.push_back(*cloud);
-            }
-            else
-            {
-                debugPrintf("Sync::Run: %s was left half written and is gone from the cloud\n",
-                            name.c_str());
-            }
-        }
-        else if (!inCloud)
-        {
-            // New on the console, or gone from the cloud while the console still has it.
-            uploads.push_back(std::make_pair(&local->second, std::string()));
-        }
-        else if (!onConsole)
-        {
-            if (base == nullptr)
-            {
-                downloads.push_back(*cloud);
-            }
-            else
-            {
-                debugPrintf("Sync::Run: %s was deleted on the console, left as it is\n",
-                            name.c_str());
-            }
+            plan.downloads.push_back(Download{name, *cloud});
         }
         else
         {
-            const bool localChanged =
-                base == nullptr || local->second.fingerprint != base->fingerprint;
-            const bool cloudChanged = base == nullptr || cloud->second.md5 != base->md5;
-            if (!localChanged && cloudChanged)
+            debugPrintf("Sync::Decide: %s was left half written and is gone from the cloud\n",
+                        name.c_str());
+        }
+    }
+    else if (cloud == nullptr)
+    {
+        // New on the console, or gone from the cloud while the console still has it.
+        plan.uploads.push_back(Upload{local, std::string()});
+    }
+    else if (local == nullptr)
+    {
+        if (base == nullptr)
+        {
+            plan.downloads.push_back(Download{name, *cloud});
+        }
+        else
+        {
+            const Doubt doubt = cloud->md5 == base->md5 ? Doubt::DeletedOnConsole
+                                                        : Doubt::DeletedOnConsoleChangedInCloud;
+            plan.questions.push_back(Question{doubt, name, *cloud, nullptr});
+        }
+    }
+    else
+    {
+        const bool localChanged = base == nullptr || local->fingerprint != base->fingerprint;
+        const bool cloudChanged = base == nullptr || cloud->md5 != base->md5;
+        if (!localChanged && cloudChanged)
+        {
+            plan.downloads.push_back(Download{name, *cloud});
+        }
+        else if (localChanged)
+        {
+            // A changed fingerprint may still mean the same content; the archive tells.
+            // It is removed at once and written again when its turn to go up comes, so
+            // archives are not all on the disk at the same time.
+            const std::string path = ArchivePath(name);
+            const std::string md5 = WriteArchive(*local, path);
+            m_storage.Remove(path);
+            if (!md5.empty() && md5 == cloud->md5)
             {
-                downloads.push_back(*cloud);
+                m_state.Record(name, SaveBase{cloud->fileId, md5, local->fingerprint, false});
             }
-            else if (localChanged)
+            else if (!md5.empty() && !cloudChanged)
             {
-                // A changed fingerprint may still mean the same content; the archive tells.
-                // It is removed at once and written again when its turn to go up comes, so
-                // archives are not all on the disk at the same time.
-                const std::string path = ArchivePath(name);
-                const std::string md5 = WriteArchive(local->second, path);
-                m_storage.Remove(path);
-                if (!md5.empty() && md5 == cloud->second.md5)
-                {
-                    m_state.Record(name, SaveBase{cloud->second.fileId, md5,
-                                                  local->second.fingerprint, false});
-                }
-                else if (!md5.empty() && !cloudChanged)
-                {
-                    uploads.push_back(std::make_pair(&local->second, cloud->second.fileId));
-                }
-                else if (!md5.empty())
-                {
-                    debugPrintf("Sync::Run: %s changed on both sides, left as it is\n",
-                                name.c_str());
-                }
+                plan.uploads.push_back(Upload{local, cloud->fileId});
+            }
+            else if (!md5.empty())
+            {
+                plan.questions.push_back(Question{Doubt::ChangedOnBothSides, name, *cloud, local});
             }
         }
     }
+}
 
-    Progress progress(m_display, uploads.size() + downloads.size());
-    debugPrintf("Sync::Run: %u saves to send, %u to bring down\n",
-                static_cast<unsigned int>(uploads.size()),
-                static_cast<unsigned int>(downloads.size()));
-    for (const auto &upload : uploads)
+void Sync::Transfer(const Plan &plan)
+{
+    Progress progress(m_display, plan.uploads.size() + plan.downloads.size());
+    debugPrintf("Sync::Transfer: %u saves to send, %u to bring down\n",
+                static_cast<unsigned int>(plan.uploads.size()),
+                static_cast<unsigned int>(plan.downloads.size()));
+    for (const Upload &upload : plan.uploads)
     {
-        QueueUpload(*upload.first, upload.second, progress);
+        QueueUpload(*upload.save, upload.fileId, progress);
     }
     m_cloud.RunQueue([this] { return Stopped(); });
     // A stopped queue leaves the archives it had written behind.
-    for (const auto &upload : uploads)
+    for (const Upload &upload : plan.uploads)
     {
-        m_storage.Remove(ArchivePath(upload.first->name));
+        m_storage.Remove(ArchivePath(upload.save->name));
     }
     // A full cloud stops only uploads; bringing saves down needs no room there.
-    for (const auto &download : downloads)
+    for (const Download &download : plan.downloads)
     {
         if (m_display.Cancelled())
         {
             break;
         }
-        if (Download(download.first, download.second))
+        if (BringDown(download.name, download.cloud))
         {
             progress.Advance();
         }
     }
-    return true;
+}
+
+Sync::Plan Sync::Settle(const std::vector<Question> &questions)
+{
+    // One question per game and doubt; the answer goes for every save of the game it covers.
+    std::map<std::pair<Doubt, std::string>, std::vector<const Question *>> games;
+    for (const Question &question : questions)
+    {
+        games[std::make_pair(question.doubt, question.name.substr(0, kTitleIdLength))].push_back(
+            &question);
+    }
+    Plan plan;
+    for (const auto &game : games)
+    {
+        const Answer answer =
+            m_display.Ask(QuestionText(game.first.first, game.first.second, game.second));
+        if (answer == Answer::None)
+        {
+            break;
+        }
+        for (const Question *question : game.second)
+        {
+            debugPrintf("Sync::Settle: %s answered %s\n", question->name.c_str(),
+                        answer == Answer::Yes ? "yes" : "no");
+            if (answer == Answer::Yes)
+            {
+                plan.downloads.push_back(Download{question->name, question->cloud});
+            }
+            else if (question->doubt == Doubt::ChangedOnBothSides)
+            {
+                plan.uploads.push_back(Upload{question->local, question->cloud.fileId});
+            }
+            else if (m_cloud.TrashFile(question->cloud.fileId))
+            {
+                m_state.Forget(question->name);
+            }
+        }
+    }
+    return plan;
+}
+
+std::string Sync::QuestionText(Doubt doubt, const std::string &titleId,
+                               const std::vector<const Question *> &questions) const
+{
+    std::string title;
+    for (const Question *question : questions)
+    {
+        if (!question->cloud.title.empty())
+        {
+            title = ShownTitle(question->cloud.title);
+        }
+        else if (question->local != nullptr)
+        {
+            title = ShownTitle(LocalTitle(question->name));
+        }
+        if (!title.empty())
+        {
+            break;
+        }
+    }
+    const std::string game = title.empty() ? titleId : title + " (" + titleId + ")";
+    const bool one = questions.size() == 1;
+    const char *copies = one ? "copy replaces" : "copies replace";
+    const char *them = one ? "it" : "them";
+    std::ostringstream text;
+    text << game << ":\n";
+    if (one)
+    {
+        text << "a save";
+    }
+    else
+    {
+        text << questions.size() << " saves";
+    }
+    if (doubt == Doubt::ChangedOnBothSides)
+    {
+        text << (one ? " has" : " have") << " changed both on this PS3 and in the cloud.\n\n"
+             << "Yes: the cloud's " << copies << " this PS3's.\n"
+             << "No: this PS3's " << copies << " the cloud's.";
+    }
+    else
+    {
+        text << (one ? " was" : " were") << " deleted on this PS3";
+        if (doubt == Doubt::DeletedOnConsole)
+        {
+            text << " but " << (one ? "is" : "are") << " still in the cloud.\n\n";
+        }
+        else
+        {
+            text << ", but another PS3 has sent " << (one ? "a newer copy of it" : "newer copies")
+                 << " to the cloud since.\n\n";
+        }
+        text << "Yes: bring " << them << " back to this PS3.\n"
+             << "No: delete " << them << " from the cloud too.";
+    }
+    return text.str();
+}
+
+std::string Sync::LocalTitle(const std::string &name) const
+{
+    std::string sfo;
+    return m_storage.Read(m_savedata + "/" + name + "/" + paramSfoName, sfo) ? ReadSfoTitle(sfo)
+                                                                             : std::string();
 }
 
 bool Sync::ListCloudSaves(std::map<std::string, CloudSave> &saves)
@@ -206,7 +353,8 @@ bool Sync::ListCloudSaves(std::map<std::string, CloudSave> &saves)
         {
             continue;
         }
-        const CloudSave save{file["id"].Str(), file["md5Checksum"].Str()};
+        const CloudSave save{file["id"].Str(), file["md5Checksum"].Str(),
+                             file["description"].Str()};
         const auto known = saves.find(name);
         if (known == saves.end())
         {
@@ -266,6 +414,8 @@ void Sync::QueueUpload(const LocalSave &save, const std::string &fileId, Progres
                 return false;
             }
             file.title = save.name + kArchiveSuffix;
+            // Every console can then name the game without bringing the archive down.
+            file.description = LocalTitle(save.name);
             file.parentId = m_rootFolderId;
             file.fileId = fileId;
             std::ostringstream text;
@@ -287,7 +437,7 @@ void Sync::QueueUpload(const LocalSave &save, const std::string &fileId, Progres
         });
 }
 
-bool Sync::Download(const std::string &name, const CloudSave &cloudSave)
+bool Sync::BringDown(const std::string &name, const CloudSave &cloudSave)
 {
     m_display.SetText(ProgressBar::Current, name);
     const std::string path = ArchivePath(name);
@@ -301,7 +451,7 @@ bool Sync::Download(const std::string &name, const CloudSave &cloudSave)
     std::string().swap(archive);
     if (!whole)
     {
-        debugPrintf("Sync::Download: %s could not be brought down whole\n", name.c_str());
+        debugPrintf("Sync::BringDown: %s could not be brought down whole\n", name.c_str());
         return false;
     }
 
@@ -313,7 +463,7 @@ bool Sync::Download(const std::string &name, const CloudSave &cloudSave)
     {
         if (!m_storage.Write(folder + "/" + file.name, file.content))
         {
-            debugPrintf("Sync::Download: %s/%s cannot be written\n", name.c_str(),
+            debugPrintf("Sync::BringDown: %s/%s cannot be written\n", name.c_str(),
                         file.name.c_str());
             return false;
         }
@@ -329,7 +479,7 @@ bool Sync::Download(const std::string &name, const CloudSave &cloudSave)
     }
     m_state.Record(name, SaveBase{cloudSave.fileId, cloudSave.md5,
                                   m_scanner.ScanSave(name).fingerprint, false});
-    debugPrintf("Sync::Download: %s saved\n", name.c_str());
+    debugPrintf("Sync::BringDown: %s saved\n", name.c_str());
     return true;
 }
 

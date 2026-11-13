@@ -31,7 +31,6 @@
 #include <sys/file.h>
 #include <io/pad.h>
 
-#include <sysutil/msg.h>
 #include <sysutil/sysutil.h>
 #include <sysutil/video.h>
 #include <sysutil/save.h>
@@ -60,6 +59,8 @@
 #include "json/Json.h"
 #include "app/DebugLog.h"
 #include "app/Paths.h"
+#include "ui/SyncDialog.h"
+#include "ui/TransferBar.h"
 
 const std::string appPath = APP_DIR;
 // A Google client of the user's own, which takes the place of the published one.
@@ -71,12 +72,7 @@ const unsigned int microsecondsPerSecond = 1000000;
 
 HttpClient http;
 GoogleDeviceAuth googleAuth(http);
-// The lower progress bar shows the files GoogleDrive moves; its functions are further down.
-int transferProgress(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow);
-void beginTransfer(const std::string &path);
-void endTransfer();
-GoogleDrive drive(http, googleAuth, parallelUploads,
-                  TransferDisplay{beginTransfer, transferProgress, endTransfer});
+GoogleDrive drive(http, googleAuth, parallelUploads, MakeTransferBar());
 
 SDL_Event event;
 SDL_Surface *screen = NULL;
@@ -91,12 +87,11 @@ SDL_mutex *messageLock = NULL;
 std::string pendingMessage;
 bool messageChanged = false;
 
-msgType dialog_type;
-
 // The sync thread and the main thread both use these flags.
-static std::atomic<int> dialog_action(0);
 std::atomic<int> exitapp(0);
 std::atomic<int> syncing(0);
+
+SyncDialog syncDialog(exitapp);
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then run Own Storage again.";
@@ -105,11 +100,8 @@ const char driveRefusedMessage[] = "Google Drive refused a request. Run Own Stor
 const char localFileMessage[] =
     "Own Storage cannot write to the PS3 hard disk. Check the free space.";
 const char unknownUserMessage[] = "Own Storage cannot tell which user is logged in.";
-const unsigned int dialogPollMicroseconds = 100000;
 
 int xmbopen = 0;
-
-double progFuncLastProgress = 0.0;
 
 int appWidth = 1280;
 int appHeight = 720;
@@ -138,25 +130,6 @@ void sysevent_callback(u64 status, u64 param, void *userdata)
         break;
     case SYSUTIL_MENU_CLOSE:
         xmbopen = 0;
-        break;
-    }
-}
-
-static void dialog_handler(msgButton button, void *usrData)
-{
-    switch (button)
-    {
-    case MSG_DIALOG_BTN_OK:
-        dialog_action = 1;
-        break;
-    case MSG_DIALOG_BTN_NO:
-    case MSG_DIALOG_BTN_ESCAPE:
-        dialog_action = 2;
-        break;
-    case MSG_DIALOG_BTN_NONE:
-        dialog_action = -1;
-        break;
-    default:
         break;
     }
 }
@@ -221,113 +194,13 @@ void drawPendingMessage()
     SDL_FreeSurface(rendered);
 }
 
-int transferProgress(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow)
-{
-    if (dltotal > 0.0)
-    {
-        double curProg = (dlnow / dltotal) * 100;
-        if (curProg - progFuncLastProgress > 1)
-        {
-            msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, curProg - progFuncLastProgress);
-
-            debugPrintf("DOWN: %f of %f P: %f C: %f\r\n", dlnow, dltotal, progFuncLastProgress,
-                        curProg);
-
-            progFuncLastProgress = curProg;
-        }
-    }
-
-    if (ultotal > 0.0)
-    {
-        double curProg = (ulnow / ultotal) * 100;
-        if (curProg - progFuncLastProgress > 1)
-        {
-            msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, curProg - progFuncLastProgress);
-
-            debugPrintf("UP: %f of %f P: %f C: %f\r\n", ulnow, ultotal, progFuncLastProgress,
-                        curProg);
-
-            progFuncLastProgress = curProg;
-        }
-    }
-
-    return 0;
-}
-
-/**
- * Shows on the lower progress bar that a file starts to move.
- * @param path the local file
- */
-void beginTransfer(const std::string &path)
-{
-    progFuncLastProgress = 0.0;
-    msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
-    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, path.c_str());
-}
-
-/**
- * Fills the lower progress bar for a file that moved in one go.
- */
-void endTransfer()
-{
-    msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, 100);
-}
-
-/** The sync's progress in the system's message dialog, with its two bars. */
-class ProgressDialog : public SyncDisplay
-{
-  public:
-    void SetText(ProgressBar bar, const std::string &text) override
-    {
-        msgDialogProgressBarSetMsg(Index(bar), text.c_str());
-    }
-    void Reset(ProgressBar bar) override
-    {
-        msgDialogProgressBarReset(Index(bar));
-    }
-    void Advance(ProgressBar bar, unsigned int points) override
-    {
-        msgDialogProgressBarInc(Index(bar), points);
-    }
-    bool Cancelled() const override
-    {
-        return dialog_action != 0;
-    }
-
-  private:
-    static u32 Index(ProgressBar bar)
-    {
-        return bar == ProgressBar::Overall ? MSG_PROGRESSBAR_INDEX0 : MSG_PROGRESSBAR_INDEX1;
-    }
-};
-
-/**
- * Tells the user that Drive has no room left, and waits until the message is closed.
- */
-void showDriveFullDialog()
-{
-    dialog_action = 0;
-    // msgDialogOpen2 refuses while another dialog is open, and the aborted sync dialog may
-    // still be closing.
-    while (msgDialogOpen2(static_cast<msgType>(MSG_DIALOG_ERROR | MSG_DIALOG_BTN_TYPE_OK),
-                          driveFullMessage, dialog_handler, NULL, NULL) != 0 &&
-           exitapp == 0)
-    {
-        sysUsleep(dialogPollMicroseconds);
-    }
-    while (dialog_action == 0 && exitapp == 0)
-    {
-        sysUsleep(dialogPollMicroseconds);
-    }
-}
-
 /**
  * Ends the sync early and tells the user why; the user quits with X.
  * @param message the reason, as the user reads it
  */
 void stopSync(const char *message)
 {
-    msgDialogAbort();
+    syncDialog.Close();
     showMessage(message);
     syncing = 0;
 }
@@ -442,7 +315,7 @@ int initCloudDrive(void *arg)
 
     showMessage("Syncing...Please DO NOT Quit or Shutdown the PS3!");
 
-    msgDialogOpen2(dialog_type, "Performing Sync...", dialog_handler, NULL, NULL);
+    syncDialog.ShowProgress();
 
     // If user new but remote data exists
     Json rootResource;
@@ -481,8 +354,7 @@ int initCloudDrive(void *arg)
     // Without a state of its own every save starts without a base; the sync works it out.
     SyncState state(profile + "/state.json", profile + "/state.backup");
     state.Load();
-    ProgressDialog progressDialog;
-    Sync sync(drive, state, consoleStorage, progressDialog, config.rootFolderId, savedata,
+    Sync sync(drive, state, consoleStorage, syncDialog, config.rootFolderId, savedata,
               profileMarkerSave, profile);
     if (!sync.Run())
     {
@@ -490,11 +362,11 @@ int initCloudDrive(void *arg)
         return 0;
     }
 
-    msgDialogAbort();
     if (drive.IsFull())
     {
-        showDriveFullDialog();
+        syncDialog.ShowError(driveFullMessage);
     }
+    syncDialog.Close();
 
     syncing = 0;
 
@@ -563,9 +435,6 @@ int main(int argc, char **argv)
 
     ioPadInit(7);
 
-    dialog_action = 0;
-    dialog_type = static_cast<msgType>(MSG_DIALOG_MUTE_ON | MSG_DIALOG_DOUBLE_PROGRESSBAR);
-
     while (exitapp == 0)
     {
         sysUtilCheckCallback();
@@ -583,7 +452,6 @@ int main(int argc, char **argv)
                         debugPrintf("Quit Called\n");
                         if (syncing == 0)
                         {
-                            dialog_action = 2;
                             exitapp = 1; // Quit application
                         }
                     }
@@ -596,7 +464,7 @@ int main(int argc, char **argv)
 
     debugPrintf("The application exited...%d\n", exitapp.load());
 
-    msgDialogAbort();
+    syncDialog.Close();
 
     SDL_KillThread(thread);
     SDL_DestroyMutex(messageLock);

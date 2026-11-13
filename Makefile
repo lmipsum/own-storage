@@ -34,7 +34,7 @@ include $(PSL1GHT)/ppu_rules
 #---------------------------------------------------------------------------------
 TARGET		:=	own-storage
 BUILD		:=	build
-SOURCES		:=	source source/app source/auth source/drive source/json source/net source/sync
+SOURCES		:=	source source/app source/auth source/drive source/json source/net source/sync source/ui
 DATA		:=	data
 INCLUDES	:=	source
 
