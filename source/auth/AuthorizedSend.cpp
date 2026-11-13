@@ -5,6 +5,8 @@
 #include "app/DebugLog.h"
 #include "json/Json.h"
 
+#include <cstdlib>
+
 #include <sys/systime.h>
 
 std::string ReadErrorReason(const std::string &reply)
@@ -27,6 +29,11 @@ bool IsRetryable(long status, const std::string &reply, Retry retry)
         return reason == "rateLimitExceeded" || reason == "userRateLimitExceeded";
     }
     return retry == Retry::AnyTransient && (status == -1 || status >= 500);
+}
+
+unsigned long long AddJitter(unsigned long long wait)
+{
+    return wait + static_cast<unsigned long long>(std::rand()) % kMaxRetryJitterMicroseconds;
 }
 
 HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::string &token)
@@ -58,8 +65,9 @@ long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
         {
             return status;
         }
-        debugPrintf("SendAuthorized: status %ld, retrying in %llu ms\n", status, wait / 1000);
-        sysUsleep(wait);
+        const unsigned long long jittered = AddJitter(wait);
+        debugPrintf("SendAuthorized: status %ld, retrying in %llu ms\n", status, jittered / 1000);
+        sysUsleep(jittered);
         wait *= 2;
     }
     return status;

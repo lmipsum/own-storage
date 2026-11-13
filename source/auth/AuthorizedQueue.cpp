@@ -183,9 +183,10 @@ void AuthorizedQueue::Finish(Slot &slot, long status)
     }
     if (IsRetryable(status, slot.reply, item.request.retry) && item.attempt < kSendAttempts)
     {
+        const unsigned long long jittered = AddJitter(item.wait);
         debugPrintf("AuthorizedQueue::Finish: status %ld, retrying in %llu ms\n", status,
-                    item.wait / 1000);
-        item.notBefore = NowMicroseconds() + item.wait;
+                    jittered / 1000);
+        item.notBefore = NowMicroseconds() + jittered;
         item.wait *= 2;
         m_waiting.push_front(std::move(item));
         return;

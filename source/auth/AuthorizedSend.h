@@ -26,6 +26,16 @@ enum class Retry
 /** How often a request is sent at most, and the wait before the first repeat (it doubles). */
 const int kSendAttempts = 5;
 const unsigned long long kFirstRetryWaitMicroseconds = 1000000;
+/** The most a retry waits beyond its doubling wait, picked at random. */
+const unsigned long long kMaxRetryJitterMicroseconds = 1000000;
+
+/**
+ * Adds a random part to a retry wait, so that requests that failed together, such as on a rate
+ * limit, are not sent again together.
+ * @param wait the doubling wait
+ * @return the wait plus up to kMaxRetryJitterMicroseconds
+ */
+unsigned long long AddJitter(unsigned long long wait);
 
 /**
  * The first reason in a Google API error reply.
