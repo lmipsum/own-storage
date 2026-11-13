@@ -6,13 +6,7 @@
 
 #include <sys/systime.h>
 
-namespace
-{
-const int kAttempts = 5;
-const unsigned long long kFirstWaitMicroseconds = 1000000;
-
-/** True for a status that may pass on a later attempt, as retry allows. */
-bool IsTransient(long status, Retry retry)
+bool IsRetryable(long status, Retry retry)
 {
     // Google asks clients to retry rate limits and server errors with exponential backoff.
     return (status == -1 && retry == Retry::AlsoUnanswered) || status == 429 || status >= 500;
@@ -24,15 +18,14 @@ HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::stri
     all.push_back("Authorization: Bearer " + token);
     return all;
 }
-} // namespace
 
 long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
                     const Request &request, Retry retry)
 {
     bool refreshed = false;
-    unsigned long long wait = kFirstWaitMicroseconds;
+    unsigned long long wait = kFirstRetryWaitMicroseconds;
     long status = -1;
-    for (int attempt = 1; attempt <= kAttempts; ++attempt)
+    for (int attempt = 1; attempt <= kSendAttempts; ++attempt)
     {
         status = request(AddToken(headers, auth.AccessToken()));
         if (status == 401 && !refreshed)
@@ -44,7 +37,7 @@ long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
             }
             continue;
         }
-        if (!IsTransient(status, retry) || attempt == kAttempts)
+        if (!IsRetryable(status, retry) || attempt == kSendAttempts)
         {
             return status;
         }

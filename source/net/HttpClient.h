@@ -42,6 +42,13 @@ class HttpClient
 
     /** True for a 2xx status. */
     static bool Succeeded(long status);
+    /**
+     * Gives a fresh curl handle the settings every request shares: the URL, the user agent,
+     * certificate checks against the shipped CA bundle, and the connect timeout.
+     */
+    static void ApplyDefaults(CURL *curl, const std::string &url);
+    /** curl write callback that appends the received data to the std::string at body. */
+    static size_t AppendToString(char *data, size_t size, size_t count, void *body);
 
   private:
     HttpClient(const HttpClient &);

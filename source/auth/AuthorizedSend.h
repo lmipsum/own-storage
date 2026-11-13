@@ -17,6 +17,16 @@ enum class Retry
     OnlyAnswered
 };
 
+/** How often a request is sent at most, and the wait before the first repeat (it doubles). */
+const int kSendAttempts = 5;
+const unsigned long long kFirstRetryWaitMicroseconds = 1000000;
+
+/** True for a status that may pass on a later attempt, as retry allows. */
+bool IsRetryable(long status, Retry retry);
+
+/** The headers with an Authorization header for token added. */
+HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::string &token);
+
 /**
  * Sends request with headers plus the bearer token of auth, built anew for every attempt.
  * An expired token is refreshed and the request sent again once; a busy server gets a few more

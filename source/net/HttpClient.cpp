@@ -11,12 +11,6 @@ namespace
 {
 const char kUserAgent[] = "Own Storage";
 
-size_t AppendTo(char *data, size_t size, size_t count, void *body)
-{
-    static_cast<std::string *>(body)->append(data, size * count);
-    return size * count;
-}
-
 size_t WriteTo(char *data, size_t size, size_t count, void *file)
 {
     return std::fwrite(data, size, count, static_cast<FILE *>(file)) * size;
@@ -55,19 +49,30 @@ HttpClient::~HttpClient()
     curl_easy_cleanup(m_curl);
 }
 
+void HttpClient::ApplyDefaults(CURL *curl, const std::string &url)
+{
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, kUserAgent);
+    curl_easy_setopt(curl, CURLOPT_CAINFO, APP_DIR "cacert.pem");
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+}
+
+size_t HttpClient::AppendToString(char *data, size_t size, size_t count, void *body)
+{
+    static_cast<std::string *>(body)->append(data, size * count);
+    return size * count;
+}
+
 void HttpClient::Prepare(const std::string &url)
 {
     // A reset keeps the open connections, so the next request can reuse them.
     curl_easy_reset(m_curl);
     m_location.clear();
-    curl_easy_setopt(m_curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(m_curl, CURLOPT_USERAGENT, kUserAgent);
-    curl_easy_setopt(m_curl, CURLOPT_CAINFO, APP_DIR "cacert.pem");
-    curl_easy_setopt(m_curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(m_curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(m_curl, CURLOPT_CONNECTTIMEOUT, 30L);
-    curl_easy_setopt(m_curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(m_curl, CURLOPT_ACCEPT_ENCODING, "");
+    ApplyDefaults(m_curl, url);
     curl_easy_setopt(m_curl, CURLOPT_HEADERFUNCTION, &HttpClient::KeepHeader);
     curl_easy_setopt(m_curl, CURLOPT_HEADERDATA, this);
 }
@@ -95,7 +100,7 @@ long HttpClient::Get(const std::string &url, const Headers &headers, std::string
 {
     Prepare(url);
     body.clear();
-    curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, &AppendTo);
+    curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, &HttpClient::AppendToString);
     curl_easy_setopt(m_curl, CURLOPT_WRITEDATA, &body);
     return Perform(headers);
 }
@@ -107,7 +112,7 @@ long HttpClient::Post(const std::string &url, const std::string &data, const Hea
     body.clear();
     curl_easy_setopt(m_curl, CURLOPT_POSTFIELDS, data.c_str());
     curl_easy_setopt(m_curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(data.size()));
-    curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, &AppendTo);
+    curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, &HttpClient::AppendToString);
     curl_easy_setopt(m_curl, CURLOPT_WRITEDATA, &body);
     return Perform(headers);
 }
@@ -120,7 +125,7 @@ long HttpClient::Put(const std::string &url, const std::string &data, const Head
     curl_easy_setopt(m_curl, CURLOPT_CUSTOMREQUEST, "PUT");
     curl_easy_setopt(m_curl, CURLOPT_POSTFIELDS, data.c_str());
     curl_easy_setopt(m_curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(data.size()));
-    curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, &AppendTo);
+    curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, &HttpClient::AppendToString);
     curl_easy_setopt(m_curl, CURLOPT_WRITEDATA, &body);
     return Perform(headers);
 }
@@ -163,7 +168,7 @@ long HttpClient::Upload(const std::string &url, const Headers &headers, const st
     curl_easy_setopt(m_curl, CURLOPT_INFILESIZE, size);
     curl_easy_setopt(m_curl, CURLOPT_READFUNCTION, &ReadFrom);
     curl_easy_setopt(m_curl, CURLOPT_READDATA, file);
-    curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, &AppendTo);
+    curl_easy_setopt(m_curl, CURLOPT_WRITEFUNCTION, &HttpClient::AppendToString);
     curl_easy_setopt(m_curl, CURLOPT_WRITEDATA, &body);
     ReportProgress(m_curl, progress);
     const long status = Perform(headers);
