@@ -51,7 +51,7 @@ bool IsDriveFullError(const std::string &reply)
 } // namespace
 
 GoogleDrive::GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, const TransferDisplay &display)
-    : m_http(http), m_auth(auth), m_display(display), m_full(false)
+    : m_http(http), m_auth(auth), m_display(display), m_full(false), m_lastFailureUnanswered(false)
 {
 }
 
@@ -66,8 +66,7 @@ bool GoogleDrive::FindFirst(const std::string &query, Json &item)
         { return m_http.Get(url, withToken, body); }, reply);
     if (!HttpClient::Succeeded(status))
     {
-        debugPrintf("FindFirst: HTTP Server Error...%ld %s\n", status,
-                    DescribeDriveError(reply).c_str());
+        NoteFailure("FindFirst: Could not search", status, reply);
         return false;
     }
     const Json::Array items = Json::Parse(reply)["items"].AsArray();
@@ -101,8 +100,7 @@ Json GoogleDrive::CreateFolder(const std::string &title, const std::string &pare
     const Json folder = Json::Parse(reply);
     if (!HttpClient::Succeeded(status) || !folder.Has("id"))
     {
-        debugPrintf("CreateFolder: Could not create folder..%ld %s\n", status,
-                    DescribeDriveError(reply).c_str());
+        NoteFailure("CreateFolder: Could not create folder", status, reply);
         return Json();
     }
     debugPrintf("CreateFolder: created %s\n", folder["id"].Str().c_str());
@@ -266,13 +264,13 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
         { return m_http.Get(url, withToken, body); }, reply);
     if (!HttpClient::Succeeded(status))
     {
-        debugPrintf("DownloadFile: Could not get downloadUrl...%ld %s\n", status,
-                    DescribeDriveError(reply).c_str());
+        NoteFailure("DownloadFile: Could not get downloadUrl", status, reply);
         return false;
     }
     const Json file = Json::Parse(reply);
     if (!file.Has("downloadUrl"))
     {
+        NoteFailure("DownloadFile: No downloadUrl", status, reply);
         return false;
     }
     const std::string downloadUrl = file["downloadUrl"].Str();
@@ -286,7 +284,7 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
         unusedReply);
     if (!HttpClient::Succeeded(status))
     {
-        debugPrintf("DownloadFile: Could not download File..%ld\n", status);
+        NoteFailure("DownloadFile: Could not download file", status, unusedReply);
         return false;
     }
     return true;
@@ -295,6 +293,7 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
 void GoogleDrive::NoteFailure(const char *what, long status, const std::string &reply)
 {
     debugPrintf("%s..%ld %s\n", what, status, DescribeDriveError(reply).c_str());
+    m_lastFailureUnanswered = status < 0;
     if (IsDriveFullError(reply))
     {
         m_full = true;
@@ -304,6 +303,11 @@ void GoogleDrive::NoteFailure(const char *what, long status, const std::string &
 bool GoogleDrive::IsFull() const
 {
     return m_full;
+}
+
+bool GoogleDrive::LastFailureUnanswered() const
+{
+    return m_lastFailureUnanswered;
 }
 
 std::string BuildMetadata(const std::string &title, const std::string &mimeType,

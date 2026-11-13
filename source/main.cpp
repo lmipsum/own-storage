@@ -118,6 +118,9 @@ std::atomic<int> syncing(0);
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then run Own Storage again.";
 const char driveUnreachableMessage[] = "Cannot reach Google Drive. Check the network.";
+const char driveRefusedMessage[] = "Google Drive refused a request. Run Own Storage again later.";
+const char remoteStateDamagedMessage[] =
+    "The Own Storage state on Google Drive (remote.json) cannot be read.";
 const unsigned int dialogPollMicroseconds = 100000;
 
 // A full remote.json save costs about 0.2 s on the console, so changes go to the journal and
@@ -308,29 +311,40 @@ void downloadDirectory(std::string path)
     sysFsMkdir(path.c_str(), 0755);
 }
 
+/** How reading remote.json from Drive ended. */
+enum class RemoteStateFetch
+{
+    /** Read, or Drive has none. */
+    Done,
+    /** A Drive request failed. */
+    Failed,
+    /** Downloaded, but it is not a sync state. */
+    Damaged
+};
+
 /**
  * Downloads remote.json, the state of the backup on Drive, and reads it.
- * @param state receives the state; empty when Drive has no remote.json
- * @return false when Drive could not be asked, or its remote.json could not be downloaded or read
+ * @param state receives the state; empty when Drive has no remote.json or it cannot be read
+ * @return how it ended
  */
-bool downloadRemoteState(Json &state)
+RemoteStateFetch downloadRemoteState(Json &state)
 {
     state = Json();
     Json remoteJson;
     if (!drive.FindInFolder(remoteStateTitle, ItemKind::File, config.rootFolderId, remoteJson))
     {
-        return false;
+        return RemoteStateFetch::Failed;
     }
     if (!remoteJson.Has("id"))
     {
         debugPrintf("downloadRemoteState: there is no remote.json on Google Drive\n");
-        return true;
+        return RemoteStateFetch::Done;
     }
     debugPrintf("Downloading remote.json from Google Drive with id %s\n",
                 remoteJson["id"].Str().c_str());
     if (!drive.DownloadFile(remoteJson["id"].Str(), remoteResourceFile))
     {
-        return false;
+        return RemoteStateFetch::Failed;
     }
     // A journal left on disk belongs to the state the download has just replaced.
     std::remove(remoteJournal.c_str());
@@ -340,9 +354,9 @@ bool downloadRemoteState(Json &state)
         // Left on disk, the next run would take it for its own state.
         std::remove(remoteResourceFile.c_str());
         state = Json();
-        return false;
+        return RemoteStateFetch::Damaged;
     }
-    return true;
+    return RemoteStateFetch::Done;
 }
 
 void downloadChanges()
@@ -509,13 +523,38 @@ void showDriveFullDialog()
 }
 
 /**
- * Ends the sync early because Drive did not answer, and tells the user, who quits with X.
+ * Ends the sync early and tells the user why; the user quits with X.
+ * @param message the reason, as the user reads it
  */
-void stopSyncUnreachable()
+void stopSync(const char *message)
 {
     msgDialogAbort();
-    showMessage(driveUnreachableMessage);
+    showMessage(message);
     syncing = 0;
+}
+
+/**
+ * Ends the sync early after a failed Drive request, naming its likely cause.
+ */
+void stopSyncAfterFailure()
+{
+    stopSync(drive.LastFailureUnanswered() ? driveUnreachableMessage : driveRefusedMessage);
+}
+
+/**
+ * Ends the sync early when remote.json could not be read from Drive.
+ * @param fetched how reading it ended; not RemoteStateFetch::Done
+ */
+void stopSyncAfterFetch(RemoteStateFetch fetched)
+{
+    if (fetched == RemoteStateFetch::Damaged)
+    {
+        stopSync(remoteStateDamagedMessage);
+    }
+    else
+    {
+        stopSyncAfterFailure();
+    }
 }
 
 /**
@@ -838,8 +877,7 @@ void finishFolderRequest(u32 index, const std::string &parentId, UploadProgress 
     const Json folder = Json::Parse(reply);
     if (!HttpClient::Succeeded(status) || !folder.Has("id"))
     {
-        debugPrintf("finishFolderRequest: Could not create directory..%ld %s\n", status,
-                    DescribeDriveError(reply).c_str());
+        drive.NoteFailure("finishFolderRequest: Could not create directory", status, reply);
         return;
     }
     debugPrintf("finishFolderRequest: created %s\n", folder["id"].Str().c_str());
@@ -1513,7 +1551,7 @@ int initCloudDrive(void *arg)
     Json rootResource;
     if (!drive.FindInFolder(driveFolderName, ItemKind::Folder, "root", rootResource))
     {
-        stopSyncUnreachable();
+        stopSyncAfterFailure();
         return 0;
     }
     if (rootResource.Has("id"))
@@ -1540,7 +1578,7 @@ int initCloudDrive(void *arg)
         else
         {
             debugPrintf("Error creating root folder on Google Drive\n");
-            stopSyncUnreachable();
+            stopSyncAfterFailure();
             return 0;
         }
     }
@@ -1582,10 +1620,14 @@ int initCloudDrive(void *arg)
         {
             replayJournal();
         }
-        else if (!downloadRemoteState(remoteResourceRoot))
+        else
         {
-            stopSyncUnreachable();
-            return 0;
+            const RemoteStateFetch fetched = downloadRemoteState(remoteResourceRoot);
+            if (fetched != RemoteStateFetch::Done)
+            {
+                stopSyncAfterFetch(fetched);
+                return 0;
+            }
         }
         // Without a data array, detectChanges has nowhere to add the new entries.
         if (!remoteResourceRoot.Has("data"))
@@ -1605,9 +1647,10 @@ int initCloudDrive(void *arg)
     // TODO: Revert to Second Time scenario
     if (userType == "three")
     {
-        if (!downloadRemoteState(remoteResourceRoot))
+        const RemoteStateFetch fetched = downloadRemoteState(remoteResourceRoot);
+        if (fetched != RemoteStateFetch::Done)
         {
-            stopSyncUnreachable();
+            stopSyncAfterFetch(fetched);
             return 0;
         }
         if (!remoteResourceRoot.IsEmpty())

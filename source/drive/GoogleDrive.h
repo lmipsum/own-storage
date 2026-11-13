@@ -107,7 +107,8 @@ class GoogleDrive
     QueuedRequest BuildMultipartRequest(const std::string &meta, const std::string &mimeType,
                                         const std::string &content, const std::string &fileId);
     /**
-     * Logs a failed request, and remembers when Drive refused it for lack of room.
+     * Logs a failed request, and remembers whether it got an answer and whether Drive refused it
+     * for lack of room.
      * @param what what failed, as the debug log names it
      * @param status the HTTP status, or -1 when no answer came
      * @param reply the body Drive answered with
@@ -115,6 +116,8 @@ class GoogleDrive
     void NoteFailure(const char *what, long status, const std::string &reply);
     /** Whether Drive has refused an upload for lack of room. */
     bool IsFull() const;
+    /** Whether the last failed request got no answer at all, which points to the network. */
+    bool LastFailureUnanswered() const;
 
   private:
     GoogleDrive(const GoogleDrive &) = delete;
@@ -140,6 +143,7 @@ class GoogleDrive
     GoogleDeviceAuth &m_auth;
     TransferDisplay m_display;
     bool m_full;
+    bool m_lastFailureUnanswered;
 };
 
 /**
