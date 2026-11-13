@@ -1,0 +1,56 @@
+SPDX-License-Identifier: GPL-3.0-or-later
+
+SDL_PSL1GHT's renderer flips without making room in the RSX command buffer; the package's
+SDL is built with this patch (see .github/workflows/package.yml).
+
+--- a/src/render/psl1ght/SDL_PSL1GHTrender.c
++++ b/src/render/psl1ght/SDL_PSL1GHTrender.c
+@@ -591,6 +591,36 @@
+                              format, pixels, pitch);
+ }
+ 
++/* Command buffer words kept free for a flip, with a wide margin. */
++#define FLIP_COMMAND_ROOM 0x800
++
++/* Calls the context's callback, which hands the filled buffer to the RSX and starts over.
++   librsx's rsxContextCallback does the same but does not put the context and the count in
++   r3 and r4. After SplinterGU/BennuGD2 ps3-psl1ght-patch/sdl2_psl1ght-cmdbuf-wrap.patch. */
++static s32
++PSL1GHT_ContextCallback(gcmContextData *context, u32 count)
++{
++    register u64 r3 asm("r3") = (u64) context;
++    register u64 r4 asm("r4") = count;
++    u64 callback = (u64) context->callback;
++
++    __asm__ __volatile__ (
++        "stdu   1,-128(1)\n"
++        "mr     31,2\n"
++        "lwz    0,0(%2)\n"
++        "lwz    2,4(%2)\n"
++        "mtctr  0\n"
++        "bctrl\n"
++        "mr     2,31\n"
++        "addi   1,1,128\n"
++        : "+r"(r3), "+r"(r4)
++        : "b"(callback)
++        : "r31", "r0", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12",
++          "lr", "ctr", "cr0", "cr1", "cr5", "cr6", "cr7", "xer", "memory");
++
++    return (s32) r3;
++}
++
+ static void
+ PSL1GHT_RenderPresent(SDL_Renderer * renderer)
+ {
+@@ -601,6 +631,11 @@
+     else
+         gcmResetFlipStatus();
+ 
++    /* gcmSetFlip and gcmSetWaitFlip write without checking for room, so a program that only
++       flips runs past the end of the buffer and stalls the RSX after about 256 frames. */
++    if (data->context->end - data->context->current < FLIP_COMMAND_ROOM)
++        PSL1GHT_ContextCallback(data->context, FLIP_COMMAND_ROOM);
++
+     gcmSetFlip(data->context, data->current_screen);
+     rsxFlushBuffer(data->context);
+ 

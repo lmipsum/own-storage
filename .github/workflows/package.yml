@@ -21,6 +21,9 @@ env:
   # nightlies, so one is pinned by its hash.
   SDK_URL: https://github.com/ps3dev/ps3dev/releases/download/nightly-2026-10-12/ps3dev-linux-X64.tar.gz
   SDK_SHA256: 76b1b3bc9ac260a4ece86da520225da7f2f4e334174e37b850093ff925eeb900
+  # The SDK's SDL source, pinned, rebuilt with patches/sdl-psl1ght-flip-room.patch.
+  SDL_URL: https://github.com/zeldin/SDL_PSL1GHT/archive/641a8ca2efa3f775d489daa37878ada1d92c24ab.tar.gz
+  SDL_SHA256: dc4a650d4b6afe4ad8c91e2d7d302570503fcf5453d7a183377225a2b3d0f66c
 
 jobs:
   package:
@@ -39,7 +42,9 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update -qq
-          apt-get install -y -qq --no-install-recommends ca-certificates curl make libelf1t64
+          # autoconf and patch rebuild SDL in the next steps.
+          apt-get install -y -qq --no-install-recommends ca-certificates curl make libelf1t64 \
+            autoconf patch
       - name: PSL1GHT SDK
         run: |
           curl -fsSL "$SDK_URL" -o ps3dev.tar.gz
@@ -48,6 +53,18 @@ jobs:
           rm ps3dev.tar.gz
           echo "PS3DEV=/opt/ps3dev" >> "$GITHUB_ENV"
           echo "PSL1GHT=/opt/ps3dev" >> "$GITHUB_ENV"
+      - name: SDL with room for flips
+        shell: bash
+        run: |
+          curl -fsSL "$SDL_URL" -o /tmp/sdl.tar.gz
+          echo "$SDL_SHA256  /tmp/sdl.tar.gz" | sha256sum -c -
+          mkdir /tmp/sdl
+          tar xzf /tmp/sdl.tar.gz -C /tmp/sdl --strip-components=1
+          patch -d /tmp/sdl -p1 < patches/sdl-psl1ght-flip-room.patch
+          cd /tmp/sdl
+          export PATH="$PS3DEV/ppu/bin:$PATH"
+          ./script.sh
+          make -j"$(nproc)" install
       - name: Build
         env:
           LOG_HOST: ${{ inputs.log_host }}
