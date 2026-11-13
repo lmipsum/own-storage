@@ -8,8 +8,9 @@
 
 bool IsRetryable(long status, Retry retry)
 {
-    // Google asks clients to retry rate limits and server errors with exponential backoff.
-    return (status == -1 && retry == Retry::AlsoUnanswered) || status == 429 || status >= 500;
+    // Google asks clients to retry rate limits and server errors with exponential backoff. A
+    // server error or a lost answer may come after the request was done, though.
+    return status == 429 || (retry == Retry::AnyTransient && (status == -1 || status >= 500));
 }
 
 HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::string &token)

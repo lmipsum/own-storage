@@ -103,8 +103,10 @@ Json GoogleDrive::CreateFolder(const std::string &title, const std::string &pare
 
     debugPrintf("Attempting folder creation on GDrive...\n");
     std::string reply;
-    const long status = SendAuthorized(m_auth, headers, [&](const HttpClient::Headers &withToken)
-                                       { return m_http.Post(url, meta, withToken, reply); });
+    // A create sent twice makes two folders; the next run looks for the folder instead.
+    const long status = SendAuthorized(
+        m_auth, headers, [&](const HttpClient::Headers &withToken)
+        { return m_http.Post(url, meta, withToken, reply); }, Retry::OnlyRefused);
     if (!HttpClient::Succeeded(status))
     {
         debugPrintf("CreateFolder: Could not create folder..%ld %s\n", status,
@@ -158,9 +160,9 @@ QueuedRequest GoogleDrive::BuildMultipartRequest(const std::string &meta,
                    "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + meta + "\r\n--" +
                    multipartBoundary + "\r\nContent-Type: " + mimeType + "\r\n\r\n" + content +
                    "\r\n--" + multipartBoundary + "--\r\n";
-    // A create sent twice makes two files, so it is not sent again when its answer is lost;
+    // A create sent twice makes two files, so it is not sent again when it may have been done;
     // the entry stays in creatingStatus and the next run looks for the file instead.
-    request.retry = fileId.empty() ? Retry::OnlyAnswered : Retry::AlsoUnanswered;
+    request.retry = fileId.empty() ? Retry::OnlyRefused : Retry::AnyTransient;
     return request;
 }
 

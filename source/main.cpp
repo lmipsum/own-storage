@@ -834,7 +834,7 @@ bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress
     request.headers.push_back("Expect:");
     request.body = BuildMetadata(resource["title"].Str(), folderMime, parentId);
     // A create sent twice makes two folders; see GoogleDrive::BuildMultipartRequest.
-    request.retry = Retry::OnlyAnswered;
+    request.retry = Retry::OnlyRefused;
     showRequestsInProgress(running, "folders", resource["title"].Str());
     return true;
 }

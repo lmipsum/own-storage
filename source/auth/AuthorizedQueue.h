@@ -21,7 +21,7 @@ struct QueuedRequest
     std::string url;
     HttpClient::Headers headers;
     std::string body;
-    Retry retry = Retry::AlsoUnanswered;
+    Retry retry = Retry::AnyTransient;
 };
 
 /**

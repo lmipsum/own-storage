@@ -10,11 +10,13 @@ class GoogleDeviceAuth;
 /** One HTTP request, sent with the headers it is given; returns the status, or -1. */
 typedef std::function<long(const HttpClient::Headers &)> Request;
 
-/** Whether a request is sent again when no answer came back at all. */
+/** Which failures a request is sent again after. */
 enum class Retry
 {
-    AlsoUnanswered,
-    OnlyAnswered
+    /** No answer, a rate limit or a server error: for requests that may be done twice. */
+    AnyTransient,
+    /** Only a rate limit, which the server answers without doing the request: for creates. */
+    OnlyRefused
 };
 
 /** How often a request is sent at most, and the wait before the first repeat (it doubles). */
@@ -29,9 +31,8 @@ HttpClient::Headers AddToken(const HttpClient::Headers &headers, const std::stri
 
 /**
  * Sends request with headers plus the bearer token of auth, built anew for every attempt.
- * An expired token is refreshed and the request sent again once; a busy server gets a few more
- * attempts with a doubling wait, and so does an unreachable one unless retry is OnlyAnswered
- * (for requests that must not be done twice). Returns the status of the last attempt.
+ * An expired token is refreshed and the request sent again once; the failures retry names get
+ * a few more attempts with a doubling wait. Returns the status of the last attempt.
  */
 long SendAuthorized(GoogleDeviceAuth &auth, const HttpClient::Headers &headers,
-                    const Request &request, Retry retry = Retry::AlsoUnanswered);
+                    const Request &request, Retry retry = Retry::AnyTransient);
