@@ -36,6 +36,8 @@ class GoogleDeviceAuth
     unsigned int PollIntervalSeconds() const;
     /** Gets a new access token with the refresh token; false when it is no longer valid. */
     bool Refresh();
+    /** Whether Google said at the last refresh that the refresh token is no longer valid. */
+    bool SignInRefused() const;
 
     const std::string &AccessToken() const;
     const std::string &RefreshToken() const;
@@ -49,4 +51,5 @@ class GoogleDeviceAuth
     unsigned int m_pollIntervalSeconds;
     std::string m_accessToken;
     std::string m_refreshToken;
+    bool m_signInRefused;
 };

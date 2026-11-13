@@ -3,7 +3,9 @@
 #include "TestCloud.h"
 #include "TestConsole.h"
 
+#include "app/CloudSaveText.h"
 #include "sync/ParamSfo.h"
+#include "sync/SaveBrowser.h"
 #include "sync/SaveScanner.h"
 #include "sync/Sync.h"
 #include "sync/SyncDisplay.h"
@@ -185,6 +187,21 @@ struct Setup
         }
         return files;
     }
+};
+/** The cloud's saves as the menu of one console of the user sees them. */
+struct Browsing
+{
+    Browsing(Setup &setup, TestConsole &on)
+        : state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup"),
+          browser(setup.cloud, state, on, setup.display, setup.rootId, kSavedata, kOwnSave,
+                  on.Scratch())
+    {
+        state.Load();
+        browser.Refresh();
+    }
+
+    SyncState state;
+    SaveBrowser browser;
 };
 } // namespace
 
@@ -618,4 +635,97 @@ TEST(DownloadCutShortIsDoneAgain)
     setup.Run(other, kSavedata);
     CHECK_EQUAL(std::string("data-1"), other.Content(std::string(kSave) + "/DATA.BIN"));
     CHECK_EQUAL(0, setup.cloud.Updates());
+}
+
+TEST(MenuListsTheGamesWithTheirSaves)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.console.Put(std::string(kSavedata) + "/BLES00001-SAVE2/DATA.BIN", "data-3", kWritten);
+    setup.Run();
+    Browsing browsing(setup, setup.console);
+    const std::vector<CloudGame> games = browsing.browser.Games();
+    CHECK_EQUAL(std::size_t(2), games.size());
+    if (games.size() == 2)
+    {
+        CHECK_EQUAL(std::string("Game One (BLES00001)"), games[0].label);
+        CHECK_EQUAL(std::size_t(2), games[0].saves.size());
+        CHECK_EQUAL(std::string("BLUS00002"), games[1].label);
+        CHECK_EQUAL(std::string("BLUS00002-AUTO"), games[1].saves.front());
+    }
+    CHECK_EQUAL(setup.cloud.Items().at(setup.ArchiveId("BLES00001-SAVE")).content.size(),
+                static_cast<std::size_t>(browsing.browser.Save("BLES00001-SAVE").size));
+}
+
+TEST(MenuTellsHowEachSaveIsOnTheConsole)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    CHECK(Browsing(setup, other).browser.Status("BLES00001-SAVE") == SaveStatus::Missing);
+    CHECK(Browsing(setup, setup.console).browser.Status("BLES00001-SAVE") == SaveStatus::Same);
+    // Touched but the same content is still the cloud's copy.
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "data-1", kChanged);
+    CHECK(Browsing(setup, setup.console).browser.Status("BLES00001-SAVE") == SaveStatus::Same);
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "played on", kChanged);
+    CHECK(Browsing(setup, setup.console).browser.Status("BLES00001-SAVE") == SaveStatus::Different);
+}
+
+TEST(MenuLoadsAMissingSaveWithoutAsking)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    Browsing browsing(setup, other);
+    CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::Loaded);
+    CHECK(setup.display.questions.empty());
+    CHECK_EQUAL(std::string("data-1"), other.Content(std::string(kSave) + "/DATA.BIN"));
+    // What came down is the base, as after a sync.
+    const SaveBase *base = browsing.state.Find("BLES00001-SAVE");
+    CHECK(base != nullptr && base->fileId == setup.ArchiveId("BLES00001-SAVE") &&
+          !base->downloading);
+    CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::AlreadyThere);
+}
+
+TEST(MenuAsksBeforeItReplacesADifferentSave)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "played here", kChanged);
+    Browsing browsing(setup, setup.console);
+    setup.display.answers = {Answer::No, Answer::Yes};
+    CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::Kept);
+    CHECK_EQUAL(std::string("played here"),
+                setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::Loaded);
+    CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK_EQUAL(std::size_t(2), setup.display.questions.size());
+    CHECK_EQUAL(std::size_t(0), setup.display.Question(0).find("Game One (BLES00001):\n"));
+}
+
+TEST(ArchiveMadeAnewIsNotTakenForAChangeOfTheSave)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    // Another account after a sign-out, or another console, has an archive of its own.
+    setup.cloud.Delete(setup.ArchiveId("BLES00001-SAVE"));
+    setup.cloud.Store(TestCloudItem{"BLES00001-SAVE.tar", setup.rootId, octetMime,
+                                    MakeTar({{"DATA.BIN", "someone else's"}})});
+    setup.Run();
+    CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+}
+
+TEST(SizesAndTimesReadAsAPersonReadsThem)
+{
+    CHECK_EQUAL(std::string("0.5 KB"), ShownSize(512));
+    CHECK_EQUAL(std::string("4.4 MB"), ShownSize(4613734));
+    CHECK_EQUAL(std::string("2026-11-13 21:13 UTC"), ShownTime("2026-11-13T21:13:21.672Z"));
+    CHECK_EQUAL(std::string("soon"), ShownTime("soon"));
 }

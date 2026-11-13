@@ -6,7 +6,8 @@
 
 namespace
 {
-const char kProgressTitle[] = "Performing Sync...";
+// The bars show a sync as well as a single save brought down from the menu.
+const char kProgressTitle[] = "Own Storage";
 const msgType kProgressType =
     static_cast<msgType>(MSG_DIALOG_MUTE_ON | MSG_DIALOG_DOUBLE_PROGRESSBAR);
 // Only Yes or No ends a question: closing it without an answer would leave the saves in doubt.
@@ -42,6 +43,12 @@ void OnAnswerButton(msgButton button, void *pressed)
 SyncDialog::SyncDialog(const std::atomic<int> &quit)
     : m_quit(quit), m_cancelled(false), m_button(kNoButton), m_progressShown(false)
 {
+}
+
+void SyncDialog::Open()
+{
+    m_cancelled = false;
+    ShowProgress();
 }
 
 void SyncDialog::Close()

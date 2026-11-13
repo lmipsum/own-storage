@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "sync/CloudSaves.h"
 #include "sync/CloudStorage.h"
 #include "sync/LocalStorage.h"
+#include "sync/SaveArchives.h"
 #include "sync/SaveScanner.h"
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
@@ -44,15 +46,6 @@ class Sync
     bool Run();
 
   private:
-    /** A save's archive in the cloud. */
-    struct CloudSave
-    {
-        std::string fileId;
-        std::string md5;
-        /** The game's title, as the console that sent the archive read it; may be empty. */
-        std::string title;
-    };
-
     /** A save to send up. */
     struct Upload
     {
@@ -111,15 +104,6 @@ class Sync
     };
 
     /**
-     * The save archives in the cloud, by save name. Of two archives of one save the one the base
-     * names is taken, or else the one with the lower id, so every run takes the same. Two consoles
-     * that each made an archive of a save before either saw the other's thus keep to their own,
-     * rather than one silently overwriting the other's progress.
-     * @param saves receives them
-     * @return false when they cannot be listed
-     */
-    bool ListCloudSaves(std::map<std::string, CloudSave> &saves);
-    /**
      * Decides what to do with a save, from what it is like on either side and its base. A save
      * that is the same on both sides gets its base at once.
      * @param name the save
@@ -147,18 +131,6 @@ class Sync
      */
     std::string QuestionText(Doubt doubt, const std::string &titleId,
                              const std::vector<const Question *> &questions) const;
-    /** The game title in a save's PARAM.SFO on the console; empty when it cannot be read. */
-    std::string LocalTitle(const std::string &name) const;
-    /**
-     * Writes a save's archive.
-     * @param save the save
-     * @param path where the archive goes
-     * @return the archive's MD5; empty when a file of the save cannot be read or archived, or
-     * the archive cannot be written
-     */
-    std::string WriteArchive(const LocalSave &save, const std::string &path);
-    /** Where a save's archive is kept while it moves. */
-    std::string ArchivePath(const std::string &name) const;
     /**
      * Queues a save's archive to go up.
      * @param save the save
@@ -166,14 +138,6 @@ class Sync
      * @param progress the bar to move when it is up
      */
     void QueueUpload(const LocalSave &save, const std::string &fileId, Progress &progress);
-    /**
-     * Brings a save down from the cloud. The archive is checked whole before any file of the save
-     * is replaced, and the base says a download is under way until every file is written.
-     * @param name the save
-     * @param cloudSave its archive in the cloud
-     * @return false when it could not be brought down
-     */
-    bool BringDown(const std::string &name, const CloudSave &cloudSave);
     /** True when the user stopped the sync or the cloud has no room left. */
     bool Stopped() const;
 
@@ -182,8 +146,7 @@ class Sync
     LocalStorage &m_storage;
     SyncDisplay &m_display;
     const SaveScanner m_scanner;
+    SaveArchives m_archives;
     const std::string m_rootFolderId;
-    const std::string m_savedata;
     const std::string m_ownSave;
-    const std::string m_workDirectory;
 };
