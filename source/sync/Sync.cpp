@@ -15,6 +15,23 @@ namespace
 // remote.json's title in the cloud.
 const char kStateTitle[] = "remote.json";
 
+/**
+ * Whether a downloaded state names only places inside the savedata directory: no absolute
+ * path and no ".." step, which would let a restore write elsewhere.
+ */
+bool StaysInSavedata(const Json &state)
+{
+    for (const Json &entry : state["data"].AsArray())
+    {
+        const std::string path = entry["path"].Str();
+        if (path.empty() || path[0] == '/' || ("/" + path + "/").find("/../") != std::string::npos)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 /** The percentage done of total, as a whole number; total must not be 0. */
 unsigned int Percent(std::size_t done, std::size_t total)
 {
@@ -45,9 +62,9 @@ void Sync::UploadProgress::Advance()
 }
 
 Sync::Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-           const std::string &rootFolderId)
+           const std::string &rootFolderId, const std::string &savedata)
     : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display),
-      m_rootFolderId(rootFolderId)
+      m_rootFolderId(rootFolderId), m_savedata(savedata)
 {
 }
 
@@ -69,7 +86,7 @@ RemoteStateFetch Sync::FetchState()
         return RemoteStateFetch::Failed;
     }
     const Json downloaded = Json::Load(m_state.FilePath());
-    if (!downloaded.Has("data"))
+    if (!downloaded.Has("data") || !StaysInSavedata(downloaded))
     {
         // Left on disk, the next run would take it for its own state.
         m_state.Discard();
@@ -107,12 +124,13 @@ void Sync::DetectChanges(const Json::Array &local)
             struct tm storedTime = {};
             strptime(stored["modifiedDate"].Str().substr(0, 18).c_str(), "%Y-%m-%dT%H:%M:%S",
                      &storedTime);
-            if (!m_storage.ModifiedTime(path, changed) ||
+            const std::string localPath = LocalPath(entry);
+            if (!m_storage.ModifiedTime(localPath, changed) ||
                 std::difftime(changed, std::mktime(&storedTime)) <= 0)
             {
                 continue;
             }
-            const std::string md5 = m_storage.Md5(path);
+            const std::string md5 = m_storage.Md5(localPath);
             if (!md5.empty() && md5 != stored["md5Checksum"].Str())
             {
                 debugPrintf("Sync::DetectChanges: %s changed\n", path.c_str());
@@ -199,7 +217,7 @@ void Sync::Upload()
         {
             const std::string parent = *parentId;
             m_cloud.QueueFile(
-                entry["path"].Str(), [this, i, parent, &progress](FileToStore &file)
+                LocalPath(entry), [this, i, parent, &progress](FileToStore &file)
                 { return PrepareFile(i, parent, progress, file); },
                 [this, i, parent, &progress](const Json &file)
                 { FinishFile(i, parent, progress, file); });
@@ -219,7 +237,7 @@ void Sync::Download()
     for (std::size_t i = 0; i < size; i++)
     {
         const Json entry = m_state.Entry(i);
-        if (entry["status"].Str() == syncedStatus && !m_storage.Exists(entry["path"].Str()))
+        if (entry["status"].Str() == syncedStatus && !m_storage.Exists(LocalPath(entry)))
         {
             ++missing;
         }
@@ -237,7 +255,7 @@ void Sync::Download()
         for (std::size_t i = 0; i < size && !m_display.Cancelled(); i++)
         {
             const Json entry = m_state.Entry(i);
-            const std::string path = entry["path"].Str();
+            const std::string path = LocalPath(entry);
             if (entry["status"].Str() != syncedStatus ||
                 (entry["mimeType"].Str() == folderMime) != folders || m_storage.Exists(path))
             {
@@ -266,6 +284,11 @@ void Sync::Download()
     }
     debugPrintf("Sync::Download: done; %u folders and files were missing\n",
                 static_cast<unsigned int>(missing));
+}
+
+std::string Sync::LocalPath(const Json &entry) const
+{
+    return m_savedata + "/" + entry["path"].Str();
 }
 
 bool Sync::Stopped() const
@@ -309,7 +332,7 @@ bool Sync::AdoptInterruptedFile(std::size_t index, const std::string &parentId,
     {
         return false;
     }
-    if (found["md5Checksum"].Str() == m_storage.Md5(entry["path"].Str()))
+    if (found["md5Checksum"].Str() == m_storage.Md5(LocalPath(entry)))
     {
         m_state.RecordFile(index, parentId, found);
         progress.Advance();

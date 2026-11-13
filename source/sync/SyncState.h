@@ -98,8 +98,8 @@ class SyncState
 
     /**
      * Finds the Drive id of the folder that holds an entry: the Own Storage folder, or the
-     * folder entry of the directory the entry is in. A title alone is not enough, as two
-     * profiles can hold a save of the same name.
+     * folder entry of the directory the entry is in. A title alone is not enough, as two saves
+     * hold files of the same name.
      * @param entry the entry
      * @param rootFolderId the Drive id of the Own Storage folder
      * @return the folder's id; none while the folder does not exist on Drive yet

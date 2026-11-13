@@ -18,7 +18,7 @@ enum class RemoteStateFetch
     Done,
     /** A request failed. */
     Failed,
-    /** Downloaded, but it is not a sync state. */
+    /** Downloaded, but it is not a sync state of the savedata directory. */
     Damaged
 };
 
@@ -36,9 +36,10 @@ class Sync
      * @param storage the console's hard disk
      * @param display what the user sees of the sync
      * @param rootFolderId the cloud id of the Own Storage folder
+     * @param savedata the logged-in user's savedata directory, which entry paths are relative to
      */
     Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-         const std::string &rootFolderId);
+         const std::string &rootFolderId, const std::string &savedata);
     Sync(const Sync &) = delete;
     Sync &operator=(const Sync &) = delete;
 
@@ -79,6 +80,8 @@ class Sync
         unsigned int m_shownPercent;
     };
 
+    /** Where an entry is on the console. */
+    std::string LocalPath(const Json &entry) const;
     /** True when the user stopped the sync or the cloud has no room left. */
     bool Stopped() const;
     /**
@@ -131,4 +134,5 @@ class Sync
     LocalStorage &m_storage;
     SyncDisplay &m_display;
     std::string m_rootFolderId;
+    std::string m_savedata;
 };

@@ -3,18 +3,17 @@
 
 #include "app/DebugLog.h"
 #include "app/Files.h"
-#include "app/Paths.h"
 #include "json/Json.h"
 
 namespace
 {
-const std::string kConfigFile = APP_DIR "config.json";
-const std::string kConfigBackup = APP_DIR "config.backup";
+const char kConfigFile[] = "/config.json";
+const char kConfigBackup[] = "/config.backup";
 } // namespace
 
-bool LoadConfig(Config &config)
+bool LoadConfig(const std::string &directory, Config &config)
 {
-    const Json saved = LoadWithBackup(kConfigFile, kConfigBackup);
+    const Json saved = LoadWithBackup(directory + kConfigFile, directory + kConfigBackup);
     if (saved.IsEmpty())
     {
         debugPrintf("LoadConfig: No readable config file\n");
@@ -29,11 +28,11 @@ bool LoadConfig(Config &config)
     return true;
 }
 
-void SaveConfig(const Config &config)
+void SaveConfig(const std::string &directory, const Config &config)
 {
     Json saved;
     saved.Add("refresh_token", Json(config.refreshToken));
     saved.Add("root_id", Json(config.rootFolderId));
-    SaveStateFile(saved, kConfigFile);
-    SaveStateFile(saved, kConfigBackup);
+    SaveStateFile(saved, directory + kConfigFile);
+    SaveStateFile(saved, directory + kConfigBackup);
 }

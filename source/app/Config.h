@@ -14,13 +14,15 @@ struct Config
 
 /**
  * Reads config.json, or its backup when config.json is missing or damaged.
+ * @param directory where the files are
  * @param config receives the saved values; untouched when nothing can be read
  * @return false when neither file can be read
  */
-bool LoadConfig(Config &config);
+bool LoadConfig(const std::string &directory, Config &config);
 
 /**
  * Saves config.json and its backup.
+ * @param directory where the files go
  * @param config the values to keep
  */
-void SaveConfig(const Config &config);
+void SaveConfig(const std::string &directory, const Config &config);
