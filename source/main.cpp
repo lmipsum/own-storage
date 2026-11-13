@@ -589,6 +589,27 @@ bool downloadFile(std::string localPath, std::string fileId)
     return true;
 }
 
+/**
+ * Downloads remote.json, the state of the backup on Drive, and reads it.
+ * @return the state; empty when Drive has no remote.json or it cannot be read
+ */
+Json downloadRemoteState()
+{
+    const Json remoteJson = checkIfRemoteResourceExists("remote.json", jsonMime, rootFolderId);
+    if (!remoteJson.Has("id"))
+    {
+        debugPrintf("downloadRemoteState: there is no remote.json on Google Drive\n");
+        return Json();
+    }
+    remoteJsonId = remoteJson["id"].Str();
+    debugPrintf("Downloading remote.json from Google Drive with id %s\n", remoteJsonId.c_str());
+    if (!downloadFile(remoteResourceFile, remoteJsonId))
+    {
+        return Json();
+    }
+    return Json::Load(remoteResourceFile);
+}
+
 void downloadChanges()
 {
     u32 remSize = remoteResourceRoot["data"].AsArray().size();
@@ -1794,6 +1815,15 @@ int initCloudDrive(void *arg)
     if (userType == "two")
     {
         remoteResourceRoot = loadWithBackup(remoteResourceFile, remoteBackup);
+        if (remoteResourceRoot.IsEmpty())
+        {
+            remoteResourceRoot = downloadRemoteState();
+        }
+        // Without a data array, detectChanges has nowhere to add the new entries.
+        if (!remoteResourceRoot.Has("data"))
+        {
+            remoteResourceRoot.Add("data", Json(Json::Array()));
+        }
 
         detectChanges();
 
@@ -1807,26 +1837,12 @@ int initCloudDrive(void *arg)
     // TODO: Revert to Second Time scenario
     if (userType == "three")
     {
-        Json remoteJson = checkIfRemoteResourceExists("remote.json", jsonMime, rootFolderId);
-
-        if (remoteJson.Has("id"))
+        remoteResourceRoot = downloadRemoteState();
+        if (!remoteResourceRoot.IsEmpty())
         {
-            remoteJsonId = remoteJson["id"].Str();
-            debugPrintf("Downloading remote.json from Google Drive with id %s\n",
-                        remoteJsonId.c_str());
-            downloadFile(remoteResourceFile, remoteJsonId);
-
-            remoteResourceRoot = Json::Load(remoteResourceFile);
-
             downloadChanges();
             debugPrintf(
                 "Data from Google Drive downloaded, Please restart app to upload changes\n");
-        }
-        else
-        {
-            debugPrintf("Wow, there's no remote.json on Google Drive!\n");
-            // buildRemoteResourceTree();
-            // downloadChanges();
         }
     }
 
