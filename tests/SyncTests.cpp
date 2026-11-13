@@ -7,11 +7,11 @@
 #include "sync/Sync.h"
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
+#include "sync/Tar.h"
 
-#include <cstdio>
 #include <ctime>
-#include <memory>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -28,49 +28,35 @@ class SilentDisplay : public SyncDisplay
     }
 };
 
-// Saves written before the first sync; the cloud's modifiedDate is later than this.
+// Saves written before the first sync.
 const std::time_t kWritten = std::time(nullptr) - 3600;
+// A later change on the console.
+const std::time_t kChanged = kWritten + 60;
 
-// The logged-in user, and the app's own save in that user's savedata.
-const char kUser[] = "00000001";
+// The app's own save in the logged-in user's savedata.
 const char kOwnSave[] = "OWNS00001-PROFILE";
 const char kSavedata[] = "/dev_hdd0/home/00000001/savedata";
-
 const char kSave[] = "/dev_hdd0/home/00000001/savedata/BLES00001-SAVE";
 
 /**
  * Fills a console with the logged-in user's saves and the app's own save, another user's save
  * of the same name, and a memory card.
  */
-void WriteSaves(TestConsole &console)
+void PutSaves(TestConsole &console)
 {
-    console.Write(std::string(kSave) + "/PARAM.SFO", "sfo-1", kWritten);
-    console.Write(std::string(kSave) + "/DATA.BIN", "data-1", kWritten);
-    console.Write("/dev_hdd0/home/00000001/savedata/BLUS00002-AUTO/DATA.BIN", "data-2", kWritten);
-    console.Write("/dev_hdd0/home/00000001/savedata/OWNS00001-PROFILE/MARKER.DAT", "1", kWritten);
-    console.Write("/dev_hdd0/home/00000002/savedata/BLES00001-SAVE/DATA.BIN", "other user",
-                  kWritten);
-    console.Write("/dev_hdd0/savedata/vmc/CARD1.VM2", "card", kWritten);
+    console.Put(std::string(kSave) + "/PARAM.SFO", "sfo-1", kWritten);
+    console.Put(std::string(kSave) + "/DATA.BIN", "data-1", kWritten);
+    console.Put("/dev_hdd0/home/00000001/savedata/BLUS00002-AUTO/DATA.BIN", "data-2", kWritten);
+    console.Put("/dev_hdd0/home/00000001/savedata/OWNS00001-PROFILE/MARKER.DAT", "1", kWritten);
+    console.Put("/dev_hdd0/home/00000002/savedata/BLES00001-SAVE/DATA.BIN", "other user", kWritten);
+    console.Put("/dev_hdd0/savedata/vmc/CARD1.VM2", "card", kWritten);
 }
 
-/**
- * What the first sync of WriteSaves() leaves in the Own Storage folder: the logged-in user's
- * saves alone.
- */
-const char kFirstSyncTree[] = "BLES00001-SAVE/\n"
-                              "  DATA.BIN\n"
-                              "  PARAM.SFO\n"
-                              "BLUS00002-AUTO/\n"
-                              "  DATA.BIN\n"
-                              "remote.json\n";
+/** What the first sync of PutSaves() leaves in the Own Storage folder. */
+const char kFirstSyncTree[] = "BLES00001-SAVE.tar\n"
+                              "BLUS00002-AUTO.tar\n";
 
-/** The logged-in user's saves, as the app scans them. */
-Json::Array Scan(const TestConsole &console)
-{
-    return SaveScanner(console, SavedataDirectory(kUser), kOwnSave).Scan();
-}
-
-/** One console and its cloud, with the Own Storage folder made, as a run sees them. */
+/** A cloud and the logged-in user's console, as runs of the app see them. */
 struct Setup
 {
     TestConsole console;
@@ -78,205 +64,329 @@ struct Setup
     SilentDisplay display;
     std::string rootId;
 
-    Setup() : cloud([this](const std::string &path) { return console.Map(path); })
+    Setup()
     {
         rootId = cloud.CreateFolder(driveFolderName, "root")["id"].Str();
     }
 
-    /** A fresh remote.json state, as a new run of the app reads it. */
-    std::unique_ptr<SyncState> NewState() const
+    /** One run of the app on a console, with the state that console kept. */
+    bool Run(TestConsole &on, const std::string &savedata)
     {
-        const std::string scratch = console.Scratch();
-        return std::unique_ptr<SyncState>(new SyncState(
-            scratch + "/remote.json", scratch + "/remote.backup", scratch + "/remote.journal"));
+        SyncState state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup");
+        state.Load();
+        return Sync(cloud, state, on, display, rootId, savedata, kOwnSave, on.Scratch()).Run();
     }
 
-    /** One later run: change detection, upload and download, as the app does it. */
-    void RunAgain()
+    /** One run of the app on the logged-in user's console. */
+    bool Run()
     {
-        std::unique_ptr<SyncState> state = NewState();
-        CHECK(state->Load());
-        Sync sync(cloud, *state, console, display, rootId, kSavedata);
-        sync.DetectChanges(Scan(console));
-        sync.Upload();
-        sync.Download();
+        return Run(console, kSavedata);
     }
 
-    /** The first run: everything the scan found goes up. */
-    void RunFirst()
+    /** The files in the cloud's archive of a save. */
+    std::vector<TarFile> Archive(const std::string &save) const
     {
-        std::unique_ptr<SyncState> state = NewState();
-        state->Reset(Scan(console));
-        Sync(cloud, *state, console, display, rootId, kSavedata).Upload();
+        std::vector<TarFile> files;
+        for (const auto &item : cloud.Items())
+        {
+            if (item.second.title == save + ".tar")
+            {
+                ReadTar(item.second.content, files);
+            }
+        }
+        return files;
     }
 };
-
-/** Whether every entry of the state on disk is synced. */
-bool AllSynced(const Setup &setup)
-{
-    std::unique_ptr<SyncState> state = setup.NewState();
-    state->Load();
-    for (std::size_t i = 0; i < state->Size(); i++)
-    {
-        if (state->Entry(i)["status"].Str() != syncedStatus)
-        {
-            return false;
-        }
-    }
-    return state->Size() > 0;
-}
 } // namespace
 
-TEST(FirstSyncUploadsTheLoggedInUsersSavesAlone)
+TEST(ArchiveIsTheSameWhateverTheOrderAndReadsBack)
+{
+    const std::vector<TarFile> files = {{"PARAM.SFO", "sfo"}, {"DATA.BIN", std::string(700, 'x')}};
+    const std::string archive = MakeTar(files);
+    CHECK_EQUAL(archive, MakeTar({files[1], files[0]}));
+    std::vector<TarFile> read;
+    CHECK(ReadTar(archive, read));
+    CHECK_EQUAL(std::size_t(2), read.size());
+    CHECK_EQUAL(std::string("DATA.BIN"), read[0].name);
+    CHECK_EQUAL(std::string(700, 'x'), read[0].content);
+    CHECK_EQUAL(std::string("sfo"), read[1].content);
+}
+
+TEST(ArchiveThatLeavesTheSaveOrIsCutShortIsRefused)
+{
+    std::vector<TarFile> read;
+    CHECK(!ReadTar(MakeTar({{"..", "x"}}), read));
+    CHECK(!ReadTar(MakeTar({{"DIR/FILE", "x"}}), read));
+    const std::string archive = MakeTar({{"DATA.BIN", "data"}});
+    CHECK(!ReadTar(archive.substr(0, archive.size() - 1024), read));
+    std::string damaged = archive;
+    damaged[0] = 'X';
+    CHECK(!ReadTar(damaged, read));
+}
+
+TEST(FirstSyncUploadsOneArchivePerSaveOfTheUserAlone)
 {
     Setup setup;
-    WriteSaves(setup.console);
-    setup.RunFirst();
+    PutSaves(setup.console);
+    CHECK(setup.Run());
     CHECK_EQUAL(std::string(kFirstSyncTree), setup.cloud.Tree(setup.rootId));
-    CHECK(AllSynced(setup));
+    const std::vector<TarFile> files = setup.Archive("BLES00001-SAVE");
+    CHECK_EQUAL(std::size_t(2), files.size());
+    CHECK_EQUAL(std::string("data-1"), files[0].content);
 }
 
 TEST(UnchangedRerunSendsNothing)
 {
     Setup setup;
-    WriteSaves(setup.console);
-    setup.RunFirst();
+    PutSaves(setup.console);
+    setup.Run();
     const int creates = setup.cloud.Creates();
-    setup.RunAgain();
+    setup.Run();
     CHECK_EQUAL(creates, setup.cloud.Creates());
     CHECK_EQUAL(0, setup.cloud.Updates());
 }
 
-TEST(ChangedFileIsUpdatedInPlace)
+TEST(ChangedSaveReplacesItsArchive)
 {
     Setup setup;
-    WriteSaves(setup.console);
-    setup.RunFirst();
+    PutSaves(setup.console);
+    setup.Run();
     const int creates = setup.cloud.Creates();
-    setup.console.Write(std::string(kSave) + "/DATA.BIN", "data-1-changed",
-                        std::time(nullptr) + 3600);
-    setup.RunAgain();
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "data-1 changed", kChanged);
+    setup.Run();
     CHECK_EQUAL(creates, setup.cloud.Creates());
-    // The file and remote.json.
-    CHECK_EQUAL(2, setup.cloud.Updates());
-    CHECK_EQUAL(std::string(kFirstSyncTree), setup.cloud.Tree(setup.rootId));
+    CHECK_EQUAL(1, setup.cloud.Updates());
+    CHECK_EQUAL(std::string("data-1 changed"), setup.Archive("BLES00001-SAVE")[0].content);
+}
+
+TEST(TouchedButSameSaveSendsNothing)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "data-1", kChanged);
+    setup.Run();
+    setup.Run();
+    CHECK_EQUAL(0, setup.cloud.Updates());
 }
 
 TEST(CreateWithLostAnswerIsTakenOverNextRun)
 {
     Setup setup;
-    WriteSaves(setup.console);
-    // The second create after the Own Storage folder: the first save folder goes through, the
-    // second is made but its answer is lost.
-    setup.cloud.LoseAnswerOfCreate(1);
-    setup.RunFirst();
-    CHECK(!AllSynced(setup));
-    setup.RunAgain();
-    CHECK_EQUAL(std::string(kFirstSyncTree), setup.cloud.Tree(setup.rootId));
-    CHECK(AllSynced(setup));
-}
-
-TEST(FailedSearchLeavesTheEntryForTheNextRun)
-{
-    Setup setup;
-    WriteSaves(setup.console);
-    setup.cloud.LoseAnswerOfCreate(1);
-    setup.RunFirst();
+    PutSaves(setup.console);
+    setup.cloud.LoseAnswerOfCreate(0);
+    setup.Run();
     const int creates = setup.cloud.Creates();
-    setup.cloud.FailSearches(true);
-    setup.RunAgain();
+    setup.Run();
     CHECK_EQUAL(creates, setup.cloud.Creates());
-    setup.cloud.FailSearches(false);
-    setup.RunAgain();
+    CHECK_EQUAL(0, setup.cloud.Updates());
     CHECK_EQUAL(std::string(kFirstSyncTree), setup.cloud.Tree(setup.rootId));
-    CHECK(AllSynced(setup));
 }
 
-TEST(NewConsoleGetsTheBackupBackUnderAnotherUserNumber)
+TEST(NewConsoleGetsTheBackupUnderAnotherUserNumber)
 {
     Setup setup;
-    WriteSaves(setup.console);
-    setup.RunFirst();
-
-    TestConsole newConsole;
+    PutSaves(setup.console);
+    setup.Run();
+    TestConsole other;
     // The same person is user 2 there; the console made that user's savedata directory.
-    newConsole.Write("/dev_hdd0/home/00000002/localusername", "two", kWritten);
-    newConsole.MakeDirectory("/dev_hdd0/home/00000002/savedata");
-    TestCloud &cloud = setup.cloud;
-    const std::string scratch = newConsole.Scratch();
-    SyncState state(scratch + "/remote.json", scratch + "/remote.backup",
-                    scratch + "/remote.journal");
-    // The cloud writes downloads where the new console keeps its files.
-    TestCloud restoring([&newConsole](const std::string &path) { return newConsole.Map(path); });
-    for (const auto &item : cloud.Items())
-    {
-        CHECK_EQUAL(item.first, restoring.Store(item.second));
-    }
-    Sync sync(restoring, state, newConsole, setup.display, setup.rootId,
-              "/dev_hdd0/home/00000002/savedata");
-    CHECK(sync.FetchState() == RemoteStateFetch::Done);
-    sync.Download();
+    other.Put("/dev_hdd0/home/00000002/localusername", "two", kWritten);
+    other.MakeDirectory("/dev_hdd0/home/00000002/savedata");
+    CHECK(setup.Run(other, "/dev_hdd0/home/00000002/savedata"));
     CHECK_EQUAL(std::string("data-1"),
-                newConsole.Read("/dev_hdd0/home/00000002/savedata/BLES00001-SAVE/DATA.BIN"));
+                other.Content("/dev_hdd0/home/00000002/savedata/BLES00001-SAVE/DATA.BIN"));
     CHECK_EQUAL(std::string("data-2"),
-                newConsole.Read("/dev_hdd0/home/00000002/savedata/BLUS00002-AUTO/DATA.BIN"));
+                other.Content("/dev_hdd0/home/00000002/savedata/BLUS00002-AUTO/DATA.BIN"));
 }
 
-TEST(LostLocalStateComesBackFromTheCloudWithoutDuplicates)
+TEST(SaveChangedOnAnotherConsoleComesDown)
 {
     Setup setup;
-    WriteSaves(setup.console);
-    setup.RunFirst();
-    const int creates = setup.cloud.Creates();
-    const std::string scratch = setup.console.Scratch();
-    std::remove((scratch + "/remote.json").c_str());
-    std::remove((scratch + "/remote.backup").c_str());
-
-    // What the app does when it finds no state of its own.
-    std::unique_ptr<SyncState> state = setup.NewState();
-    CHECK(!state->Load());
-    CHECK_EQUAL(std::size_t(0), state->Size());
-    Sync sync(setup.cloud, *state, setup.console, setup.display, setup.rootId, kSavedata);
-    CHECK(sync.FetchState() == RemoteStateFetch::Done);
-    sync.DetectChanges(Scan(setup.console));
-    sync.Upload();
-    CHECK_EQUAL(creates, setup.cloud.Creates());
-    CHECK(AllSynced(setup));
+    PutSaves(setup.console);
+    setup.Run();
+    TestConsole other;
+    other.MakeDirectories("/dev_hdd0/home/00000001/savedata");
+    setup.Run(other, kSavedata);
+    other.Put(std::string(kSave) + "/DATA.BIN", "played on", kChanged);
+    other.Remove(std::string(kSave) + "/PARAM.SFO");
+    setup.Run(other, kSavedata);
+    setup.Run();
+    CHECK_EQUAL(std::string("played on"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK(!setup.console.Exists(std::string(kSave) + "/PARAM.SFO"));
+    // What came down is the base now: the next run has nothing to do.
+    const int updates = setup.cloud.Updates();
+    setup.Run();
+    CHECK_EQUAL(updates, setup.cloud.Updates());
 }
 
-TEST(DamagedStateInTheCloudIsNotTaken)
+TEST(SaveChangedOnBothSidesIsLeftAsItIs)
 {
     Setup setup;
-    setup.cloud.Store(TestCloudItem{"remote.json", setup.rootId, jsonMime, "not a sync state"});
-    std::unique_ptr<SyncState> state = setup.NewState();
-    Sync sync(setup.cloud, *state, setup.console, setup.display, setup.rootId, kSavedata);
-    CHECK(sync.FetchState() == RemoteStateFetch::Damaged);
-    CHECK(!setup.console.Exists(state->FilePath()));
+    PutSaves(setup.console);
+    setup.Run();
+    TestConsole other;
+    other.MakeDirectories("/dev_hdd0/home/00000001/savedata");
+    setup.Run(other, kSavedata);
+    other.Put(std::string(kSave) + "/DATA.BIN", "played there", kChanged);
+    setup.Run(other, kSavedata);
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "played here", kChanged);
+    setup.Run();
+    CHECK_EQUAL(std::string("played here"),
+                setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK_EQUAL(std::string("played there"), setup.Archive("BLES00001-SAVE")[0].content);
 }
 
-TEST(StateThatLeavesTheSavedataIsNotTaken)
+TEST(SaveDeletedOnTheConsoleIsNotBroughtBack)
 {
     Setup setup;
-    setup.cloud.Store(TestCloudItem{"remote.json", setup.rootId, jsonMime,
-                                    "{\"data\":[{\"path\":\"BLES00001-SAVE/../../00000002\"}]}"});
-    std::unique_ptr<SyncState> state = setup.NewState();
-    Sync sync(setup.cloud, *state, setup.console, setup.display, setup.rootId, kSavedata);
-    CHECK(sync.FetchState() == RemoteStateFetch::Damaged);
-    CHECK(!setup.console.Exists(state->FilePath()));
+    PutSaves(setup.console);
+    setup.Run();
+    setup.console.Remove(std::string(kSave) + "/DATA.BIN");
+    setup.console.Remove(std::string(kSave) + "/PARAM.SFO");
+    setup.console.RemoveDirectory(kSave);
+    setup.Run();
+    CHECK(!setup.console.Exists(kSave));
+    CHECK_EQUAL(std::size_t(2), setup.Archive("BLES00001-SAVE").size());
 }
 
-TEST(JournalKeepsWhatAnInterruptedRunWasTold)
+TEST(FailedListingStopsTheSync)
 {
     Setup setup;
-    WriteSaves(setup.console);
-    std::unique_ptr<SyncState> state = setup.NewState();
-    state->Reset(Scan(setup.console));
-    Json folder;
-    folder.Add("id", Json("folder-id"));
-    state->RecordFolder(0, setup.rootId, folder);
-    // No full save after this one change: a new run finds it in the journal.
-    std::unique_ptr<SyncState> next = setup.NewState();
-    CHECK(next->Load());
-    CHECK_EQUAL(std::string("folder-id"), next->Entry(0)["id"].Str());
-    CHECK_EQUAL(syncedStatus, next->Entry(0)["status"].Str());
+    PutSaves(setup.console);
+    setup.cloud.FailSearches(true);
+    CHECK(!setup.Run());
+    CHECK_EQUAL(1, setup.cloud.Creates());
+}
+
+TEST(SaveGoneFromTheCloudGoesUpAgain)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    for (const auto &item : setup.cloud.Items())
+    {
+        if (item.second.title == "BLES00001-SAVE.tar")
+        {
+            setup.cloud.Delete(item.first);
+            break;
+        }
+    }
+    setup.Run();
+    CHECK_EQUAL(std::string(kFirstSyncTree), setup.cloud.Tree(setup.rootId));
+}
+
+TEST(SaveGoneOnBothSidesIsForgotten)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    const std::vector<TarFile> files = setup.Archive("BLES00001-SAVE");
+    for (const auto &item : setup.cloud.Items())
+    {
+        if (item.second.title == "BLES00001-SAVE.tar")
+        {
+            setup.cloud.Delete(item.first);
+            break;
+        }
+    }
+    setup.console.Remove(std::string(kSave) + "/DATA.BIN");
+    setup.console.Remove(std::string(kSave) + "/PARAM.SFO");
+    setup.console.RemoveDirectory(kSave);
+    setup.Run();
+    // Without a base, an archive that turns up again is new to this console and comes down.
+    setup.cloud.Store(TestCloudItem{"BLES00001-SAVE.tar", setup.rootId, octetMime, MakeTar(files)});
+    setup.Run();
+    CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+}
+
+TEST(OfTwoArchivesOfASaveTheBaseKeepsItsOwn)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    std::string firstId;
+    for (const auto &item : setup.cloud.Items())
+    {
+        if (item.second.title == "BLES00001-SAVE.tar")
+        {
+            firstId = item.first;
+        }
+    }
+    setup.cloud.Delete(firstId);
+    setup.Run();
+    // Another console made an archive of the save under a lower id than this console's.
+    setup.cloud.Store(firstId, TestCloudItem{"BLES00001-SAVE.tar", setup.rootId, octetMime,
+                                             MakeTar({{"DATA.BIN", "played there"}})});
+    setup.Run();
+    CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK_EQUAL(0, setup.cloud.Updates());
+}
+
+TEST(DamagedArchiveLeavesTheSaveAlone)
+{
+    Setup setup;
+    setup.console.MakeDirectories(kSavedata);
+    const std::string id =
+        setup.cloud.Store(TestCloudItem{"BLES00003-NEW.tar", setup.rootId, octetMime, "not a tar"});
+    setup.Run();
+    CHECK(!setup.console.Exists(std::string(kSavedata) + "/BLES00003-NEW"));
+    // Without a base the next run tries again.
+    setup.cloud.Store(id, TestCloudItem{"BLES00003-NEW.tar", setup.rootId, octetMime,
+                                        MakeTar({{"DATA.BIN", "new"}})});
+    setup.Run();
+    CHECK_EQUAL(std::string("new"),
+                setup.console.Content(std::string(kSavedata) + "/BLES00003-NEW/DATA.BIN"));
+}
+
+TEST(ArchiveDamagedOnTheWayLeavesTheSaveAlone)
+{
+    Setup setup;
+    setup.console.MakeDirectories(kSavedata);
+    // A sound archive with bytes after its end still unpacks; only its MD5 tells.
+    setup.cloud.Store(TestCloudItem{"BLES00003-NEW.tar", setup.rootId, octetMime,
+                                    MakeTar({{"DATA.BIN", "new"}})});
+    setup.cloud.DamageDownloads(true);
+    setup.Run();
+    CHECK(!setup.console.Exists(std::string(kSavedata) + "/BLES00003-NEW"));
+}
+
+TEST(OnlySaveArchivesComeDownAndOfTwoTheFirst)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.cloud.Store(TestCloudItem{"BLES00001-SAVE.tar", setup.rootId, octetMime,
+                                    MakeTar({{"DATA.BIN", "a copy"}})});
+    setup.cloud.Store(TestCloudItem{"OWNS00001-PROFILE.tar", setup.rootId, octetMime,
+                                    MakeTar({{"MARKER.DAT", "2"}})});
+    setup.cloud.Store(
+        TestCloudItem{"...tar", setup.rootId, octetMime, MakeTar({{"DATA.BIN", "outside"}})});
+    setup.cloud.Store(TestCloudItem{"notes.txt", setup.rootId, octetMime, "notes"});
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    setup.Run(other, kSavedata);
+    CHECK_EQUAL(std::string("data-1"), other.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK(!other.Exists(std::string(kSavedata) + "/OWNS00001-PROFILE"));
+    CHECK(!other.Exists("/dev_hdd0/home/00000001/DATA.BIN"));
+    CHECK(!other.Exists(std::string(kSavedata) + "/notes"));
+}
+
+TEST(DownloadCutShortIsDoneAgain)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    setup.Run(other, kSavedata);
+    // The run ended after one file of the save was written.
+    other.Put(std::string(kSave) + "/DATA.BIN", "half", kChanged);
+    SyncState state(other.Scratch() + "/state.json", other.Scratch() + "/state.backup");
+    state.Load();
+    SaveBase base = *state.Find("BLES00001-SAVE");
+    base.downloading = true;
+    state.Record("BLES00001-SAVE", base);
+    setup.Run(other, kSavedata);
+    CHECK_EQUAL(std::string("data-1"), other.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK_EQUAL(0, setup.cloud.Updates());
 }

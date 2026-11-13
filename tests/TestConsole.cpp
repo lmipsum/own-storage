@@ -21,7 +21,7 @@ namespace
 const char kConsoleRoot[] = "/dev_hdd0";
 
 /** Creates every missing directory on the way to path. */
-void MakeDirectories(const std::string &path)
+void MakePcDirectories(const std::string &path)
 {
     for (std::size_t slash = path.find('/', 1); slash != std::string::npos;
          slash = path.find('/', slash + 1))
@@ -61,7 +61,7 @@ TestConsole::TestConsole()
     }
     m_root = pattern;
     m_scratch = m_root + "/scratch";
-    MakeDirectories(m_scratch);
+    MakePcDirectories(m_scratch);
 }
 
 TestConsole::~TestConsole()
@@ -74,21 +74,30 @@ std::string TestConsole::Map(const std::string &path) const
     return path.compare(0, sizeof kConsoleRoot - 1, kConsoleRoot) == 0 ? m_root + path : path;
 }
 
-void TestConsole::Write(const std::string &path, const std::string &content, std::time_t changed)
+void TestConsole::Put(const std::string &path, const std::string &content, std::time_t changed)
 {
     const std::string mapped = Map(path);
-    MakeDirectories(mapped.substr(0, mapped.rfind('/')));
+    MakePcDirectories(mapped.substr(0, mapped.rfind('/')));
     std::ofstream(mapped.c_str(), std::ios::binary) << content;
     const utimbuf times = {changed, changed};
     utime(mapped.c_str(), &times);
 }
 
-std::string TestConsole::Read(const std::string &path) const
+std::string TestConsole::Content(const std::string &path) const
 {
-    std::ifstream file(Map(path).c_str(), std::ios::binary);
-    std::ostringstream content;
-    content << file.rdbuf();
-    return content.str();
+    std::string content;
+    Read(path, content);
+    return content;
+}
+
+void TestConsole::MakeDirectories(const std::string &path)
+{
+    MakePcDirectories(Map(path));
+}
+
+void TestConsole::RemoveDirectory(const std::string &path)
+{
+    rmdir(Map(path).c_str());
 }
 
 const std::string &TestConsole::Scratch() const
@@ -122,27 +131,46 @@ bool TestConsole::Exists(const std::string &path) const
     return stat(Map(path).c_str(), &entry) == 0;
 }
 
-bool TestConsole::ModifiedTime(const std::string &path, std::time_t &time) const
+bool TestConsole::Status(const std::string &path, FileStatus &status) const
 {
     struct stat entry;
     if (stat(Map(path).c_str(), &entry) != 0)
     {
         return false;
     }
-    time = entry.st_mtime;
+    status.size = static_cast<unsigned long long>(entry.st_size);
+    status.modified = entry.st_mtime;
     return true;
 }
 
 std::string TestConsole::Md5(const std::string &path) const
 {
+    std::string content;
+    return Read(path, content) ? ContentDigest(content) : std::string();
+}
+
+bool TestConsole::Read(const std::string &path, std::string &content) const
+{
     std::ifstream file(Map(path).c_str(), std::ios::binary);
     if (!file)
     {
-        return "";
+        return false;
     }
-    std::ostringstream content;
-    content << file.rdbuf();
-    return ContentDigest(content.str());
+    std::ostringstream read;
+    read << file.rdbuf();
+    content = read.str();
+    return true;
+}
+
+bool TestConsole::Write(const std::string &path, const std::string &content)
+{
+    std::ofstream file(Map(path).c_str(), std::ios::binary | std::ios::trunc);
+    return static_cast<bool>(file.write(content.data(), content.size()));
+}
+
+void TestConsole::Remove(const std::string &path)
+{
+    std::remove(Map(path).c_str());
 }
 
 void TestConsole::MakeDirectory(const std::string &path)

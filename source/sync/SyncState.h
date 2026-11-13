@@ -1,128 +1,69 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "json/Json.h"
-
-#include <cstddef>
-
-#include <optional>
+#include <map>
 #include <string>
+#include <vector>
 
 /** The folder in the user's Drive that holds every backup. */
 const std::string driveFolderName = "Own Storage";
 
-/** remote.json status of an entry that is still to be created on Drive. */
-const std::string uploadStatus = "upload";
-/** remote.json status of an entry whose creation on Drive started but was not recorded. */
-const std::string creatingStatus = "creating";
-/** remote.json status of an entry that Drive holds as the console does. */
-const std::string syncedStatus = "synced";
-/** remote.json status of a file that changed on the console after it went to Drive. */
-const std::string updateStatus = "update";
+/** What a save was like, on the console and in the cloud, when the two last held the same. */
+struct SaveBase
+{
+    /** The cloud id of the save's archive. */
+    std::string fileId;
+    /** The archive's MD5. */
+    std::string md5;
+    /** LocalSave::fingerprint of the save folder then. */
+    std::string fingerprint;
+    /**
+     * True while the archive's files are being written into the save folder: a run that ends
+     * before they all are leaves it set, and the next run brings the save down again.
+     */
+    bool downloading;
+};
 
 /**
- * remote.json: every folder and file of the backup, with its Drive id and status. What Drive
- * answers is appended to a journal at once and remote.json is saved in full only now and then,
- * so an interrupted run loses no Drive id it was given. For the sync thread only.
+ * The base of every save: what it was like when the console and the cloud last held the same.
+ * A change since then, on either side, is what the sync acts on. Saved in full after every
+ * change, with a backup. For the sync thread only.
  */
 class SyncState
 {
   public:
     /**
-     * @param file remote.json
-     * @param backup the copy every full save writes next to it
-     * @param journal the changes since the last full save, one entry per line
+     * @param file where the state is kept
+     * @param backup the copy every save writes next to it
      */
-    SyncState(const std::string &file, const std::string &backup, const std::string &journal);
+    SyncState(const std::string &file, const std::string &backup);
     SyncState(const SyncState &) = delete;
     SyncState &operator=(const SyncState &) = delete;
 
     /**
-     * Reads remote.json, or its backup, and applies the journal an interrupted run left.
-     * @return false when neither file holds a state; there are then no entries
+     * Reads the state, or its backup.
+     * @return false when neither file holds a state; there are then no bases
      */
     bool Load();
-    /**
-     * Takes over another state, such as the one Drive holds, and saves it in full; the journal
-     * of the state it replaces is deleted. The state is shared, not copied, so the caller should
-     * not change it afterwards.
-     * @param state the state; one without a data array gets an empty one
-     */
-    void Reset(const Json &state);
-    /**
-     * Starts over with the given entries, such as the first scan of the console, and saves them;
-     * the journal of the state they replace is deleted.
-     * The entries are shared, not copied, so the caller should not change them afterwards.
-     * @param entries the entries
-     */
-    void Reset(const Json::Array &entries);
-    /** Saves remote.json in full, with its backup, and empties the journal it now contains. */
-    void SaveAll();
-    /**
-     * Deletes remote.json and the journal, such as after a download that is not a state; the
-     * backup stays.
-     */
-    void Discard();
-    /** remote.json's path. */
-    const std::string &FilePath() const;
 
-    /** How many entries there are. */
-    std::size_t Size() const;
-    /** The entry at index; it shares the stored one, so change entries only through here. */
-    Json Entry(std::size_t index) const;
-    /** Adds an entry found on the console; it is saved with the next full save. */
-    void Append(const Json &entry);
-    /** Marks a file that changed on the console; it is saved with the next full save. */
-    void MarkChanged(std::size_t index);
+    /** The names of the saves that have a base. */
+    std::vector<std::string> Names() const;
     /**
-     * Saves that an entry's creation on Drive is about to start. A run that ends before it
-     * records the answer leaves the entry in creatingStatus, so the next run looks for the item
-     * before creating it again.
-     * @param index the entry
+     * The base of a save.
+     * @param name the save folder's name
+     * @return the base; null when the save has none
      */
-    void MarkCreating(std::size_t index);
-    /**
-     * Saves that a folder exists on Drive.
-     * @param index the folder's entry
-     * @param parentId the Drive folder that holds it
-     * @param folder what Drive says about the folder
-     */
-    void RecordFolder(std::size_t index, const std::string &parentId, const Json &folder);
-    /**
-     * Saves that a file is stored on Drive.
-     * @param index the file's entry
-     * @param parentId the Drive folder that holds it
-     * @param file what Drive says about the file
-     */
-    void RecordFile(std::size_t index, const std::string &parentId, const Json &file);
-
-    /**
-     * Finds the Drive id of the folder that holds an entry: the Own Storage folder, or the
-     * folder entry of the directory the entry is in. A title alone is not enough, as two saves
-     * hold files of the same name.
-     * @param entry the entry
-     * @param rootFolderId the Drive id of the Own Storage folder
-     * @return the folder's id; none while the folder does not exist on Drive yet
-     */
-    std::optional<std::string> ParentId(const Json &entry, const std::string &rootFolderId) const;
-
-    /**
-     * Whether an entry still has to be created on Drive, including one whose creation an
-     * earlier run started but did not record.
-     */
-    static bool IsPendingCreation(const Json &entry);
+    const SaveBase *Find(const std::string &name) const;
+    /** Sets the base of a save and saves the state. */
+    void Record(const std::string &name, const SaveBase &base);
+    /** Drops the base of a save and saves the state. */
+    void Forget(const std::string &name);
 
   private:
-    /** Sets an entry's status without saving it. */
-    void SetStatus(std::size_t index, const std::string &status);
-    /** Appends an entry to the journal, and saves in full now and then. */
-    void Record(std::size_t index);
-    /** Applies the journal to the entries in memory. */
-    void ReplayJournal();
+    /** Writes the state and its backup. */
+    void Save() const;
 
     std::string m_file;
     std::string m_backup;
-    std::string m_journal;
-    Json m_root;
-    std::size_t m_changesSinceFullSave;
+    std::map<std::string, SaveBase> m_bases;
 };

@@ -19,23 +19,22 @@ std::string Now()
     std::strftime(text, sizeof text, "%Y-%m-%dT%H:%M:%S.000Z", std::gmtime(&now));
     return text;
 }
-
-/** Whether an item is of the kind a search asks for. */
-bool IsKind(const TestCloudItem &item, ItemKind kind)
-{
-    return (item.mimeType == folderMime) == (kind == ItemKind::Folder);
-}
 } // namespace
 
-TestCloud::TestCloud(const PathMap &map)
-    : m_map(map), m_failSearches(false), m_createsUntilLostAnswer(-1), m_creates(0), m_updates(0),
-      m_nextId(1)
+TestCloud::TestCloud()
+    : m_failSearches(false), m_damageDownloads(false), m_createsUntilLostAnswer(-1), m_creates(0),
+      m_updates(0), m_nextId(1)
 {
 }
 
 void TestCloud::FailSearches(bool fail)
 {
     m_failSearches = fail;
+}
+
+void TestCloud::DamageDownloads(bool damage)
+{
+    m_damageDownloads = damage;
 }
 
 void TestCloud::LoseAnswerOfCreate(int createsBefore)
@@ -97,10 +96,19 @@ std::string TestCloud::Store(const TestCloudItem &item)
     return id;
 }
 
-bool TestCloud::FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
-                             Json &item)
+void TestCloud::Delete(const std::string &id)
 {
-    item = Json();
+    m_items.erase(id);
+}
+
+void TestCloud::Store(const std::string &id, const TestCloudItem &item)
+{
+    m_items[id] = item;
+}
+
+bool TestCloud::FindFolder(const std::string &title, const std::string &parentId, Json &folder)
+{
+    folder = Json();
     if (m_failSearches)
     {
         return false;
@@ -108,10 +116,27 @@ bool TestCloud::FindInFolder(const std::string &title, ItemKind kind, const std:
     for (const std::pair<const std::string, TestCloudItem> &stored : m_items)
     {
         if (stored.second.title == title && stored.second.parentId == parentId &&
-            IsKind(stored.second, kind))
+            stored.second.mimeType == folderMime)
         {
-            item = Describe(stored.first);
+            folder = Describe(stored.first);
             break;
+        }
+    }
+    return true;
+}
+
+bool TestCloud::ListFiles(const std::string &folderId, Json::Array &files)
+{
+    files.clear();
+    if (m_failSearches)
+    {
+        return false;
+    }
+    for (const std::pair<const std::string, TestCloudItem> &stored : m_items)
+    {
+        if (stored.second.parentId == folderId && stored.second.mimeType != folderMime)
+        {
+            files.push_back(Describe(stored.first));
         }
     }
     return true;
@@ -126,7 +151,7 @@ Json TestCloud::UploadFile(const std::string &path, const std::string &title,
                            const std::string &mimeType, const std::string &parentId,
                            const std::string &fileId)
 {
-    std::ifstream file(m_map(path).c_str(), std::ios::binary);
+    std::ifstream file(path.c_str(), std::ios::binary);
     if (!file)
     {
         return Json();
@@ -152,21 +177,9 @@ bool TestCloud::DownloadFile(const std::string &fileId, const std::string &local
     {
         return false;
     }
-    std::ofstream(m_map(localPath).c_str(), std::ios::binary) << m_items[fileId].content;
+    std::ofstream(localPath.c_str(), std::ios::binary)
+        << m_items[fileId].content << (m_damageDownloads ? "x" : "");
     return true;
-}
-
-void TestCloud::QueueFolder(const PrepareFolder &prepare, const Done &done)
-{
-    m_queue.push_back(
-        [this, prepare, done]
-        {
-            FolderToCreate folder;
-            if (prepare(folder))
-            {
-                done(CreateFolder(folder.title, folder.parentId));
-            }
-        });
 }
 
 void TestCloud::QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done)

@@ -9,7 +9,7 @@ RUN	?=
 JSON_C	?= /usr
 
 CXX	:= $(CROSS)g++
-SHARED	:= sync/SyncState.cpp sync/SaveScanner.cpp sync/Sync.cpp json/Json.cpp \
+SHARED	:= sync/SyncState.cpp sync/SaveScanner.cpp sync/Sync.cpp sync/Tar.cpp json/Json.cpp \
 	   app/Files.cpp app/DebugLog.cpp
 SOURCES	:= $(wildcard *.cpp) $(addprefix ../source/,$(SHARED))
 # include/ goes first: its headers stand in for the console's.

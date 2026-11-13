@@ -6,19 +6,12 @@
 #include <functional>
 #include <string>
 
-/** The type Drive gives a folder; remote.json entries carry it too. */
+/** The type Drive gives a folder. */
 const std::string folderMime = "application/vnd.google-apps.folder";
 /** The type a save file is sent with. */
 const std::string octetMime = "application/octet-stream";
-/** The type remote.json is sent with. */
+/** The type of the metadata that creates a folder. */
 const std::string jsonMime = "application/json";
-
-/** What FindInFolder looks for. */
-enum class ItemKind
-{
-    Folder,
-    File
-};
 
 /** The likely cause of the last failed request. */
 enum class Failure
@@ -29,14 +22,6 @@ enum class Failure
     Refused,
     /** A local file could not be read or written. */
     LocalFile
-};
-
-/** A folder to create, as decided when its turn in the queue comes. */
-struct FolderToCreate
-{
-    std::string title;
-    /** The folder to create it in. */
-    std::string parentId;
 };
 
 /** A local file to store, as decided when its turn in the queue comes. */
@@ -50,14 +35,12 @@ struct FileToStore
 };
 
 /**
- * Where the backup is kept, as the sync needs it: searches, folders and files one by one, and a
- * queue that sends many at once. Google Drive is one.
+ * Where the backup is kept, as the sync needs it: searches, listings, folders and files one by
+ * one, and a queue that sends many files at once. Google Drive is one.
  */
 class CloudStorage
 {
   public:
-    /** Fills in a queued folder when its turn comes; false when nothing is to be sent. */
-    typedef std::function<bool(FolderToCreate &folder)> PrepareFolder;
     /** Fills in a queued file when its turn comes; false when nothing is to be sent. */
     typedef std::function<bool(FileToStore &file)> PrepareFile;
     /** Takes what the cloud says about the item; without "id" when the request failed. */
@@ -68,15 +51,22 @@ class CloudStorage
     virtual ~CloudStorage() = default;
 
     /**
-     * The folder or file of a title in a folder, unless it is trashed.
-     * @param title the item's title
-     * @param kind whether a folder or a file is looked for
+     * The folder of a title in a folder, unless it is trashed.
+     * @param title the folder's title
      * @param parentId the folder that holds it
-     * @param item receives the item; without "id" when there is none
-     * @return false when the search failed, so whether the item exists is not known
+     * @param folder receives the folder; without "id" when there is none
+     * @return false when the search failed, so whether the folder exists is not known
      */
-    virtual bool FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
-                              Json &item) = 0;
+    virtual bool FindFolder(const std::string &title, const std::string &parentId,
+                            Json &folder) = 0;
+    /**
+     * Every file in a folder, unless it is trashed; folders in it are left out.
+     * @param folderId the folder
+     * @param files receives what the cloud says about each file, with its "id", "title" and
+     * "md5Checksum"
+     * @return false when the listing failed
+     */
+    virtual bool ListFiles(const std::string &folderId, Json::Array &files) = 0;
     /**
      * Creates a folder.
      * @param title the folder's name
@@ -104,13 +94,11 @@ class CloudStorage
      */
     virtual bool DownloadFile(const std::string &fileId, const std::string &localPath) = 0;
 
-    /** Queues the creation of a folder; nothing is sent before RunQueue(). */
-    virtual void QueueFolder(const PrepareFolder &prepare, const Done &done) = 0;
     /**
      * Queues storing a file; nothing is sent before RunQueue().
      * @param path the local file
-     * @param prepare fills in the rest when the file is about to be sent
-     * @param done takes the stored file
+     * @param prepare fills in the rest when the file's turn comes, and may write the file then
+     * @param done takes the stored file; not called when prepare refuses or the queue stops
      */
     virtual void QueueFile(const std::string &path, const PrepareFile &prepare,
                            const Done &done) = 0;
