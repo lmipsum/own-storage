@@ -75,6 +75,8 @@ const std::string driveFolderName = "Own Storage";
 // remote.json status of an entry whose creation on Drive started but was not recorded.
 const std::string creatingStatus = "creating";
 const unsigned int microsecondsPerSecond = 1000000;
+// Enough of an unexpected reply to recognise it in the debug log.
+const std::size_t maxLoggedReplyLength = 200;
 
 HttpClient http;
 GoogleDeviceAuth googleAuth(http);
@@ -229,6 +231,21 @@ void drawPendingMessage()
 }
 
 /**
+ * Describes a failed Drive request for the debug log, from its JSON error reply.
+ * @param reply the body Drive answered with
+ * @return "reason: message", or the start of the body when it is not a Drive error
+ */
+std::string describeDriveError(const std::string &reply)
+{
+    const Json error = Json::Parse(reply)["error"];
+    if (error.IsEmpty())
+    {
+        return reply.substr(0, maxLoggedReplyLength);
+    }
+    return error["errors"][0u]["reason"].Str() + ": " + error["message"].Str();
+}
+
+/**
  * Retrieves a Resource tree of the resources under a folder in google drive
  * @param parentId the parentid for whomm the resources are to be listed
  * @return the resource array containing all children
@@ -252,7 +269,8 @@ Json::Array getResourcesUnderFolder(std::string parentId)
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("getResourcesUnderFolder: HTTP Server Error...%l\n", ret);
+        debugPrintf("getResourcesUnderFolder: HTTP Server Error...%ld %s\n", ret,
+                    describeDriveError(resp).c_str());
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
     }
@@ -286,7 +304,8 @@ Json findFirstRemoteItem(const std::string &query)
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("findFirstRemoteItem: HTTP Server Error...%l\n", ret);
+        debugPrintf("findFirstRemoteItem: HTTP Server Error...%ld %s\n", ret,
+                    describeDriveError(resp).c_str());
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
     }
@@ -499,7 +518,8 @@ bool downloadFile(std::string localPath, std::string fileId)
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("downloadFile: Could not get downloadUrl...%l\n", ret);
+        debugPrintf("downloadFile: Could not get downloadUrl...%ld %s\n", ret,
+                    describeDriveError(resp).c_str());
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
         return false;
@@ -529,11 +549,11 @@ bool downloadFile(std::string localPath, std::string fileId)
         googleAuth, hdr, [&](const HttpClient::Headers &headers)
         { return http.Download(downloadLink, headers, localPath, transferProgress); });
 
-    debugPrintf("Return Code for file download is %d\n", ret);
+    debugPrintf("Return Code for file download is %ld\n", ret);
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("downloadFile: Could not download File..%l\n", ret);
+        debugPrintf("downloadFile: Could not download File..%ld\n", ret);
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
         return false;
@@ -740,7 +760,8 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("uploadFile: Could not pose meta data..%l\n", ret);
+        debugPrintf("uploadFile: Could not pose meta data..%ld %s\n", ret,
+                    describeDriveError(resp).c_str());
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
         return obj;
@@ -771,7 +792,8 @@ Json uploadFile(std::string path, std::string filename, std::string mimeType, st
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("uploadFile: Could not upload file..%l\n", ret);
+        debugPrintf("uploadFile: Could not upload file..%ld %s\n", ret,
+                    describeDriveError(resp2).c_str());
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
         return obj;
@@ -822,7 +844,8 @@ Json uploadDirectory(std::string dirName, std::string parentId)
 
     if (!HttpClient::Succeeded(ret))
     {
-        debugPrintf("uploadDirectory: Could not upload directory..%l\n", ret);
+        debugPrintf("uploadDirectory: Could not upload directory..%ld %s\n", ret,
+                    describeDriveError(resp).c_str());
         // This could mean the internet disconnected, or the server crashed or whatever
         // Possibly exit the application?
         return obj;
@@ -831,11 +854,11 @@ Json uploadDirectory(std::string dirName, std::string parentId)
     obj = Json::Parse(resp);
     if (obj.Has("id"))
     {
-        debugPrintf("Folder id is %d, %s\n", ret, obj["id"].Str().c_str());
+        debugPrintf("Folder id is %ld, %s\n", ret, obj["id"].Str().c_str());
     }
     else
     {
-        debugPrintf("Folder creation failed with status %d\n", ret);
+        debugPrintf("Folder creation failed with status %ld\n", ret);
     }
 
     return obj;
