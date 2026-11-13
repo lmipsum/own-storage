@@ -55,6 +55,7 @@
 #include "auth/AuthorizedSend.h"
 #include "auth/ClientCredentials.h"
 #include "drive/GoogleDrive.h"
+#include "app/Files.h"
 #include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
 #include "json/Json.h"
@@ -82,6 +83,11 @@ const unsigned int microsecondsPerSecond = 1000000;
 
 HttpClient http;
 GoogleDeviceAuth googleAuth(http);
+// The lower progress bar shows the files GoogleDrive moves; its functions are further down.
+int transferProgress(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow);
+void beginTransfer(const std::string &path);
+void endTransfer();
+GoogleDrive drive(http, googleAuth, TransferDisplay{beginTransfer, transferProgress, endTransfer});
 
 std::string rootFolderId = "root";
 std::string remoteJsonId = "root";
@@ -110,8 +116,6 @@ static std::atomic<int> dialog_action(0);
 std::atomic<int> exitapp(0);
 std::atomic<int> syncing(0);
 
-// Set when Drive refuses an upload for lack of room; the sync then stops. Sync thread only.
-bool driveFull = false;
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then run Own Storage again.";
 const unsigned int dialogPollMicroseconds = 100000;
@@ -359,6 +363,25 @@ int transferProgress(void *clientp, double dltotal, double dlnow, double ultotal
 }
 
 /**
+ * Shows on the lower progress bar that a file starts to move.
+ * @param path the local file
+ */
+void beginTransfer(const std::string &path)
+{
+    progFuncLastProgress = 0.0;
+    msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
+    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, path.c_str());
+}
+
+/**
+ * Fills the lower progress bar for a file that moved in one go.
+ */
+void endTransfer()
+{
+    msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, 100);
+}
+
+/**
  * Creates a directory locally
  * @param path the path of the directory to create
  */
@@ -373,7 +396,7 @@ void downloadDirectory(std::string path)
  */
 Json downloadRemoteState()
 {
-    const Json remoteJson = checkIfRemoteResourceExists("remote.json", jsonMime, rootFolderId);
+    const Json remoteJson = drive.FindInFolder("remote.json", jsonMime, rootFolderId);
     if (!remoteJson.Has("id"))
     {
         debugPrintf("downloadRemoteState: there is no remote.json on Google Drive\n");
@@ -381,7 +404,7 @@ Json downloadRemoteState()
     }
     remoteJsonId = remoteJson["id"].Str();
     debugPrintf("Downloading remote.json from Google Drive with id %s\n", remoteJsonId.c_str());
-    if (!downloadFile(remoteResourceFile, remoteJsonId))
+    if (!drive.DownloadFile(remoteJsonId, remoteResourceFile))
     {
         return Json();
     }
@@ -499,7 +522,7 @@ void downloadChanges()
                     progressCounter++;
                     debugPrintf("downloadChanges: Creating file with path %s\n", result.c_str());
 
-                    if (!downloadFile(result, resource["id"].Str()))
+                    if (!drive.DownloadFile(resource["id"].Str(), result))
                     {
                         continue;
                     }
@@ -531,21 +554,6 @@ void downloadChanges()
     }
 
     debugPrintf("downloadChanges finished, All synced files Downloaded\n");
-}
-
-/**
- * Logs a failed upload request, and stops the sync when Drive has no room left.
- * @param what what failed, as the debug log names it
- * @param status the HTTP status, or -1 when there was no answer
- * @param reply the body Drive answered with
- */
-void recordUploadFailure(const char *what, long status, const std::string &reply)
-{
-    debugPrintf("%s..%ld %s\n", what, status, describeDriveError(reply).c_str());
-    if (isDriveFullError(reply))
-    {
-        driveFull = true;
-    }
 }
 
 /**
@@ -726,8 +734,8 @@ Json findInterruptedCreation(const Json &resource, const std::string &parentId)
     const std::string typeCondition = resource["mimeType"].Str() == folderMime
                                           ? "mimeType='" + folderMime + "'"
                                           : "mimeType!='" + folderMime + "'";
-    const Json item = findFirstRemoteItem(
-        typeCondition + " and " + buildTitleInFolderQuery(resource["title"].Str(), parentId));
+    const Json item = drive.FindFirst(typeCondition + " and " +
+                                      BuildTitleInFolderQuery(resource["title"].Str(), parentId));
     if (item.Has("id"))
     {
         debugPrintf("findInterruptedCreation: %s is already on Drive from an interrupted run\n",
@@ -861,8 +869,8 @@ bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress
                   http.Escape("id,modifiedDate,parents/id");
     request.headers.push_back("Content-Type: application/json");
     request.headers.push_back("Expect:");
-    request.body = constructMetaData(resource["title"].Str(), folderMime, parentId);
-    // A create sent twice makes two folders; see buildMultipartRequest.
+    request.body = BuildMetadata(resource["title"].Str(), folderMime, parentId);
+    // A create sent twice makes two folders; see GoogleDrive::BuildMultipartRequest.
     request.retry = Retry::OnlyAnswered;
     showRequestsInProgress(running, "folders", resource["title"].Str());
     return true;
@@ -883,7 +891,7 @@ void finishFolderRequest(u32 index, const std::string &parentId, UploadProgress 
     if (!HttpClient::Succeeded(status) || !folder.Has("id"))
     {
         debugPrintf("finishFolderRequest: Could not create directory..%ld %s\n", status,
-                    describeDriveError(reply).c_str());
+                    DescribeDriveError(reply).c_str());
         return;
     }
     debugPrintf("Folder id is %ld, %s\n", status, folder["id"].Str().c_str());
@@ -939,7 +947,7 @@ bool prepareFileRequest(u32 index, const std::string &parentId, UploadProgress &
         return false;
     }
     std::string content;
-    if (!readWholeFile(path, content) || content.find(multipartBoundary) != std::string::npos)
+    if (!ReadWholeFile(path, content) || content.find(multipartBoundary) != std::string::npos)
     {
         outsideQueue.push_back(index);
         return false;
@@ -948,8 +956,8 @@ bool prepareFileRequest(u32 index, const std::string &parentId, UploadProgress &
     {
         markCreating(index);
     }
-    request = buildMultipartRequest(constructMetaData(title, octetMime, parentId), octetMime,
-                                    content, fileId);
+    request = drive.BuildMultipartRequest(BuildMetadata(title, octetMime, parentId), octetMime,
+                                          content, fileId);
 
     showRequestsInProgress(running, "files", title);
     return true;
@@ -969,7 +977,7 @@ void finishFileRequest(u32 index, const std::string &parentId, UploadProgress &p
     const Json file = Json::Parse(reply);
     if (!HttpClient::Succeeded(status) || !file.Has("id"))
     {
-        recordUploadFailure("finishFileRequest: Could not upload file", status, reply);
+        drive.NoteFailure("finishFileRequest: Could not upload file", status, reply);
         return;
     }
     debugPrintf("Resource id is %s\n", file["id"].Str().c_str());
@@ -1021,7 +1029,7 @@ void uploadFileOutsideQueue(u32 index, const std::string &parentId, UploadProgre
     {
         markCreating(index);
     }
-    const Json file = uploadFile(path, title, octetMime, parentId, fileId);
+    const Json file = drive.UploadFile(path, title, octetMime, parentId, fileId);
     if (file.Has("id"))
     {
         recordFile(index, parentId, file);
@@ -1044,7 +1052,7 @@ void uploadChanges()
             progress.total++;
         }
     }
-    const AuthorizedQueue::Stop stop = [] { return dialog_action != 0 || driveFull; };
+    const AuthorizedQueue::Stop stop = [] { return dialog_action != 0 || drive.IsFull(); };
     AuthorizedQueue queue(googleAuth, parallelUploads);
 
     debugPrintf("uploadChanges Step 1: Creating directories first on Google Drive,%u\n",
@@ -1123,7 +1131,7 @@ void uploadChanges()
     if (remoteJsonId == "root")
     {
         Json remJson;
-        remJson = uploadFile(remoteResourceFile, "remote.json", jsonMime, rootFolderId);
+        remJson = drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, rootFolderId);
         if (remJson.Has("id"))
         {
             remoteJsonId = remJson["id"].Str();
@@ -1133,7 +1141,7 @@ void uploadChanges()
     else if (progress.done > 0)
     {
         debugPrintf("Updating remote.json on the server...\n");
-        uploadFile(remoteResourceFile, "remote.json", jsonMime, rootFolderId, remoteJsonId);
+        drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, rootFolderId, remoteJsonId);
     }
 }
 
@@ -1295,41 +1303,6 @@ std::string authenticateUser()
         authStatus = "authorization_complete";
     }
     return authStatus;
-}
-
-/**
- * Builds a remote Resource Tree from root folder to every file there is
- */
-void buildRemoteResourceTree()
-{
-    std::vector<Json> resourceTree;
-    std::vector<std::string> foldersToTraverse;
-    Json resourceObject = checkIfRemoteResourceExists(driveFolderName, folderMime, rootFolderId);
-    if (resourceObject.Has("id"))
-    {
-        resourceTree.push_back(Json(resourceObject));
-        foldersToTraverse.push_back(resourceObject["id"].Str());
-        while (foldersToTraverse.size() > 0)
-        {
-            Json::Array tempArray = getResourcesUnderFolder(foldersToTraverse.back());
-            if (!tempArray.empty())
-            {
-                for (Json::Array::iterator i = tempArray.begin(); i != tempArray.end(); ++i)
-                {
-                    if ((*i)["mimeType"].Str() == folderMime)
-                        foldersToTraverse.push_back((*i)["id"].Str());
-                    resourceTree.push_back(*i);
-                }
-            }
-            foldersToTraverse.pop_back();
-        }
-    }
-
-    debugPrintf("Remote Resource Tree built, writing to Remote Resource Json\n");
-
-    remoteResourceRoot.Add("data", Json(resourceTree));
-
-    writeChangesToFile();
 }
 
 /**
@@ -1582,7 +1555,7 @@ int initCloudDrive(void *arg)
     msgDialogOpen2(dialog_type, "Performing Sync...", dialog_handler, NULL, NULL);
 
     // If user new but remote data exists
-    Json rootResource = checkIfRemoteResourceExists(driveFolderName, folderMime, "root");
+    Json rootResource = drive.FindInFolder(driveFolderName, folderMime, "root");
     if (rootResource.Has("id"))
     {
         rootFolderId = rootResource["id"].Str();
@@ -1594,7 +1567,7 @@ int initCloudDrive(void *arg)
     {
         debugPrintf("User has no previous data on Google Drive\n");
         Json rtId;
-        rtId = uploadDirectory(driveFolderName, "root");
+        rtId = drive.CreateFolder(driveFolderName, "root");
 
         if (rtId.Has("id"))
         {
@@ -1686,7 +1659,7 @@ int initCloudDrive(void *arg)
     last_sync = new std::string(epochTime);*/
 
     msgDialogAbort();
-    if (driveFull)
+    if (drive.IsFull())
     {
         showDriveFullDialog();
     }
