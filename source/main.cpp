@@ -53,6 +53,7 @@
 #include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
 #include "app/ConsoleStorage.h"
+#include "app/Profile.h"
 #include "sync/SaveScanner.h"
 #include "sync/Sync.h"
 #include "sync/SyncState.h"
@@ -61,10 +62,6 @@
 #include "app/Paths.h"
 
 const std::string appPath = APP_DIR;
-const std::string remoteResourceFile = APP_DIR "remote.json";
-const std::string remoteBackup = APP_DIR "remote.backup";
-// The remote.json entries changed since its last full save, one JSON object per line.
-const std::string remoteJournal = APP_DIR "remote.journal";
 // A Google client of the user's own, which takes the place of the published one.
 const std::string userClientFile = APP_DIR "client.json";
 // Uploads that run at once; Drive takes about a second to answer each, and these waits
@@ -80,11 +77,6 @@ void beginTransfer(const std::string &path);
 void endTransfer();
 GoogleDrive drive(http, googleAuth, parallelUploads,
                   TransferDisplay{beginTransfer, transferProgress, endTransfer});
-
-Config config;
-
-// The sync thread's view of the backup on Drive.
-SyncState remoteState(remoteResourceFile, remoteBackup, remoteJournal);
 
 SDL_Event event;
 SDL_Surface *screen = NULL;
@@ -112,6 +104,7 @@ const char driveUnreachableMessage[] = "Cannot reach Google Drive. Check the net
 const char driveRefusedMessage[] = "Google Drive refused a request. Run Own Storage again later.";
 const char localFileMessage[] =
     "Own Storage cannot write to the PS3 hard disk. Check the free space.";
+const char unknownUserMessage[] = "Own Storage cannot tell which user is logged in.";
 const char remoteStateDamagedMessage[] =
     "The Own Storage state on Google Drive (remote.json) cannot be read.";
 const unsigned int dialogPollMicroseconds = 100000;
@@ -428,8 +421,19 @@ int initCloudDrive(void *arg)
     }
     googleAuth.SetClient(client);
 
+    ConsoleStorage consoleStorage;
+    const std::optional<std::string> user = FindLoggedInUser(consoleStorage);
+    if (!user)
+    {
+        showMessage(unknownUserMessage);
+        return 0;
+    }
+    const std::string profile = MakeProfileDirectory(consoleStorage, *user);
+    const std::string savedata = SavedataDirectory(*user);
+
     debugPrintf("Checking if User is Authenticated...\n");
-    const bool signedIn = LoadConfig(config) && !config.refreshToken.empty();
+    Config config;
+    const bool signedIn = LoadConfig(profile, config) && !config.refreshToken.empty();
 
     showMessage("Checking if User is authenticated...");
 
@@ -452,7 +456,7 @@ int initCloudDrive(void *arg)
     }
 
     config.refreshToken = googleAuth.RefreshToken();
-    SaveConfig(config);
+    SaveConfig(profile, config);
     debugPrintf("Authentication Phase Complete, checking remote root folder existence\n");
 
     syncing = 1;
@@ -487,7 +491,7 @@ int initCloudDrive(void *arg)
             config.rootFolderId = rtId["id"].Str();
             debugPrintf("Created root directory on Google Drive with id %s\n",
                         config.rootFolderId.c_str());
-            SaveConfig(config);
+            SaveConfig(profile, config);
         }
         else
         {
@@ -497,10 +501,12 @@ int initCloudDrive(void *arg)
         }
     }
 
-    ConsoleStorage consoleStorage;
+    SyncState remoteState(profile + "/remote.json", profile + "/remote.backup",
+                          profile + "/remote.journal");
     ProgressDialog progressDialog;
-    Sync sync(drive, remoteState, consoleStorage, progressDialog, config.rootFolderId);
-    const Json::Array localEntries = SaveScanner(consoleStorage).Scan();
+    Sync sync(drive, remoteState, consoleStorage, progressDialog, config.rootFolderId, savedata);
+    const Json::Array localEntries =
+        SaveScanner(consoleStorage, savedata, profileMarkerSave).Scan();
 
     // The first run, with nothing on Drive yet: everything the scan found goes up.
     if (userType == "one")
