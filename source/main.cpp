@@ -19,6 +19,8 @@
 
 #include <iostream>
 #include <sstream>
+#include <fstream>
+#include <cstdio>
 #include <string.h>
 
 #include <stdio.h>
@@ -66,6 +68,8 @@ const std::string appFileBackup = APP_DIR "config.backup";
 const std::string localResourceFile = APP_DIR "local.json";
 const std::string remoteResourceFile = APP_DIR "remote.json";
 const std::string remoteBackup = APP_DIR "remote.backup";
+// The remote.json entries changed since its last full save, one JSON object per line.
+const std::string remoteJournal = APP_DIR "remote.journal";
 // A Google client of the user's own, which takes the place of the published one.
 const std::string userClientFile = APP_DIR "client.json";
 const std::string queryFields =
@@ -113,6 +117,11 @@ bool driveFull = false;
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then run Own Storage again.";
 const unsigned int dialogPollMicroseconds = 100000;
+
+// A full remote.json save costs about 0.2 s on the console, so changes go to the journal and
+// remote.json is saved in full only every this many of them. Sync thread only.
+const u32 changesPerFullSave = 50;
+u32 changesSinceFullSave = 0;
 
 int xmbopen = 0;
 
@@ -607,6 +616,8 @@ Json downloadRemoteState()
     {
         return Json();
     }
+    // A journal left on disk belongs to the state the download has just replaced.
+    std::remove(remoteJournal.c_str());
     return Json::Load(remoteResourceFile);
 }
 
@@ -974,6 +985,9 @@ std::string getParentIdByFolderName(std::string folderName)
     return result;
 }
 
+/**
+ * Saves remote.json in full, with its backup, and empties the journal it now contains.
+ */
 void writeChangesToFile()
 {
     // Backup remote.json before a write to save from any catastrophes
@@ -982,8 +996,79 @@ void writeChangesToFile()
 
     if (backupSaved && saved)
     {
+        std::remove(remoteJournal.c_str());
+        changesSinceFullSave = 0;
         debugPrintf("writeChangesToFile: Changes to remote.json written successfully\n");
     }
+}
+
+/**
+ * Saves one changed remote.json entry: appends it to the journal, and saves remote.json in
+ * full every changesPerFullSave changes.
+ * @param index the entry's position in remote.json
+ */
+void recordEntry(u32 index)
+{
+    const std::string line = remoteResourceRoot["data"][index].Str() + "\n";
+    FILE *journal = std::fopen(remoteJournal.c_str(), "ab");
+    const bool appended =
+        journal != NULL && std::fwrite(line.data(), 1, line.size(), journal) == line.size();
+    if (journal != NULL && std::fclose(journal) != 0)
+    {
+        debugPrintf("recordEntry: could not close %s\n", remoteJournal.c_str());
+    }
+    if (!appended || ++changesSinceFullSave >= changesPerFullSave)
+    {
+        writeChangesToFile();
+    }
+}
+
+/**
+ * Applies the journal an interrupted run left to remote.json's content in memory.
+ */
+void replayJournal()
+{
+    // The fields an upload changes; a journaled entry replaces them in the loaded one.
+    static const char *const recordedFields[] = {"status",       "id",       "parentid",
+                                                 "modifiedDate", "fileSize", "md5Checksum"};
+    std::ifstream journal(remoteJournal.c_str(), std::ios::binary);
+    if (!journal)
+    {
+        return;
+    }
+    u32 replayed = 0;
+    std::string line;
+    while (std::getline(journal, line))
+    {
+        // A power cut can leave the last line half written; it does not parse and is skipped.
+        const Json change = Json::Parse(line);
+        if (!change.Has("path"))
+        {
+            continue;
+        }
+        const Json::Array entries = remoteResourceRoot["data"].AsArray();
+        u32 i = 0;
+        while (i < entries.size() && entries[i]["path"].Str() != change["path"].Str())
+        {
+            ++i;
+        }
+        if (i == entries.size())
+        {
+            remoteResourceRoot["data"].Append(change);
+        }
+        else
+        {
+            for (const char *field : recordedFields)
+            {
+                if (change.Has(field))
+                {
+                    remoteResourceRoot["data"][i].Add(field, change[field]);
+                }
+            }
+        }
+        ++replayed;
+    }
+    debugPrintf("replayJournal: %u changes of an interrupted run applied\n", replayed);
 }
 
 std::string calculateMD5Checksum(const std::string &path);
@@ -1009,7 +1094,7 @@ bool isPendingCreation(const Json &resource)
 void markCreating(u32 index)
 {
     remoteResourceRoot["data"][index].Add("status", Json(creatingStatus));
-    writeChangesToFile();
+    recordEntry(index);
 }
 
 /**
@@ -1119,7 +1204,7 @@ void uploadChanges()
                     remoteResourceRoot["data"][i].Add("modifiedDate",
                                                       Json(obj["modifiedDate"].Str()));
                     remoteResourceRoot["data"][i].Add("status", Json("synced"));
-                    writeChangesToFile();
+                    recordEntry(i);
 
                     syncJson = 1;
                     progressCounter++;
@@ -1202,7 +1287,7 @@ void uploadChanges()
                                                       Json(obj["md5Checksum"].Str()));
                     remoteResourceRoot["data"][i].Add("status", Json("synced"));
 
-                    writeChangesToFile();
+                    recordEntry(i);
                     syncJson = 1;
                     progressCounter++;
 
@@ -1259,7 +1344,7 @@ void uploadChanges()
                                                       Json(obj["md5Checksum"].Str()));
                     remoteResourceRoot["data"][i].Add("status", Json("synced"));
 
-                    writeChangesToFile();
+                    recordEntry(i);
                     syncJson = 1;
                     progressCounter++;
 
@@ -1290,6 +1375,9 @@ void uploadChanges()
             }
         }
     }
+
+    // The upload below sends remote.json as it is on disk, so it must hold every change.
+    writeChangesToFile();
 
     debugPrintf("uploadChanges Step 3: Uploading remote.json to google drive\n");
 
@@ -1797,7 +1885,7 @@ int initCloudDrive(void *arg)
     if (userType == "one")
     {
         remoteResourceRoot = Json::Load(localResourceFile);
-        saveStateFile(remoteResourceRoot, remoteResourceFile);
+        writeChangesToFile();
 
         uploadChanges();
     }
@@ -1818,6 +1906,10 @@ int initCloudDrive(void *arg)
         if (remoteResourceRoot.IsEmpty())
         {
             remoteResourceRoot = downloadRemoteState();
+        }
+        else
+        {
+            replayJournal();
         }
         // Without a data array, detectChanges has nowhere to add the new entries.
         if (!remoteResourceRoot.Has("data"))
