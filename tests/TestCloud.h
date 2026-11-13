@@ -37,6 +37,10 @@ class TestCloud : public CloudStorage
     int Creates() const;
     /** How many stored files were overwritten. */
     int Updates() const;
+    /** What the cloud shows about a file; empty when nothing was given. */
+    std::string Description(const std::string &id) const;
+    /** Changes what the cloud shows about a file, as the user can on the Drive website. */
+    void SetDescription(const std::string &id, const std::string &description);
     /** Every item, by id. */
     const std::map<std::string, TestCloudItem> &Items() const;
     /**
@@ -55,9 +59,11 @@ class TestCloud : public CloudStorage
     bool FindFolder(const std::string &title, const std::string &parentId, Json &folder) override;
     bool ListFiles(const std::string &folderId, Json::Array &files) override;
     Json CreateFolder(const std::string &title, const std::string &parentId) override;
-    Json UploadFile(const std::string &path, const std::string &title, const std::string &mimeType,
-                    const std::string &parentId, const std::string &fileId) override;
+    Json UploadFile(const std::string &path, const FileToStore &file,
+                    const std::string &mimeType) override;
     bool DownloadFile(const std::string &fileId, const std::string &localPath) override;
+    /** Takes the file away, as the trash hides it from every listing. */
+    bool TrashFile(const std::string &fileId) override;
     void QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done) override;
     void RunQueue(const Stop &stop) override;
     unsigned int Running() const override;
@@ -68,9 +74,10 @@ class TestCloud : public CloudStorage
     /** What the cloud answers about an item. */
     Json Describe(const std::string &id) const;
     /** Adds an item; its answer is lost when LoseAnswerOfCreate() says so. */
-    Json Create(const TestCloudItem &item);
+    Json Create(const TestCloudItem &item, const std::string &description);
 
     std::map<std::string, TestCloudItem> m_items;
+    std::map<std::string, std::string> m_descriptions;
     std::vector<std::function<void()>> m_queue;
     bool m_failSearches;
     bool m_damageDownloads;

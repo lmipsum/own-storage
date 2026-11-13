@@ -3,20 +3,22 @@
 #include "TestCloud.h"
 #include "TestConsole.h"
 
+#include "sync/ParamSfo.h"
 #include "sync/SaveScanner.h"
 #include "sync/Sync.h"
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
 #include "sync/Tar.h"
 
+#include <cstdint>
 #include <ctime>
 #include <string>
 #include <vector>
 
 namespace
 {
-/** A display nobody looks at, which never asks to stop. */
-class SilentDisplay : public SyncDisplay
+/** A display nobody looks at, which never asks to stop and answers from a script. */
+class ScriptedDisplay : public SyncDisplay
 {
   public:
     void SetText(ProgressBar, const std::string &) override {}
@@ -26,7 +28,56 @@ class SilentDisplay : public SyncDisplay
     {
         return false;
     }
+    Answer Ask(const std::string &question) override
+    {
+        questions.push_back(question);
+        if (answers.empty())
+        {
+            return Answer::None;
+        }
+        const Answer answer = answers.front();
+        answers.erase(answers.begin());
+        return answer;
+    }
+
+    /** Given in turn; once they run out no answer comes, as when the app closes. */
+    std::vector<Answer> answers;
+    /** A question asked; empty when there were fewer, so a check fails instead of crashing. */
+    std::string Question(std::size_t index) const
+    {
+        return index < questions.size() ? questions[index] : std::string();
+    }
+
+    /** Every question asked. */
+    std::vector<std::string> questions;
 };
+
+/** Appends a little-endian number of a byte count. */
+void PutLittleEndian(std::string &bytes, std::uint32_t value, int count)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        bytes += static_cast<char>((value >> (8 * i)) & 0xff);
+    }
+}
+
+/** A PARAM.SFO with a title alone, laid out as the console lays it out. */
+std::string MakeSfo(const std::string &title)
+{
+    const std::uint32_t keyTable = 20 + 16;
+    const std::string keys("TITLE\0\0\0", 8);
+    std::string sfo("\0PSF", 4);
+    PutLittleEndian(sfo, 0x0101, 4);
+    PutLittleEndian(sfo, keyTable, 4);
+    PutLittleEndian(sfo, keyTable + keys.size(), 4);
+    PutLittleEndian(sfo, 1, 4);
+    PutLittleEndian(sfo, 0, 2);
+    PutLittleEndian(sfo, 0x0204, 2);
+    PutLittleEndian(sfo, title.size() + 1, 4);
+    PutLittleEndian(sfo, title.size() + 1, 4);
+    PutLittleEndian(sfo, 0, 4);
+    return sfo + keys + title + '\0';
+}
 
 // Saves written before the first sync.
 const std::time_t kWritten = std::time(nullptr) - 3600;
@@ -44,7 +95,7 @@ const char kSave[] = "/dev_hdd0/home/00000001/savedata/BLES00001-SAVE";
  */
 void PutSaves(TestConsole &console)
 {
-    console.Put(std::string(kSave) + "/PARAM.SFO", "sfo-1", kWritten);
+    console.Put(std::string(kSave) + "/PARAM.SFO", MakeSfo("Game One"), kWritten);
     console.Put(std::string(kSave) + "/DATA.BIN", "data-1", kWritten);
     console.Put("/dev_hdd0/home/00000001/savedata/BLUS00002-AUTO/DATA.BIN", "data-2", kWritten);
     console.Put("/dev_hdd0/home/00000001/savedata/OWNS00001-PROFILE/MARKER.DAT", "1", kWritten);
@@ -61,7 +112,7 @@ struct Setup
 {
     TestConsole console;
     TestCloud cloud;
-    SilentDisplay display;
+    ScriptedDisplay display;
     std::string rootId;
 
     Setup()
@@ -81,6 +132,44 @@ struct Setup
     bool Run()
     {
         return Run(console, kSavedata);
+    }
+
+    /** The cloud id of a save's archive; empty when there is none. */
+    std::string ArchiveId(const std::string &save) const
+    {
+        for (const auto &item : cloud.Items())
+        {
+            if (item.second.title == save + ".tar")
+            {
+                return item.first;
+            }
+        }
+        return std::string();
+    }
+
+    /**
+     * Plays the save on another console of the same user, then on this one, so that it changed
+     * on both sides since its base.
+     */
+    void ChangeOnBothSides()
+    {
+        TestConsole other;
+        other.MakeDirectories(kSavedata);
+        Run(other, kSavedata);
+        other.Put(std::string(kSave) + "/DATA.BIN", "played there", kChanged);
+        Run(other, kSavedata);
+        console.Put(std::string(kSave) + "/DATA.BIN", "played here", kChanged);
+    }
+
+    /** Deletes a save on this console. */
+    void DeleteSave(const std::string &save)
+    {
+        const std::string folder = std::string(kSavedata) + "/" + save;
+        for (const std::string &file : console.List(folder))
+        {
+            console.Remove(folder + "/" + file);
+        }
+        console.RemoveDirectory(folder);
     }
 
     /** The files in the cloud's archive of a save. */
@@ -219,34 +308,174 @@ TEST(SaveChangedOnAnotherConsoleComesDown)
     CHECK_EQUAL(updates, setup.cloud.Updates());
 }
 
-TEST(SaveChangedOnBothSidesIsLeftAsItIs)
+TEST(SaveChangedOnBothSidesIsLeftAsItIsWithoutAnAnswer)
 {
     Setup setup;
     PutSaves(setup.console);
     setup.Run();
-    TestConsole other;
-    other.MakeDirectories("/dev_hdd0/home/00000001/savedata");
-    setup.Run(other, kSavedata);
-    other.Put(std::string(kSave) + "/DATA.BIN", "played there", kChanged);
-    setup.Run(other, kSavedata);
-    setup.console.Put(std::string(kSave) + "/DATA.BIN", "played here", kChanged);
+    setup.ChangeOnBothSides();
     setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+    CHECK_EQUAL(std::size_t(0), setup.display.Question(0).find("Game One (BLES00001):\n"));
     CHECK_EQUAL(std::string("played here"),
                 setup.console.Content(std::string(kSave) + "/DATA.BIN"));
     CHECK_EQUAL(std::string("played there"), setup.Archive("BLES00001-SAVE")[0].content);
 }
 
-TEST(SaveDeletedOnTheConsoleIsNotBroughtBack)
+TEST(SaveChangedOnBothSidesComesDownOnYes)
 {
     Setup setup;
     PutSaves(setup.console);
     setup.Run();
-    setup.console.Remove(std::string(kSave) + "/DATA.BIN");
-    setup.console.Remove(std::string(kSave) + "/PARAM.SFO");
-    setup.console.RemoveDirectory(kSave);
+    setup.ChangeOnBothSides();
+    setup.display.answers = {Answer::Yes};
     setup.Run();
+    CHECK_EQUAL(std::string("played there"),
+                setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+}
+
+TEST(SaveChangedOnBothSidesGoesUpOnNo)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.ChangeOnBothSides();
+    setup.display.answers = {Answer::No};
+    setup.Run();
+    CHECK_EQUAL(std::string("played here"), setup.Archive("BLES00001-SAVE")[0].content);
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+}
+
+TEST(SaveDeletedOnTheConsoleIsNotBroughtBackWithoutAnAnswer)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
     CHECK(!setup.console.Exists(kSave));
     CHECK_EQUAL(std::size_t(2), setup.Archive("BLES00001-SAVE").size());
+}
+
+TEST(SaveDeletedOnTheConsoleComesBackOnYes)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.display.answers = {Answer::Yes};
+    setup.Run();
+    CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+}
+
+TEST(SaveDeletedOnTheConsoleGoesFromTheCloudOnNo)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.display.answers = {Answer::No};
+    setup.Run();
+    CHECK_EQUAL(std::string("BLUS00002-AUTO.tar\n"), setup.cloud.Tree(setup.rootId));
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+}
+
+TEST(SaveDeletedHereButPlayedOnElsewhereSaysSo)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    setup.Run(other, kSavedata);
+    other.Put(std::string(kSave) + "/DATA.BIN", "played there", kChanged);
+    setup.Run(other, kSavedata);
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+    CHECK(setup.display.Question(0).find("another PS3 has sent a newer copy") != std::string::npos);
+}
+
+TEST(LongTitleFromTheCloudIsCut)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    const std::string id = setup.ArchiveId("BLES00001-SAVE");
+    // A title of 129 bytes whose last character, two bytes long, would be cut in half.
+    const std::string title = std::string(127, 'a') + "\xc3\xa9";
+    setup.cloud.SetDescription(id, title);
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+    CHECK_EQUAL(std::size_t(0),
+                setup.display.Question(0).find(std::string(127, 'a') + " (BLES00001):\n"));
+}
+
+TEST(SavesOfOneGameAreAskedAboutOnce)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.console.Put(std::string(kSavedata) + "/BLES00001-SAVE2/DATA.BIN", "data-3", kWritten);
+    setup.Run();
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.DeleteSave("BLES00001-SAVE2");
+    setup.display.answers = {Answer::Yes};
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+    CHECK(setup.display.Question(0).find("2 saves were deleted") != std::string::npos);
+    CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK_EQUAL(std::string("data-3"),
+                setup.console.Content(std::string(kSavedata) + "/BLES00001-SAVE2/DATA.BIN"));
+}
+
+TEST(NoAnswerEndsTheQuestions)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.DeleteSave("BLUS00002-AUTO");
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+}
+
+TEST(GameWithoutATitleIsNamedByItsId)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.DeleteSave("BLUS00002-AUTO");
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+    CHECK_EQUAL(std::size_t(0), setup.display.Question(0).find("BLUS00002:\n"));
+}
+
+TEST(ArchiveCarriesTheGameTitleForEveryConsole)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    CHECK_EQUAL(std::string("Game One"),
+                setup.cloud.Description(setup.ArchiveId("BLES00001-SAVE")));
+    // The title comes from the cloud once the console has no PARAM.SFO left to read.
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.Run();
+    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+    CHECK_EQUAL(std::size_t(0), setup.display.Question(0).find("Game One (BLES00001):\n"));
+}
+
+TEST(GameTitleIsReadFromParamSfo)
+{
+    const std::string sfo = MakeSfo("Game One");
+    CHECK_EQUAL(std::string("Game One"), ReadSfoTitle(sfo));
+    CHECK_EQUAL(std::string(), ReadSfoTitle(sfo.substr(0, sfo.size() - 4)));
+    CHECK_EQUAL(std::string(), ReadSfoTitle("sfo-1"));
 }
 
 TEST(FailedListingStopsTheSync)

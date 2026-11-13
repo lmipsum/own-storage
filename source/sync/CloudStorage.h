@@ -28,6 +28,8 @@ enum class Failure
 struct FileToStore
 {
     std::string title;
+    /** What the cloud shows about it; may be empty. */
+    std::string description;
     /** The folder that holds it. */
     std::string parentId;
     /** The stored file to update; empty to create a new one. */
@@ -62,8 +64,8 @@ class CloudStorage
     /**
      * Every file in a folder, unless it is trashed; folders in it are left out.
      * @param folderId the folder
-     * @param files receives what the cloud says about each file, with its "id", "title" and
-     * "md5Checksum"
+     * @param files receives what the cloud says about each file, with its "id", "title",
+     * "description" and "md5Checksum"
      * @return false when the listing failed
      */
     virtual bool ListFiles(const std::string &folderId, Json::Array &files) = 0;
@@ -77,15 +79,12 @@ class CloudStorage
     /**
      * Stores a local file.
      * @param path the local file
-     * @param title its name in the cloud
+     * @param file where and how to store it
      * @param mimeType its type
-     * @param parentId the folder that holds it
-     * @param fileId the stored file to update; empty to create a new one
      * @return the stored file; without "id" when the upload failed
      */
-    virtual Json UploadFile(const std::string &path, const std::string &title,
-                            const std::string &mimeType, const std::string &parentId,
-                            const std::string &fileId) = 0;
+    virtual Json UploadFile(const std::string &path, const FileToStore &file,
+                            const std::string &mimeType) = 0;
     /**
      * Saves a stored file to a local path.
      * @param fileId the stored file
@@ -93,6 +92,12 @@ class CloudStorage
      * @return false when the download failed
      */
     virtual bool DownloadFile(const std::string &fileId, const std::string &localPath) = 0;
+    /**
+     * Moves a stored file to the trash, where the user can still restore it for a while.
+     * @param fileId the stored file
+     * @return false when the request failed
+     */
+    virtual bool TrashFile(const std::string &fileId) = 0;
 
     /**
      * Queues storing a file; nothing is sent before RunQueue().

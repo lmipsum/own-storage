@@ -15,8 +15,8 @@
 /**
  * Keeps a user's saves and their backup in line. Every save is one archive in the cloud. A save
  * that changed since its base only on the console goes up, one that changed only in the cloud
- * comes down. A save that changed on both sides, or was deleted on the console, is left as it
- * is: that needs the user's say. For the sync thread only.
+ * comes down. A save that changed on both sides, or was deleted on the console, needs the user's
+ * say: once the rest is done, the user is asked once per game. For the sync thread only.
  */
 class Sync
 {
@@ -38,7 +38,7 @@ class Sync
     Sync &operator=(const Sync &) = delete;
 
     /**
-     * Brings every save and its backup in line, as far as that needs no one's say.
+     * Brings every save and its backup in line, asking the user where that needs a say.
      * @return false when the cloud's saves could not be listed, so nothing was done
      */
     bool Run();
@@ -49,6 +49,50 @@ class Sync
     {
         std::string fileId;
         std::string md5;
+        /** The game's title, as the console that sent the archive read it; may be empty. */
+        std::string title;
+    };
+
+    /** A save to send up. */
+    struct Upload
+    {
+        const LocalSave *save;
+        /** The archive to replace in the cloud; empty to create one. */
+        std::string fileId;
+    };
+
+    /** A save to bring down. */
+    struct Download
+    {
+        std::string name;
+        CloudSave cloud;
+    };
+
+    /** Why a save needs the user's say. */
+    enum class Doubt
+    {
+        ChangedOnBothSides,
+        DeletedOnConsole,
+        /** Deleted here after another console had sent a newer copy, which the user should know. */
+        DeletedOnConsoleChangedInCloud
+    };
+
+    /** A save that needs the user's say. */
+    struct Question
+    {
+        Doubt doubt;
+        std::string name;
+        CloudSave cloud;
+        /** The save on the console; null when it was deleted there. */
+        const LocalSave *local;
+    };
+
+    /** What a run does with the saves. */
+    struct Plan
+    {
+        std::vector<Upload> uploads;
+        std::vector<Download> downloads;
+        std::vector<Question> questions;
     };
 
     /** How far the upper progress bar is. */
@@ -76,6 +120,36 @@ class Sync
      */
     bool ListCloudSaves(std::map<std::string, CloudSave> &saves);
     /**
+     * Decides what to do with a save, from what it is like on either side and its base. A save
+     * that is the same on both sides gets its base at once.
+     * @param name the save
+     * @param local the save on the console; null when it is not there
+     * @param cloud its archive in the cloud; null when there is none
+     * @param plan receives the decision
+     */
+    void Decide(const std::string &name, const LocalSave *local, const CloudSave *cloud,
+                Plan &plan);
+    /** Sends the plan's uploads, then brings its downloads down, on fresh progress bars. */
+    void Transfer(const Plan &plan);
+    /**
+     * Asks the user once per game what to do with the saves in doubt. A save deleted on the
+     * console that the user does not want back goes to the cloud's trash at once.
+     * @param questions the saves in doubt
+     * @return the uploads and downloads the answers call for
+     */
+    Plan Settle(const std::vector<Question> &questions);
+    /**
+     * The question for one game.
+     * @param doubt why its saves need a say
+     * @param titleId the game's ID
+     * @param questions its saves
+     * @return the question, naming the game and what each answer does
+     */
+    std::string QuestionText(Doubt doubt, const std::string &titleId,
+                             const std::vector<const Question *> &questions) const;
+    /** The game title in a save's PARAM.SFO on the console; empty when it cannot be read. */
+    std::string LocalTitle(const std::string &name) const;
+    /**
      * Writes a save's archive.
      * @param save the save
      * @param path where the archive goes
@@ -99,7 +173,7 @@ class Sync
      * @param cloudSave its archive in the cloud
      * @return false when it could not be brought down
      */
-    bool Download(const std::string &name, const CloudSave &cloudSave);
+    bool BringDown(const std::string &name, const CloudSave &cloudSave);
     /** True when the user stopped the sync or the cloud has no room left. */
     bool Stopped() const;
 

@@ -52,6 +52,17 @@ int TestCloud::Updates() const
     return m_updates;
 }
 
+std::string TestCloud::Description(const std::string &id) const
+{
+    const auto description = m_descriptions.find(id);
+    return description == m_descriptions.end() ? std::string() : description->second;
+}
+
+void TestCloud::SetDescription(const std::string &id, const std::string &description)
+{
+    m_descriptions[id] = description;
+}
+
 const std::map<std::string, TestCloudItem> &TestCloud::Items() const
 {
     return m_items;
@@ -144,31 +155,38 @@ bool TestCloud::ListFiles(const std::string &folderId, Json::Array &files)
 
 Json TestCloud::CreateFolder(const std::string &title, const std::string &parentId)
 {
-    return Create(TestCloudItem{title, parentId, folderMime, ""});
+    return Create(TestCloudItem{title, parentId, folderMime, ""}, std::string());
 }
 
-Json TestCloud::UploadFile(const std::string &path, const std::string &title,
-                           const std::string &mimeType, const std::string &parentId,
-                           const std::string &fileId)
+Json TestCloud::UploadFile(const std::string &path, const FileToStore &file,
+                           const std::string &mimeType)
 {
-    std::ifstream file(path.c_str(), std::ios::binary);
-    if (!file)
+    std::ifstream local(path.c_str(), std::ios::binary);
+    if (!local)
     {
         return Json();
     }
     std::ostringstream content;
-    content << file.rdbuf();
-    if (fileId.empty())
+    content << local.rdbuf();
+    if (file.fileId.empty())
     {
-        return Create(TestCloudItem{title, parentId, mimeType, content.str()});
+        return Create(TestCloudItem{file.title, file.parentId, mimeType, content.str()},
+                      file.description);
     }
-    if (m_items.count(fileId) == 0)
+    if (m_items.count(file.fileId) == 0)
     {
         return Json();
     }
-    m_items[fileId].content = content.str();
+    m_items[file.fileId].content = content.str();
+    m_descriptions[file.fileId] = file.description;
     ++m_updates;
-    return Describe(fileId);
+    return Describe(file.fileId);
+}
+
+bool TestCloud::TrashFile(const std::string &fileId)
+{
+    m_descriptions.erase(fileId);
+    return m_items.erase(fileId) == 1;
 }
 
 bool TestCloud::DownloadFile(const std::string &fileId, const std::string &localPath)
@@ -190,7 +208,7 @@ void TestCloud::QueueFile(const std::string &path, const PrepareFile &prepare, c
             FileToStore file;
             if (prepare(file))
             {
-                done(UploadFile(path, file.title, octetMime, file.parentId, file.fileId));
+                done(UploadFile(path, file, octetMime));
             }
         });
 }
@@ -237,15 +255,17 @@ Json TestCloud::Describe(const std::string &id) const
     described.Add("modifiedDate", Json(Now()));
     if (item.mimeType != folderMime)
     {
+        described.Add("description", Json(Description(id)));
         described.Add("md5Checksum", Json(ContentDigest(item.content)));
         described.Add("fileSize", Json(std::to_string(item.content.size())));
     }
     return described;
 }
 
-Json TestCloud::Create(const TestCloudItem &item)
+Json TestCloud::Create(const TestCloudItem &item, const std::string &description)
 {
     const std::string id = Store(item);
+    m_descriptions[id] = description;
     ++m_creates;
     if (m_createsUntilLostAnswer == 0)
     {

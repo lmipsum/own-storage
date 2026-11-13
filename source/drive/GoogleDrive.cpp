@@ -21,7 +21,8 @@ const char kFoundItemFields[] =
 const char kStoredFileFields[] = "fileSize,id,md5Checksum,modifiedDate,parents/id";
 const char kCreatedFolderFields[] = "id,modifiedDate,parents/id";
 // What a listing gives of each file, and how many files one request may give.
-const char kListedFields[] = "kind,items(id,md5Checksum,title),nextPageToken";
+const char kListedFields[] = "kind,items(description,id,md5Checksum,title),nextPageToken";
+const char kTrashedFileFields[] = "id";
 // What a listing reply says it is; any other reply is not a listing, however it ends.
 const char kFileListKind[] = "drive#fileList";
 const char kListPageSize[] = "1000";
@@ -60,22 +61,24 @@ bool IsDriveFullError(const std::string &reply)
 }
 
 /**
- * Builds the metadata Drive needs to create an item.
- * @param title the item's name
+ * Builds the metadata Drive needs to create or update an item.
+ * @param file the item's name, description and folder
  * @param mimeType its type
- * @param parentId the folder that holds it
  * @return the metadata as JSON text
  */
-std::string BuildMetadata(const std::string &title, const std::string &mimeType,
-                          const std::string &parentId)
+std::string BuildMetadata(const FileToStore &file, const std::string &mimeType)
 {
     Json parent;
-    parent.Add("id", Json(parentId));
+    parent.Add("id", Json(file.parentId));
     Json::Array parents;
     parents.push_back(parent);
 
     Json meta;
-    meta.Add("title", Json(title));
+    meta.Add("title", Json(file.title));
+    if (!file.description.empty())
+    {
+        meta.Add("description", Json(file.description));
+    }
     meta.Add("parents", Json(parents));
     meta.Add("mimeType", Json(mimeType));
     return meta.Str();
@@ -196,16 +199,16 @@ QueuedRequest GoogleDrive::BuildFolderRequest(const std::string &title, const st
     request.url = std::string(kFilesUrl) + "?fields=" + m_http.Escape(kCreatedFolderFields);
     request.headers.push_back("Content-Type: " + jsonMime);
     request.headers.push_back("Expect:");
-    request.body = BuildMetadata(title, folderMime, parentId);
+    request.body =
+        BuildMetadata(FileToStore{title, std::string(), parentId, std::string()}, folderMime);
     // A create sent twice makes two folders, so a lost answer is left to the next run, which
     // looks up the Own Storage folder at every start.
     request.retry = Retry::OnlyRefused;
     return request;
 }
 
-Json GoogleDrive::UploadFile(const std::string &path, const std::string &title,
-                             const std::string &mimeType, const std::string &parentId,
-                             const std::string &fileId)
+Json GoogleDrive::UploadFile(const std::string &path, const FileToStore &file,
+                             const std::string &mimeType)
 {
     sysFSStat entry;
     if (sysFsStat(path.c_str(), &entry) != 0)
@@ -213,14 +216,14 @@ Json GoogleDrive::UploadFile(const std::string &path, const std::string &title,
         debugPrintf("UploadFile: Could not read %s\n", path.c_str());
         return Json();
     }
-    const std::string meta = BuildMetadata(title, mimeType, parentId);
+    const std::string meta = BuildMetadata(file, mimeType);
     std::string content;
     if (entry.st_size <= kMultipartUploadLimit && ReadWholeFile(path, content) &&
         content.find(kMultipartBoundary) == std::string::npos)
     {
-        return UploadInOneRequest(path, meta, mimeType, content, fileId);
+        return UploadInOneRequest(path, meta, mimeType, content, file.fileId);
     }
-    return UploadResumable(path, meta, mimeType, entry.st_size, fileId);
+    return UploadResumable(path, meta, mimeType, entry.st_size, file.fileId);
 }
 
 QueuedRequest GoogleDrive::BuildMultipartRequest(const std::string &meta,
@@ -372,6 +375,25 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
     return true;
 }
 
+bool GoogleDrive::TrashFile(const std::string &fileId)
+{
+    const std::string url = std::string(kFilesUrl) + "/" + fileId +
+                            "/trash?fields=" + m_http.Escape(kTrashedFileFields);
+    std::string reply;
+    // Trashing twice leaves the file in the trash all the same, so it is safe to send again.
+    const long status = SendAuthorized(
+        m_auth, HttpClient::Headers(1, "Expect:"),
+        [&](const HttpClient::Headers &withToken, std::string &body)
+        { return m_http.Post(url, std::string(), withToken, body); }, reply);
+    if (!HttpClient::Succeeded(status))
+    {
+        NoteFailure("TrashFile: Could not trash file", status, reply);
+        return false;
+    }
+    debugPrintf("TrashFile: trashed %s\n", fileId.c_str());
+    return true;
+}
+
 void GoogleDrive::QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done)
 {
     m_queue.Add(
@@ -391,8 +413,8 @@ void GoogleDrive::QueueFile(const std::string &path, const PrepareFile &prepare,
                 m_resumable.push_back(ResumableFile{path, file, done});
                 return false;
             }
-            request = BuildMultipartRequest(BuildMetadata(file.title, octetMime, file.parentId),
-                                            octetMime, content, file.fileId);
+            request = BuildMultipartRequest(BuildMetadata(file, octetMime), octetMime, content,
+                                            file.fileId);
             return true;
         },
         [this, done](long status, const std::string &reply)
@@ -411,8 +433,7 @@ void GoogleDrive::RunQueue(const Stop &stop)
         {
             break;
         }
-        const FileToStore &file = queued.file;
-        queued.done(UploadFile(queued.path, file.title, octetMime, file.parentId, file.fileId));
+        queued.done(UploadFile(queued.path, queued.file, octetMime));
     }
 }
 

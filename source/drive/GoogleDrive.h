@@ -47,9 +47,10 @@ class GoogleDrive : public CloudStorage
      * Uploads up to 5 MB in one request, a bigger file (or one that holds the multipart boundary)
      * in a resumable session.
      */
-    Json UploadFile(const std::string &path, const std::string &title, const std::string &mimeType,
-                    const std::string &parentId, const std::string &fileId) override;
+    Json UploadFile(const std::string &path, const FileToStore &file,
+                    const std::string &mimeType) override;
     bool DownloadFile(const std::string &fileId, const std::string &localPath) override;
+    bool TrashFile(const std::string &fileId) override;
 
     /**
      * Sends the file as octetMime. A file that cannot go in one request waits until the queue is
