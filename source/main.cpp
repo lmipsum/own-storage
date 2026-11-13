@@ -119,6 +119,8 @@ const char driveFullMessage[] = "Your Google storage is full, so some saves were
                                 "Free up space in Google Drive, then run Own Storage again.";
 const char driveUnreachableMessage[] = "Cannot reach Google Drive. Check the network.";
 const char driveRefusedMessage[] = "Google Drive refused a request. Run Own Storage again later.";
+const char localFileMessage[] =
+    "Own Storage cannot write to the PS3 hard disk. Check the free space.";
 const char remoteStateDamagedMessage[] =
     "The Own Storage state on Google Drive (remote.json) cannot be read.";
 const unsigned int dialogPollMicroseconds = 100000;
@@ -538,7 +540,15 @@ void stopSync(const char *message)
  */
 void stopSyncAfterFailure()
 {
-    stopSync(drive.LastFailureUnanswered() ? driveUnreachableMessage : driveRefusedMessage);
+    const long status = drive.LastFailureStatus();
+    if (status == HttpClient::kLocalError)
+    {
+        stopSync(localFileMessage);
+    }
+    else
+    {
+        stopSync(status < 0 ? driveUnreachableMessage : driveRefusedMessage);
+    }
 }
 
 /**

@@ -51,7 +51,7 @@ bool IsDriveFullError(const std::string &reply)
 } // namespace
 
 GoogleDrive::GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, const TransferDisplay &display)
-    : m_http(http), m_auth(auth), m_display(display), m_full(false), m_lastFailureUnanswered(false)
+    : m_http(http), m_auth(auth), m_display(display), m_full(false), m_lastFailureStatus(0)
 {
 }
 
@@ -293,7 +293,7 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
 void GoogleDrive::NoteFailure(const char *what, long status, const std::string &reply)
 {
     debugPrintf("%s..%ld %s\n", what, status, DescribeDriveError(reply).c_str());
-    m_lastFailureUnanswered = status < 0;
+    m_lastFailureStatus = status;
     if (IsDriveFullError(reply))
     {
         m_full = true;
@@ -305,9 +305,9 @@ bool GoogleDrive::IsFull() const
     return m_full;
 }
 
-bool GoogleDrive::LastFailureUnanswered() const
+long GoogleDrive::LastFailureStatus() const
 {
-    return m_lastFailureUnanswered;
+    return m_lastFailureStatus;
 }
 
 std::string BuildMetadata(const std::string &title, const std::string &mimeType,

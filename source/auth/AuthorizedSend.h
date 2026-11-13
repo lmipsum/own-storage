@@ -33,7 +33,7 @@ const unsigned long long kMaxRetryJitterMicroseconds = 1000000;
  * Adds a random part to a retry wait, so that requests that failed together, such as on a rate
  * limit, are not sent again together.
  * @param wait the doubling wait
- * @return the wait plus up to kMaxRetryJitterMicroseconds
+ * @return the wait plus less than kMaxRetryJitterMicroseconds
  */
 unsigned long long AddJitter(unsigned long long wait);
 

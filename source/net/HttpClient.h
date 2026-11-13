@@ -10,7 +10,8 @@
  * HTTPS requests over one reused curl handle, so later requests to the same host skip the TLS
  * handshake. Server certificates are checked against the CA bundle shipped with the app.
  *
- * Every request returns the HTTP status, or kNoAnswer or kNotSent when no response arrived.
+ * Every request returns the HTTP status, or kNoAnswer, kNotSent or kLocalError when no response
+ * arrived.
  */
 class HttpClient
 {
@@ -20,6 +21,8 @@ class HttpClient
     static constexpr long kNoAnswer = -1;
     /** The status of a request that never left: its host could not be resolved or reached. */
     static constexpr long kNotSent = -2;
+    /** The status of a request that was not sent because a local file could not be opened. */
+    static constexpr long kLocalError = -3;
     /** curl's progress callback: totals and amounts done so far, down and up. */
     typedef int (*Progress)(void *data, double downTotal, double downNow, double upTotal,
                             double upNow);

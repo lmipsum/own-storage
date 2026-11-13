@@ -152,7 +152,7 @@ long HttpClient::Download(const std::string &url, const Headers &headers, const 
     if (file == NULL)
     {
         debugPrintf("Cannot write %s\n", path.c_str());
-        return -1;
+        return kLocalError;
     }
     Prepare(url);
     curl_easy_setopt(m_curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -176,7 +176,7 @@ long HttpClient::Upload(const std::string &url, const Headers &headers, const st
     if (file == NULL)
     {
         debugPrintf("Cannot read %s\n", path.c_str());
-        return -1;
+        return kLocalError;
     }
     std::fseek(file, 0, SEEK_END);
     const long size = std::ftell(file);
