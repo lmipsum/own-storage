@@ -14,7 +14,7 @@ namespace
 const char kEntries[] = "data";
 // A full remote.json save costs about 0.2 s on the console, so changes go to the journal and
 // remote.json is saved in full only every this many of them.
-const u32 kChangesPerFullSave = 50;
+const std::size_t kChangesPerFullSave = 50;
 // The fields an upload changes; a journaled entry replaces them in the loaded one.
 const char *const kRecordedFields[] = {"status",       "id",       "parentid",
                                        "modifiedDate", "fileSize", "md5Checksum"};
@@ -52,6 +52,8 @@ bool SyncState::Load()
 void SyncState::Reset(const Json &state)
 {
     m_root = WithEntries(state);
+    // A journal left on disk belongs to the state this one replaces.
+    std::remove(m_journal.c_str());
     SaveAll();
 }
 
@@ -74,12 +76,23 @@ void SyncState::SaveAll()
     }
 }
 
-u32 SyncState::Size() const
+void SyncState::Discard()
+{
+    std::remove(m_file.c_str());
+    std::remove(m_journal.c_str());
+}
+
+const std::string &SyncState::FilePath() const
+{
+    return m_file;
+}
+
+std::size_t SyncState::Size() const
 {
     return m_root[kEntries].AsArray().size();
 }
 
-Json SyncState::Entry(u32 index) const
+Json SyncState::Entry(std::size_t index) const
 {
     return m_root[kEntries][index];
 }
@@ -89,18 +102,18 @@ void SyncState::Append(const Json &entry)
     m_root[kEntries].Append(entry);
 }
 
-void SyncState::MarkChanged(u32 index)
+void SyncState::MarkChanged(std::size_t index)
 {
     SetStatus(index, updateStatus);
 }
 
-void SyncState::MarkCreating(u32 index)
+void SyncState::MarkCreating(std::size_t index)
 {
     SetStatus(index, creatingStatus);
     Record(index);
 }
 
-void SyncState::RecordFolder(u32 index, const std::string &parentId, const Json &folder)
+void SyncState::RecordFolder(std::size_t index, const std::string &parentId, const Json &folder)
 {
     Json entry = m_root[kEntries][index];
     entry.Add("id", Json(folder["id"].Str()));
@@ -110,7 +123,7 @@ void SyncState::RecordFolder(u32 index, const std::string &parentId, const Json 
     Record(index);
 }
 
-void SyncState::RecordFile(u32 index, const std::string &parentId, const Json &file)
+void SyncState::RecordFile(std::size_t index, const std::string &parentId, const Json &file)
 {
     Json entry = m_root[kEntries][index];
     entry.Add("id", Json(file["id"].Str()));
@@ -148,12 +161,12 @@ bool SyncState::IsPendingCreation(const Json &entry)
     return status == uploadStatus || status == creatingStatus;
 }
 
-void SyncState::SetStatus(u32 index, const std::string &status)
+void SyncState::SetStatus(std::size_t index, const std::string &status)
 {
     m_root[kEntries][index].Add("status", Json(status));
 }
 
-void SyncState::Record(u32 index)
+void SyncState::Record(std::size_t index)
 {
     const std::string line = m_root[kEntries][index].Str() + "\n";
     FILE *journal = std::fopen(m_journal.c_str(), "ab");
@@ -176,7 +189,7 @@ void SyncState::ReplayJournal()
     {
         return;
     }
-    u32 replayed = 0;
+    std::size_t replayed = 0;
     std::string line;
     while (std::getline(journal, line))
     {
@@ -187,7 +200,7 @@ void SyncState::ReplayJournal()
             continue;
         }
         const Json::Array entries = m_root[kEntries].AsArray();
-        u32 i = 0;
+        std::size_t i = 0;
         while (i < entries.size() && entries[i]["path"].Str() != change["path"].Str())
         {
             ++i;
@@ -208,5 +221,6 @@ void SyncState::ReplayJournal()
         }
         ++replayed;
     }
-    debugPrintf("SyncState::ReplayJournal: %u changes of an interrupted run applied\n", replayed);
+    debugPrintf("SyncState::ReplayJournal: %u changes of an interrupted run applied\n",
+                static_cast<unsigned int>(replayed));
 }

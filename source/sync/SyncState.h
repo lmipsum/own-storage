@@ -3,7 +3,7 @@
 
 #include "json/Json.h"
 
-#include <ppu-types.h>
+#include <cstddef>
 
 #include <optional>
 #include <string>
@@ -43,49 +43,58 @@ class SyncState
      */
     bool Load();
     /**
-     * Takes over another state, such as the one Drive holds, and saves it in full. The state
-     * is shared, not copied, so the caller should not change it afterwards.
+     * Takes over another state, such as the one Drive holds, and saves it in full; the journal
+     * of the state it replaces is deleted. The state is shared, not copied, so the caller should
+     * not change it afterwards.
      * @param state the state; one without a data array gets an empty one
      */
     void Reset(const Json &state);
     /**
-     * Starts over with the given entries, such as the first scan of the console, and saves them.
+     * Starts over with the given entries, such as the first scan of the console, and saves them;
+     * the journal of the state they replace is deleted.
      * The entries are shared, not copied, so the caller should not change them afterwards.
      * @param entries the entries
      */
     void Reset(const Json::Array &entries);
     /** Saves remote.json in full, with its backup, and empties the journal it now contains. */
     void SaveAll();
+    /**
+     * Deletes remote.json and the journal, such as after a download that is not a state; the
+     * backup stays.
+     */
+    void Discard();
+    /** remote.json's path. */
+    const std::string &FilePath() const;
 
     /** How many entries there are. */
-    u32 Size() const;
+    std::size_t Size() const;
     /** The entry at index; it shares the stored one, so change entries only through here. */
-    Json Entry(u32 index) const;
+    Json Entry(std::size_t index) const;
     /** Adds an entry found on the console; it is saved with the next full save. */
     void Append(const Json &entry);
     /** Marks a file that changed on the console; it is saved with the next full save. */
-    void MarkChanged(u32 index);
+    void MarkChanged(std::size_t index);
     /**
      * Saves that an entry's creation on Drive is about to start. A run that ends before it
      * records the answer leaves the entry in creatingStatus, so the next run looks for the item
      * before creating it again.
      * @param index the entry
      */
-    void MarkCreating(u32 index);
+    void MarkCreating(std::size_t index);
     /**
      * Saves that a folder exists on Drive.
      * @param index the folder's entry
      * @param parentId the Drive folder that holds it
      * @param folder what Drive says about the folder
      */
-    void RecordFolder(u32 index, const std::string &parentId, const Json &folder);
+    void RecordFolder(std::size_t index, const std::string &parentId, const Json &folder);
     /**
      * Saves that a file is stored on Drive.
      * @param index the file's entry
      * @param parentId the Drive folder that holds it
      * @param file what Drive says about the file
      */
-    void RecordFile(u32 index, const std::string &parentId, const Json &file);
+    void RecordFile(std::size_t index, const std::string &parentId, const Json &file);
 
     /**
      * Finds the Drive id of the folder that holds an entry: the Own Storage folder, or the
@@ -105,9 +114,9 @@ class SyncState
 
   private:
     /** Sets an entry's status without saving it. */
-    void SetStatus(u32 index, const std::string &status);
+    void SetStatus(std::size_t index, const std::string &status);
     /** Appends an entry to the journal, and saves in full now and then. */
-    void Record(u32 index);
+    void Record(std::size_t index);
     /** Applies the journal to the entries in memory. */
     void ReplayJournal();
 
@@ -115,5 +124,5 @@ class SyncState
     std::string m_backup;
     std::string m_journal;
     Json m_root;
-    u32 m_changesSinceFullSave;
+    std::size_t m_changesSinceFullSave;
 };

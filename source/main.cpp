@@ -18,8 +18,6 @@
 */
 
 #include <iostream>
-#include <sstream>
-#include <fstream>
 #include <cstdio>
 #include <string.h>
 
@@ -41,15 +39,12 @@
 #include <net/net.h>
 #include <net/netctl.h>
 #include <netinet/in.h>
-#include <optional>
 #include <atomic>
 
 #include <SDL/SDL.h>
 #include <SDL/SDL_image.h>
 #include <SDL/SDL_ttf.h>
 #include <SDL/SDL_thread.h>
-
-#include <mbedtls/md.h>
 
 #include "auth/ClientCredentials.h"
 #include "drive/GoogleDrive.h"
@@ -59,6 +54,7 @@
 #include "net/HttpClient.h"
 #include "app/ConsoleStorage.h"
 #include "sync/SaveScanner.h"
+#include "sync/Sync.h"
 #include "sync/SyncState.h"
 #include "json/Json.h"
 #include "app/DebugLog.h"
@@ -69,8 +65,6 @@ const std::string remoteResourceFile = APP_DIR "remote.json";
 const std::string remoteBackup = APP_DIR "remote.backup";
 // The remote.json entries changed since its last full save, one JSON object per line.
 const std::string remoteJournal = APP_DIR "remote.journal";
-// remote.json's title on Drive.
-const std::string remoteStateTitle = "remote.json";
 // A Google client of the user's own, which takes the place of the published one.
 const std::string userClientFile = APP_DIR "client.json";
 // Uploads that run at once; Drive takes about a second to answer each, and these waits
@@ -89,9 +83,6 @@ GoogleDrive drive(http, googleAuth, parallelUploads,
 
 Config config;
 
-// The console's hard disk, and what it holds now as the save scan found it.
-const ConsoleStorage consoleStorage{};
-Json::Array localEntries;
 // The sync thread's view of the backup on Drive.
 SyncState remoteState(remoteResourceFile, remoteBackup, remoteJournal);
 
@@ -293,205 +284,33 @@ void endTransfer()
     msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, 100);
 }
 
-/**
- * Creates a directory locally
- * @param path the path of the directory to create
- */
-void downloadDirectory(std::string path)
+/** The sync's progress in the system's message dialog, with its two bars. */
+class ProgressDialog : public SyncDisplay
 {
-    sysFsMkdir(path.c_str(), 0755);
-}
+  public:
+    void SetText(ProgressBar bar, const std::string &text) override
+    {
+        msgDialogProgressBarSetMsg(Index(bar), text.c_str());
+    }
+    void Reset(ProgressBar bar) override
+    {
+        msgDialogProgressBarReset(Index(bar));
+    }
+    void Advance(ProgressBar bar, unsigned int points) override
+    {
+        msgDialogProgressBarInc(Index(bar), points);
+    }
+    bool Cancelled() const override
+    {
+        return dialog_action != 0;
+    }
 
-/** How reading remote.json from Drive ended. */
-enum class RemoteStateFetch
-{
-    /** Read, or Drive has none. */
-    Done,
-    /** A Drive request failed. */
-    Failed,
-    /** Downloaded, but it is not a sync state. */
-    Damaged
+  private:
+    static u32 Index(ProgressBar bar)
+    {
+        return bar == ProgressBar::Overall ? MSG_PROGRESSBAR_INDEX0 : MSG_PROGRESSBAR_INDEX1;
+    }
 };
-
-/**
- * Downloads remote.json, the state of the backup on Drive, and reads it.
- * @param state receives the state; empty when Drive has no remote.json or it cannot be read
- * @return how it ended
- */
-RemoteStateFetch downloadRemoteState(Json &state)
-{
-    state = Json();
-    Json remoteJson;
-    if (!drive.FindInFolder(remoteStateTitle, ItemKind::File, config.rootFolderId, remoteJson))
-    {
-        return RemoteStateFetch::Failed;
-    }
-    if (!remoteJson.Has("id"))
-    {
-        debugPrintf("downloadRemoteState: there is no remote.json on Google Drive\n");
-        return RemoteStateFetch::Done;
-    }
-    debugPrintf("Downloading remote.json from Google Drive with id %s\n",
-                remoteJson["id"].Str().c_str());
-    if (!drive.DownloadFile(remoteJson["id"].Str(), remoteResourceFile))
-    {
-        return RemoteStateFetch::Failed;
-    }
-    // A journal left on disk belongs to the state the download has just replaced.
-    std::remove(remoteJournal.c_str());
-    state = Json::Load(remoteResourceFile);
-    if (!state.Has("data"))
-    {
-        // Left on disk, the next run would take it for its own state.
-        std::remove(remoteResourceFile.c_str());
-        state = Json();
-        return RemoteStateFetch::Damaged;
-    }
-    return RemoteStateFetch::Done;
-}
-
-void downloadChanges()
-{
-    u32 remSize = remoteState.Size();
-    u32 i = 0;
-    u32 progressCounter = 0;
-    u32 totalProgress = 0;
-    u32 prevProgress = 0;
-    // u32 globProgress = 0;
-
-    std::string result;
-
-    for (i = 0; i < remSize; i++)
-    {
-        Json resource = remoteState.Entry(i);
-        if (resource["status"].Str() == syncedStatus)
-        {
-            sysFSStat entry;
-
-            if (sysFsStat(resource["path"].Str().c_str(), &entry) != 0)
-            {
-                totalProgress++;
-            }
-        }
-    }
-
-    debugPrintf("downloadChanges Step 1: Creating directories first on HDD\n");
-
-    msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX0);
-    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, "Downloading Parent Entries...");
-    msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0, 0);
-
-    for (i = 0; i < remSize; i++)
-    {
-        if (dialog_action != 0)
-            break;
-
-        Json resource = remoteState.Entry(i);
-
-        if (resource["status"].Str() == syncedStatus)
-        {
-            if (resource["mimeType"].Str() == folderMime)
-            {
-                sysFSStat entry;
-                result = resource["path"].Str();
-
-                if (sysFsStat(result.c_str(), &entry) != 0)
-                {
-                    progressCounter++;
-                    debugPrintf("downloadChanges: Creating Directory with path %s\n",
-                                result.c_str());
-
-                    msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
-                    msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, 0);
-                    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1,
-                                               resource["path"].Str().c_str());
-
-                    downloadDirectory(result);
-
-                    msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, 100);
-
-                    std::stringstream ss;
-                    ss << "Downloading Parent Entries: " << progressCounter << " of "
-                       << totalProgress;
-
-                    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, ss.str().c_str());
-                    msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0,
-                                            ((progressCounter * 100) / totalProgress) -
-                                                prevProgress);
-
-                    /*if(userType == "three")
-                    {
-                        msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0, ((progressCounter * 100) /
-                    totalProgress) - prevProgress);
-                    }
-                    if(userType == "two")
-                    {
-                        msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0, ((progressCounter * 40) /
-                    totalProgress) - globProgress);
-                    }
-                    globProgress = (progressCounter * 40) / totalProgress;*/
-                    prevProgress = (progressCounter * 100) / totalProgress;
-                }
-            }
-        }
-    }
-
-    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, "Downloading Child Entries...");
-
-    debugPrintf("downloadChanges Step 2: Creating files on HDD\n");
-
-    for (i = 0; i < remSize; i++)
-    {
-        if (dialog_action != 0)
-            break;
-
-        Json resource = remoteState.Entry(i);
-
-        if (resource["status"].Str() == syncedStatus)
-        {
-            if (resource["mimeType"].Str() != folderMime)
-            {
-                sysFSStat entry;
-                result = resource["path"].Str();
-
-                if (sysFsStat(result.c_str(), &entry) != 0)
-                {
-                    progressCounter++;
-                    debugPrintf("downloadChanges: Creating file with path %s\n", result.c_str());
-
-                    if (!drive.DownloadFile(resource["id"].Str(), result))
-                    {
-                        continue;
-                    }
-
-                    std::stringstream ss;
-                    ss << "Downloading Child Entries: " << progressCounter << " of "
-                       << totalProgress;
-
-                    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, ss.str().c_str());
-                    msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0,
-                                            ((progressCounter * 100) / totalProgress) -
-                                                prevProgress);
-
-                    /*if(userType == "three")
-                    {
-                        msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0, ((progressCounter * 100) /
-                    totalProgress) - prevProgress);
-                    }
-                    if(userType == "two")
-                    {
-                        msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0, ((progressCounter * 40) /
-                    totalProgress) - globProgress);
-                    }
-                    globProgress = (progressCounter * 40) / totalProgress;*/
-                    prevProgress = (progressCounter * 100) / totalProgress;
-                }
-            }
-        }
-    }
-
-    debugPrintf("downloadChanges finished, All synced files Downloaded\n");
-}
 
 /**
  * Tells the user that Drive has no room left, and waits until the message is closed.
@@ -557,442 +376,6 @@ void stopSyncAfterFetch(RemoteStateFetch fetched)
     {
         stopSyncAfterFailure();
     }
-}
-
-std::string calculateMD5Checksum(const std::string &path);
-
-/**
- * Looks for the Drive item an earlier, interrupted run created for an entry.
- * @param resource the remote.json entry
- * @param parentId the Drive folder that holds the item
- * @param item receives the item; without "id" when the entry is not in creatingStatus or Drive
- * has no such item
- * @return false when Drive could not be asked, so the entry must not be created now
- */
-bool findInterruptedCreation(const Json &resource, const std::string &parentId, Json &item)
-{
-    item = Json();
-    if (resource["status"].Str() != creatingStatus)
-    {
-        return true;
-    }
-    const ItemKind kind =
-        resource["mimeType"].Str() == folderMime ? ItemKind::Folder : ItemKind::File;
-    if (!drive.FindInFolder(resource["title"].Str(), kind, parentId, item))
-    {
-        debugPrintf("findInterruptedCreation: %s left for the next run\n",
-                    resource["path"].Str().c_str());
-        return false;
-    }
-    if (item.Has("id"))
-    {
-        debugPrintf("findInterruptedCreation: %s is already on Drive from an interrupted run\n",
-                    resource["path"].Str().c_str());
-    }
-    return true;
-}
-
-/**
- * The upper progress bar of an upload: how many of the pending entries are done.
- */
-struct UploadProgress
-{
-    const char *label;
-    u32 total;
-    u32 done = 0;
-    u32 shownPercent = 0;
-
-    /** Counts one more finished entry and moves the bar. */
-    void Advance()
-    {
-        ++done;
-        std::stringstream text;
-        text << label << ": " << done << " of " << total;
-        msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, text.str().c_str());
-        const u32 percent = done * 100 / total;
-        msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0, percent - shownPercent);
-        shownPercent = percent;
-    }
-};
-
-/**
- * Settles a file that an interrupted run may already have stored on Drive.
- * @param index the file's entry in remote.json
- * @param parentId the Drive folder that holds it
- * @param progress the bar to move when the stored file is taken over as it is
- * @param fileId receives the Drive file to update, or "" when a new one is to be created
- * @return true when nothing is to be sent: Drive holds the file as it is now, or Drive could not
- * be asked whether it does
- */
-bool adoptInterruptedFile(u32 index, const std::string &parentId, UploadProgress &progress,
-                          std::string &fileId)
-{
-    const Json resource = remoteState.Entry(index);
-    fileId = resource["status"].Str() == updateStatus ? resource["id"].Str() : std::string();
-    Json found;
-    if (!findInterruptedCreation(resource, parentId, found))
-    {
-        return true;
-    }
-    if (!found.Has("id"))
-    {
-        return false;
-    }
-    if (found["md5Checksum"].Str() == calculateMD5Checksum(resource["path"].Str()))
-    {
-        remoteState.RecordFile(index, parentId, found);
-        progress.Advance();
-        return true;
-    }
-    // The interrupted upload may not hold the file's current content.
-    fileId = found["id"].Str();
-    return false;
-}
-
-/**
- * Shows on the lower progress bar what the queue is sending.
- * @param running how many requests the queue is sending besides the one starting now
- * @param kind what is being sent, in the plural
- * @param title the item starting now
- */
-void showRequestsInProgress(unsigned int running, const char *kind, const std::string &title)
-{
-    std::stringstream text;
-    text << running + 1 << " " << kind << " in progress, last: " << title;
-    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, text.str().c_str());
-}
-
-/**
- * Fills in the folder to create when its turn comes, unless an interrupted run created it.
- * @param index the folder's entry in remote.json
- * @param parentId the Drive folder to create it in
- * @param progress the bar to move when the folder is taken over
- * @param folder receives the folder to create
- * @return false when nothing is to be sent: the folder exists already, or Drive could not be
- * asked whether it does
- */
-bool prepareFolder(u32 index, const std::string &parentId, UploadProgress &progress,
-                   FolderToCreate &folder)
-{
-    const Json resource = remoteState.Entry(index);
-    debugPrintf("prepareFolder: Syncing directory %s under %s\n", resource["title"].Str().c_str(),
-                parentId.c_str());
-    Json found;
-    if (!findInterruptedCreation(resource, parentId, found))
-    {
-        return false;
-    }
-    if (found.Has("id"))
-    {
-        remoteState.RecordFolder(index, parentId, found);
-        progress.Advance();
-        return false;
-    }
-    remoteState.MarkCreating(index);
-    folder.title = resource["title"].Str();
-    folder.parentId = parentId;
-    showRequestsInProgress(drive.Running(), "folders", folder.title);
-    return true;
-}
-
-/**
- * Saves the folder Drive created.
- * @param index the folder's entry in remote.json
- * @param parentId the Drive folder it was created in
- * @param progress the bar to move when the folder exists
- * @param folder what Drive says about it; without "id" when it was not created
- */
-void finishFolder(u32 index, const std::string &parentId, UploadProgress &progress,
-                  const Json &folder)
-{
-    if (!folder.Has("id"))
-    {
-        return;
-    }
-    debugPrintf("finishFolder: created %s\n", folder["id"].Str().c_str());
-    remoteState.RecordFolder(index, parentId, folder);
-    progress.Advance();
-}
-
-/**
- * Fills in the file to store when its turn comes, unless an interrupted run stored it already.
- * @param index the file's entry in remote.json
- * @param parentId the Drive folder that holds it
- * @param progress the bar to move when the stored file is taken over
- * @param file receives the file to store
- * @return false when nothing is to be sent
- */
-bool prepareFile(u32 index, const std::string &parentId, UploadProgress &progress,
-                 FileToStore &file)
-{
-    const Json resource = remoteState.Entry(index);
-    debugPrintf("prepareFile: Syncing file %s under %s\n", resource["title"].Str().c_str(),
-                parentId.c_str());
-    if (adoptInterruptedFile(index, parentId, progress, file.fileId))
-    {
-        return false;
-    }
-    if (file.fileId.empty())
-    {
-        remoteState.MarkCreating(index);
-    }
-    file.title = resource["title"].Str();
-    file.parentId = parentId;
-    showRequestsInProgress(drive.Running(), "files", file.title);
-    return true;
-}
-
-/**
- * Saves the file Drive stored.
- * @param index the file's entry in remote.json
- * @param parentId the Drive folder that holds it
- * @param progress the bar to move when the file is stored
- * @param file what Drive says about it; without "id" when it was not stored
- */
-void finishFile(u32 index, const std::string &parentId, UploadProgress &progress, const Json &file)
-{
-    if (!file.Has("id"))
-    {
-        return;
-    }
-    debugPrintf("finishFile: stored %s\n", file["id"].Str().c_str());
-    remoteState.RecordFile(index, parentId, file);
-    progress.Advance();
-}
-
-/**
- * Brings remote.json on Drive up to the local one, unless it holds the same content already.
- * Comparing the content also catches the changes of a run that ended before it pushed them.
- */
-void pushRemoteState()
-{
-    Json stored;
-    if (!drive.FindInFolder(remoteStateTitle, ItemKind::File, config.rootFolderId, stored))
-    {
-        debugPrintf("pushRemoteState: remote.json left for the next run\n");
-        return;
-    }
-    if (stored["md5Checksum"].Str() == calculateMD5Checksum(remoteResourceFile))
-    {
-        return;
-    }
-    debugPrintf("pushRemoteState: Uploading remote.json to Google Drive\n");
-    // Without an id this creates remote.json; when the answer is lost, the next run finds it here.
-    drive.UploadFile(remoteResourceFile, remoteStateTitle, jsonMime, config.rootFolderId,
-                     stored["id"].Str());
-}
-
-/**
- * Uploads everything marked in remote resource Tree
- */
-void uploadChanges()
-{
-    const u32 remSize = remoteState.Size();
-    UploadProgress progress = {"Uploading Parent Entries", 0};
-    for (u32 i = 0; i < remSize; i++)
-    {
-        const Json resource = remoteState.Entry(i);
-        if (SyncState::IsPendingCreation(resource) || resource["status"].Str() == updateStatus)
-        {
-            progress.total++;
-        }
-    }
-    const CloudStorage::Stop stop = [] { return dialog_action != 0 || drive.IsFull(); };
-
-    debugPrintf("uploadChanges Step 1: Creating directories first on Google Drive,%u\n",
-                progress.total);
-    msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX0);
-    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, "Uploading Parent Entries...");
-    // Change detection leaves its own text and a full bar here.
-    msgDialogProgressBarReset(MSG_PROGRESSBAR_INDEX1);
-
-    // Drive finds a file by its parent folder's id, so folders go first, level by level: each
-    // round creates the folders whose parent the rounds before have created.
-    std::vector<bool> queued(remSize, false);
-    for (u32 added = 1; added > 0;)
-    {
-        added = 0;
-        for (u32 i = 0; i < remSize; i++)
-        {
-            const Json resource = remoteState.Entry(i);
-            if (queued[i] || !SyncState::IsPendingCreation(resource) ||
-                resource["mimeType"].Str() != folderMime)
-            {
-                continue;
-            }
-            const std::optional<std::string> parentId =
-                remoteState.ParentId(resource, config.rootFolderId);
-            if (parentId)
-            {
-                const std::string folderParent = *parentId;
-                drive.QueueFolder([i, folderParent, &progress](FolderToCreate &folder)
-                                  { return prepareFolder(i, folderParent, progress, folder); },
-                                  [i, folderParent, &progress](const Json &folder)
-                                  { finishFolder(i, folderParent, progress, folder); });
-                queued[i] = true;
-                ++added;
-            }
-        }
-        drive.RunQueue(stop);
-    }
-
-    progress.label = "Uploading Child Entries";
-    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, "Uploading Child Entries...");
-    debugPrintf("uploadChanges Step 2: Creating files on Google Drive\n");
-
-    for (u32 i = 0; i < remSize; i++)
-    {
-        const Json resource = remoteState.Entry(i);
-        if ((SyncState::IsPendingCreation(resource) || resource["status"].Str() == updateStatus) &&
-            resource["mimeType"].Str() != folderMime)
-        {
-            const std::optional<std::string> parentId =
-                remoteState.ParentId(resource, config.rootFolderId);
-            if (parentId)
-            {
-                const std::string fileParent = *parentId;
-                drive.QueueFile(
-                    resource["path"].Str(), [i, fileParent, &progress](FileToStore &file)
-                    { return prepareFile(i, fileParent, progress, file); },
-                    [i, fileParent, &progress](const Json &file)
-                    { finishFile(i, fileParent, progress, file); });
-            }
-        }
-    }
-    drive.RunQueue(stop);
-
-    // The upload below sends remote.json as it is on disk, so it must hold every change.
-    remoteState.SaveAll();
-
-    pushRemoteState();
-}
-
-/**
- * Hashes a file the way Drive reports md5Checksum.
- *
- * @param path File to hash.
- * @return The MD5 digest as lowercase hex, or an empty string when the file cannot be read.
- */
-std::string calculateMD5Checksum(const std::string &path)
-{
-    unsigned char digest[16];
-    if (mbedtls_md_file(mbedtls_md_info_from_type(MBEDTLS_MD_MD5), path.c_str(), digest) != 0)
-    {
-        return "";
-    }
-    std::string hex;
-    char digits[3];
-    for (unsigned char byte : digest)
-    {
-        snprintf(digits, sizeof digits, "%02x", byte);
-        hex += digits;
-    }
-    return hex;
-}
-
-void detectChanges()
-{
-    // Upload Mode only for now
-    // 1 - If an entry exists in local but not in remote, add it and mark for upload
-    // 2 - If an entry exists in local and in remote, check if it's changed by size (folder can be
-    // ignored)
-
-    u32 lrtSize = localEntries.size();
-    u32 rrtSize = remoteState.Size();
-    u32 i = 0;
-    u32 j = 0;
-    u32 prevProgress = 0;
-    bool found;
-
-    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, "Detecting Changes...");
-    msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, "Finding file differences...");
-
-    for (i = 0; i < lrtSize; i++)
-    {
-        found = false;
-
-        if (dialog_action != 0)
-        {
-            break;
-        }
-
-        Json lres = localEntries[i];
-
-        for (j = 0; j < rrtSize; j++)
-        {
-            Json rres = remoteState.Entry(j);
-
-            if (lres["path"].Str() == rres["path"].Str())
-            {
-                found = true;
-                if (lres["mimeType"].Str() != folderMime)
-                {
-                    if (rres["status"].Str() == syncedStatus)
-                    {
-                        sysFSStat lstat;
-                        sysFsStat(lres["path"].Str().c_str(), &lstat);
-
-                        time_t fileModTime = lstat.st_mtime;
-
-                        std::string remoteTime = rres["modifiedDate"].Str().substr(0, 18);
-
-                        struct tm remoteModTime = {0};
-                        strptime(remoteTime.c_str(), "%Y-%m-%dT%H:%M:%S", &remoteModTime);
-
-                        time_t remoteEpoch = mktime(&remoteModTime);
-
-                        // debugPrintf("Times are %lld, %lld\n", (long long int)fileModTime, (long
-                        // long int)remoteEpoch);
-
-                        double seconds = difftime(fileModTime, remoteEpoch);
-                        if (seconds > 0)
-                        {
-                            debugPrintf("Local file has been modified %s\n",
-                                        rres["path"].Str().c_str());
-
-                            std::string md5c = calculateMD5Checksum(lres["path"].Str());
-
-                            if (!md5c.empty())
-                            {
-                                if (md5c != rres["md5Checksum"].Str())
-                                {
-                                    debugPrintf("Local file MD5 has been changed %s,%s,%s\n",
-                                                rres["path"].Str().c_str(), md5c.c_str(),
-                                                rres["md5Checksum"].Str().c_str());
-                                    remoteState.MarkChanged(j);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!found)
-        {
-            debugPrintf("Found New Entry in Local Resource, Adding for sync %s",
-                        lres["path"].Str().c_str());
-            remoteState.Append(lres);
-        }
-
-        std::stringstream ss;
-        ss << "Finding File Differences: " << i << " of " << lrtSize;
-
-        msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX1, ss.str().c_str());
-        msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0, ((i * 100) / lrtSize) - prevProgress);
-        msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX1, ((i * 100) / lrtSize) - prevProgress);
-
-        /*if(userType=="two")
-        {
-                msgDialogProgressBarInc(MSG_PROGRESSBAR_INDEX0, ((i * 20) / lrtSize) -
-        globProgress);
-        }*/
-
-        // globProgress = (i * 20) / lrtSize;
-        prevProgress = (i * 100) / lrtSize;
-    }
-    // get_free_memory();
-    // debugPrintf("System Memory: %u, %u\n",meminfo.avail,meminfo.total);
 }
 
 /**
@@ -1114,14 +497,16 @@ int initCloudDrive(void *arg)
         }
     }
 
-    localEntries = SaveScanner(consoleStorage).Scan();
+    ConsoleStorage consoleStorage;
+    ProgressDialog progressDialog;
+    Sync sync(drive, remoteState, consoleStorage, progressDialog, config.rootFolderId);
+    const Json::Array localEntries = SaveScanner(consoleStorage).Scan();
 
     // The first run, with nothing on Drive yet: everything the scan found goes up.
     if (userType == "one")
     {
         remoteState.Reset(localEntries);
-
-        uploadChanges();
+        sync.Upload();
     }
 
     // A later run: what changed on the console goes up, and what is missing here comes down.
@@ -1129,39 +514,28 @@ int initCloudDrive(void *arg)
     {
         if (!remoteState.Load())
         {
-            Json downloaded;
-            const RemoteStateFetch fetched = downloadRemoteState(downloaded);
+            const RemoteStateFetch fetched = sync.FetchState();
             if (fetched != RemoteStateFetch::Done)
             {
                 stopSyncAfterFetch(fetched);
                 return 0;
             }
-            remoteState.Reset(downloaded);
         }
-
-        detectChanges();
-
-        uploadChanges();
-        downloadChanges();
+        sync.DetectChanges(localEntries);
+        sync.Upload();
+        sync.Download();
     }
 
     // The first run on a console whose user has a backup on Drive: the backup comes down.
     if (userType == "three")
     {
-        Json downloaded;
-        const RemoteStateFetch fetched = downloadRemoteState(downloaded);
+        const RemoteStateFetch fetched = sync.FetchState();
         if (fetched != RemoteStateFetch::Done)
         {
             stopSyncAfterFetch(fetched);
             return 0;
         }
-        if (!downloaded.IsEmpty())
-        {
-            remoteState.Reset(downloaded);
-            downloadChanges();
-            debugPrintf(
-                "Data from Google Drive downloaded, Please restart app to upload changes\n");
-        }
+        sync.Download();
     }
 
     msgDialogAbort();
