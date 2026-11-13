@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/ConsoleStorage.h"
 
-#include <cstdio>
+#include <stdio.h>
 #include <cstring>
 
 #include <mbedtls/md.h>
@@ -62,7 +62,8 @@ std::string ConsoleStorage::Md5(const std::string &path) const
     char digits[3];
     for (unsigned char byte : digest)
     {
-        std::snprintf(digits, sizeof digits, "%02x", byte);
+        // The console's C++ library offers snprintf only outside std.
+        snprintf(digits, sizeof digits, "%02x", byte);
         hex += digits;
     }
     return hex;
