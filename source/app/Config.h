@@ -10,8 +10,6 @@ struct Config
     std::string refreshToken;
     /** The Drive id of the Own Storage folder; "root" until it is known. */
     std::string rootFolderId = "root";
-    /** The Drive id of the uploaded remote.json; "root" until it is uploaded. */
-    std::string remoteJsonId = "root";
 };
 
 /**

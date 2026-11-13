@@ -25,10 +25,6 @@ bool LoadConfig(Config &config)
     {
         config.rootFolderId = saved["root_id"].Str();
     }
-    if (saved.Has("remote_fid"))
-    {
-        config.remoteJsonId = saved["remote_fid"].Str();
-    }
     debugPrintf("LoadConfig: Config file read\n");
     return true;
 }
@@ -38,7 +34,6 @@ void SaveConfig(const Config &config)
     Json saved;
     saved.Add("refresh_token", Json(config.refreshToken));
     saved.Add("root_id", Json(config.rootFolderId));
-    saved.Add("remote_fid", Json(config.remoteJsonId));
     SaveStateFile(saved, kConfigFile);
     SaveStateFile(saved, kConfigBackup);
 }

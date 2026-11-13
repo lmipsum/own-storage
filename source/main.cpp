@@ -324,10 +324,9 @@ bool downloadRemoteState(Json &state)
         debugPrintf("downloadRemoteState: there is no remote.json on Google Drive\n");
         return true;
     }
-    config.remoteJsonId = remoteJson["id"].Str();
     debugPrintf("Downloading remote.json from Google Drive with id %s\n",
-                config.remoteJsonId.c_str());
-    if (!drive.DownloadFile(config.remoteJsonId, remoteResourceFile))
+                remoteJson["id"].Str().c_str());
+    if (!drive.DownloadFile(remoteJson["id"].Str(), remoteResourceFile))
     {
         return false;
     }
@@ -1001,6 +1000,28 @@ void uploadFileOutsideQueue(u32 index, const std::string &parentId, UploadProgre
 }
 
 /**
+ * Brings remote.json on Drive up to the local one, unless it holds the same content already.
+ * Comparing the content also catches the changes of a run that ended before it pushed them.
+ */
+void pushRemoteState()
+{
+    Json stored;
+    if (!drive.FindInFolder("remote.json", jsonMime, config.rootFolderId, stored))
+    {
+        debugPrintf("pushRemoteState: remote.json left for the next run\n");
+        return;
+    }
+    if (stored["md5Checksum"].Str() == calculateMD5Checksum(remoteResourceFile))
+    {
+        return;
+    }
+    debugPrintf("pushRemoteState: Uploading remote.json to Google Drive\n");
+    // Without an id this creates remote.json; when the answer is lost, the next run finds it here.
+    drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, config.rootFolderId,
+                     stored["id"].Str());
+}
+
+/**
  * Uploads everything marked in remote resource Tree
  */
 void uploadChanges()
@@ -1089,25 +1110,7 @@ void uploadChanges()
     // The upload below sends remote.json as it is on disk, so it must hold every change.
     writeChangesToFile();
 
-    debugPrintf("uploadChanges Step 3: Uploading remote.json to google drive\n");
-
-    if (config.remoteJsonId == "root")
-    {
-        Json remJson;
-        remJson =
-            drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, config.rootFolderId);
-        if (remJson.Has("id"))
-        {
-            config.remoteJsonId = remJson["id"].Str();
-            SaveConfig(config);
-        }
-    }
-    else if (progress.done > 0)
-    {
-        debugPrintf("Updating remote.json on the server...\n");
-        drive.UploadFile(remoteResourceFile, "remote.json", jsonMime, config.rootFolderId,
-                         config.remoteJsonId);
-    }
+    pushRemoteState();
 }
 
 /**
