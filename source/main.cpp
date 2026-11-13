@@ -329,7 +329,25 @@ Json checkIfRemoteResourceExists(std::string resourceTitle, std::string mimeType
 }
 
 /**
- * Reads a state file, or its backup when the file is missing or cannot be parsed.
+ * Writes a state file and makes it readable to all (0644).
+ * @param content the state to write
+ * @param path the file to write it to
+ * @return false when the file could not be written
+ */
+bool saveStateFile(const Json &content, const std::string &path)
+{
+    if (!content.Save(path))
+    {
+        debugPrintf("saveStateFile: could not write %s\n", path.c_str());
+        return false;
+    }
+    sysFsChmod(path.c_str(), 0644);
+    return true;
+}
+
+/**
+ * Reads a state file, or its backup when the file is missing or cannot be parsed, and then
+ * writes the backup's content over the spoiled file.
  * @param path the state file
  * @param backupPath the copy that every save writes next to it
  * @return the content; empty when neither can be read
@@ -343,7 +361,13 @@ Json loadWithBackup(const std::string &path, const std::string &backupPath)
     }
     // Every save writes the two files one after the other, so a power cut spoils at most one.
     debugPrintf("%s is missing or damaged, reading %s\n", path.c_str(), backupPath.c_str());
-    return Json::Load(backupPath);
+    const Json backup = Json::Load(backupPath);
+    if (!backup.IsEmpty())
+    {
+        // Left spoiled until the next save, the file would leave the backup as the only copy.
+        saveStateFile(backup, path);
+    }
+    return backup;
 }
 
 /**
@@ -357,11 +381,8 @@ void storeConfig()
     appConfig.Add("last_sync", Json(last_sync));
     appConfig.Add("remote_fid", Json(remoteJsonId));
 
-    appConfig.Save(appFile);
-    appConfig.Save(appFileBackup);
-
-    sysFsChmod(appFile.c_str(), 0644);
-    sysFsChmod(appFileBackup.c_str(), 0644);
+    saveStateFile(appConfig, appFile);
+    saveStateFile(appConfig, appFileBackup);
 }
 
 /**
@@ -850,14 +871,14 @@ std::string getParentIdByFolderName(std::string folderName)
 
 void writeChangesToFile()
 {
-    // Backup remote.json before a write to save from any catastrophies
-    remoteResourceRoot.Save(remoteBackup);
-    sysFsChmod(remoteBackup.c_str(), 0644);
+    // Backup remote.json before a write to save from any catastrophes
+    const bool backupSaved = saveStateFile(remoteResourceRoot, remoteBackup);
+    const bool saved = saveStateFile(remoteResourceRoot, remoteResourceFile);
 
-    remoteResourceRoot.Save(remoteResourceFile);
-    sysFsChmod(remoteResourceFile.c_str(), 0644);
-
-    debugPrintf("writeChangesToFile: Changes to remote.json written successfully\n");
+    if (backupSaved && saved)
+    {
+        debugPrintf("writeChangesToFile: Changes to remote.json written successfully\n");
+    }
 }
 
 std::string calculateMD5Checksum(const std::string &path);
@@ -1584,8 +1605,7 @@ void buildLocalResourceTree()
 
     // Overwrite local.json every time
     localResourceRoot.Add("data", Json(resourceTree));
-    localResourceRoot.Save(localResourceFile);
-    sysFsChmod(localResourceFile.c_str(), 0644);
+    saveStateFile(localResourceRoot, localResourceFile);
 
     debugPrintf("Resource file has been written successfully...\n");
 }
@@ -1683,7 +1703,7 @@ int initCloudDrive(void *arg)
     if (userType == "one")
     {
         remoteResourceRoot = Json::Load(localResourceFile);
-        remoteResourceRoot.Save(remoteResourceFile);
+        saveStateFile(remoteResourceRoot, remoteResourceFile);
 
         uploadChanges();
     }
