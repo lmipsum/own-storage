@@ -41,7 +41,6 @@
 #include <net/net.h>
 #include <net/netctl.h>
 #include <netinet/in.h>
-#include <algorithm>
 #include <optional>
 #include <atomic>
 
@@ -52,8 +51,6 @@
 
 #include <mbedtls/md.h>
 
-#include "auth/AuthorizedQueue.h"
-#include "auth/AuthorizedSend.h"
 #include "auth/ClientCredentials.h"
 #include "drive/GoogleDrive.h"
 #include "app/Files.h"
@@ -87,7 +84,8 @@ GoogleDeviceAuth googleAuth(http);
 int transferProgress(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow);
 void beginTransfer(const std::string &path);
 void endTransfer();
-GoogleDrive drive(http, googleAuth, TransferDisplay{beginTransfer, transferProgress, endTransfer});
+GoogleDrive drive(http, googleAuth, parallelUploads,
+                  TransferDisplay{beginTransfer, transferProgress, endTransfer});
 
 Config config;
 
@@ -531,14 +529,17 @@ void stopSync(const char *message)
  */
 void stopSyncAfterFailure()
 {
-    const long status = drive.LastFailureStatus();
-    if (status == HttpClient::kLocalError)
+    switch (drive.LastFailure())
     {
+    case Failure::LocalFile:
         stopSync(localFileMessage);
-    }
-    else
-    {
-        stopSync(status < 0 ? driveUnreachableMessage : driveRefusedMessage);
+        break;
+    case Failure::Unreachable:
+        stopSync(driveUnreachableMessage);
+        break;
+    case Failure::Refused:
+        stopSync(driveRefusedMessage);
+        break;
     }
 }
 
@@ -662,21 +663,20 @@ void showRequestsInProgress(unsigned int running, const char *kind, const std::s
 }
 
 /**
- * Builds the request that creates a folder, or takes over the folder an interrupted run created.
+ * Fills in the folder to create when its turn comes, unless an interrupted run created it.
  * @param index the folder's entry in remote.json
  * @param parentId the Drive folder to create it in
  * @param progress the bar to move when the folder is taken over
- * @param running how many requests the queue is sending, for the lower progress bar
- * @param request receives the request
+ * @param folder receives the folder to create
  * @return false when nothing is to be sent: the folder exists already, or Drive could not be
  * asked whether it does
  */
-bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress &progress,
-                          unsigned int running, QueuedRequest &request)
+bool prepareFolder(u32 index, const std::string &parentId, UploadProgress &progress,
+                   FolderToCreate &folder)
 {
     const Json resource = remoteState.Entry(index);
-    debugPrintf("prepareFolderRequest: Syncing directory %s under %s\n",
-                resource["title"].Str().c_str(), parentId.c_str());
+    debugPrintf("prepareFolder: Syncing directory %s under %s\n", resource["title"].Str().c_str(),
+                parentId.c_str());
     Json found;
     if (!findInterruptedCreation(resource, parentId, found))
     {
@@ -689,169 +689,75 @@ bool prepareFolderRequest(u32 index, const std::string &parentId, UploadProgress
         return false;
     }
     remoteState.MarkCreating(index);
-    request = drive.BuildFolderRequest(resource["title"].Str(), parentId);
-    showRequestsInProgress(running, "folders", resource["title"].Str());
+    folder.title = resource["title"].Str();
+    folder.parentId = parentId;
+    showRequestsInProgress(drive.Running(), "folders", folder.title);
     return true;
 }
 
 /**
- * Saves the folder Drive created, or logs why it did not.
+ * Saves the folder Drive created.
  * @param index the folder's entry in remote.json
  * @param parentId the Drive folder it was created in
  * @param progress the bar to move when the folder exists
- * @param status the HTTP status, or below zero when no answer came
- * @param reply Drive's answer
+ * @param folder what Drive says about it; without "id" when it was not created
  */
-void finishFolderRequest(u32 index, const std::string &parentId, UploadProgress &progress,
-                         long status, const std::string &reply)
+void finishFolder(u32 index, const std::string &parentId, UploadProgress &progress,
+                  const Json &folder)
 {
-    const Json folder = Json::Parse(reply);
-    if (!HttpClient::Succeeded(status) || !folder.Has("id"))
+    if (!folder.Has("id"))
     {
-        drive.NoteFailure("finishFolderRequest: Could not create directory", status, reply);
         return;
     }
-    debugPrintf("finishFolderRequest: created %s\n", folder["id"].Str().c_str());
+    debugPrintf("finishFolder: created %s\n", folder["id"].Str().c_str());
     remoteState.RecordFolder(index, parentId, folder);
     progress.Advance();
 }
 
 /**
- * Queues the creation of a folder whose parent already exists on Drive.
- * @param queue the queue that sends it
- * @param index the folder's entry in remote.json
- * @param parentId the Drive folder to create it in
- * @param progress the bar to move when it is done
- */
-void queueFolder(AuthorizedQueue &queue, u32 index, const std::string &parentId,
-                 UploadProgress &progress)
-{
-    queue.Add([&queue, index, parentId, &progress](QueuedRequest &request)
-              { return prepareFolderRequest(index, parentId, progress, queue.Running(), request); },
-              [index, parentId, &progress](long status, const std::string &reply)
-              { finishFolderRequest(index, parentId, progress, status, reply); });
-}
-
-/**
- * Builds the request that uploads a pending or changed file, unless an interrupted run stored
- * it already or it cannot go in one request.
+ * Fills in the file to store when its turn comes, unless an interrupted run stored it already.
  * @param index the file's entry in remote.json
  * @param parentId the Drive folder that holds it
  * @param progress the bar to move when the stored file is taken over
- * @param outsideQueue collects the files that cannot go in one request
- * @param running how many requests the queue is sending, for the lower progress bar
- * @param request receives the request
- * @return false when nothing is to be sent by the queue
+ * @param file receives the file to store
+ * @return false when nothing is to be sent
  */
-bool prepareFileRequest(u32 index, const std::string &parentId, UploadProgress &progress,
-                        std::vector<u32> &outsideQueue, unsigned int running,
-                        QueuedRequest &request)
+bool prepareFile(u32 index, const std::string &parentId, UploadProgress &progress,
+                 FileToStore &file)
 {
     const Json resource = remoteState.Entry(index);
-    const std::string path = resource["path"].Str();
-    const std::string title = resource["title"].Str();
-    sysFSStat entry;
-    if (sysFsStat(path.c_str(), &entry) != 0 || entry.st_size > multipartUploadLimit)
-    {
-        outsideQueue.push_back(index);
-        return false;
-    }
-    debugPrintf("prepareFileRequest: Syncing file %s under %s\n", title.c_str(), parentId.c_str());
-
-    std::string fileId;
-    if (adoptInterruptedFile(index, parentId, progress, fileId))
+    debugPrintf("prepareFile: Syncing file %s under %s\n", resource["title"].Str().c_str(),
+                parentId.c_str());
+    if (adoptInterruptedFile(index, parentId, progress, file.fileId))
     {
         return false;
     }
-    std::string content;
-    if (!ReadWholeFile(path, content) || content.find(multipartBoundary) != std::string::npos)
-    {
-        outsideQueue.push_back(index);
-        return false;
-    }
-    if (fileId.empty())
+    if (file.fileId.empty())
     {
         remoteState.MarkCreating(index);
     }
-    request = drive.BuildMultipartRequest(BuildMetadata(title, octetMime, parentId), octetMime,
-                                          content, fileId);
-
-    showRequestsInProgress(running, "files", title);
+    file.title = resource["title"].Str();
+    file.parentId = parentId;
+    showRequestsInProgress(drive.Running(), "files", file.title);
     return true;
 }
 
 /**
- * Saves the file Drive stored, or logs why it did not.
+ * Saves the file Drive stored.
  * @param index the file's entry in remote.json
  * @param parentId the Drive folder that holds it
  * @param progress the bar to move when the file is stored
- * @param status the HTTP status, or below zero when no answer came
- * @param reply Drive's answer
+ * @param file what Drive says about it; without "id" when it was not stored
  */
-void finishFileRequest(u32 index, const std::string &parentId, UploadProgress &progress,
-                       long status, const std::string &reply)
+void finishFile(u32 index, const std::string &parentId, UploadProgress &progress, const Json &file)
 {
-    const Json file = Json::Parse(reply);
-    if (!HttpClient::Succeeded(status) || !file.Has("id"))
+    if (!file.Has("id"))
     {
-        drive.NoteFailure("finishFileRequest: Could not upload file", status, reply);
         return;
     }
-    debugPrintf("finishFileRequest: stored %s\n", file["id"].Str().c_str());
+    debugPrintf("finishFile: stored %s\n", file["id"].Str().c_str());
     remoteState.RecordFile(index, parentId, file);
     progress.Advance();
-}
-
-/**
- * Queues the upload of a pending or changed file.
- * @param queue the queue that sends it
- * @param index the file's entry in remote.json
- * @param parentId the Drive folder that holds it
- * @param progress the bar to move when it is done
- * @param outsideQueue collects the files that cannot go in one request
- */
-void queueFile(AuthorizedQueue &queue, u32 index, const std::string &parentId,
-               UploadProgress &progress, std::vector<u32> &outsideQueue)
-{
-    queue.Add(
-        [&queue, index, parentId, &progress, &outsideQueue](QueuedRequest &request)
-        {
-            return prepareFileRequest(index, parentId, progress, outsideQueue, queue.Running(),
-                                      request);
-        },
-        [index, parentId, &progress](long status, const std::string &reply)
-        { finishFileRequest(index, parentId, progress, status, reply); });
-}
-
-/**
- * Uploads a file that cannot go in one request, the resumable way.
- * @param index the file's entry in remote.json
- * @param parentId the Drive folder that holds it
- * @param progress the bar to move when it is done
- */
-void uploadFileOutsideQueue(u32 index, const std::string &parentId, UploadProgress &progress)
-{
-    const Json resource = remoteState.Entry(index);
-    const std::string path = resource["path"].Str();
-    const std::string title = resource["title"].Str();
-    debugPrintf("uploadFileOutsideQueue: Syncing file %s under %s\n", title.c_str(),
-                parentId.c_str());
-
-    std::string fileId;
-    if (adoptInterruptedFile(index, parentId, progress, fileId))
-    {
-        return;
-    }
-    if (fileId.empty())
-    {
-        remoteState.MarkCreating(index);
-    }
-    const Json file = drive.UploadFile(path, title, octetMime, parentId, fileId);
-    if (file.Has("id"))
-    {
-        remoteState.RecordFile(index, parentId, file);
-        progress.Advance();
-    }
 }
 
 /**
@@ -891,8 +797,7 @@ void uploadChanges()
             progress.total++;
         }
     }
-    const AuthorizedQueue::Stop stop = [] { return dialog_action != 0 || drive.IsFull(); };
-    AuthorizedQueue queue(googleAuth, parallelUploads);
+    const CloudStorage::Stop stop = [] { return dialog_action != 0 || drive.IsFull(); };
 
     debugPrintf("uploadChanges Step 1: Creating directories first on Google Drive,%u\n",
                 progress.total);
@@ -919,19 +824,22 @@ void uploadChanges()
                 remoteState.ParentId(resource, config.rootFolderId);
             if (parentId)
             {
-                queueFolder(queue, i, *parentId, progress);
+                const std::string folderParent = *parentId;
+                drive.QueueFolder([i, folderParent, &progress](FolderToCreate &folder)
+                                  { return prepareFolder(i, folderParent, progress, folder); },
+                                  [i, folderParent, &progress](const Json &folder)
+                                  { finishFolder(i, folderParent, progress, folder); });
                 queued[i] = true;
                 ++added;
             }
         }
-        queue.Run(stop);
+        drive.RunQueue(stop);
     }
 
     progress.label = "Uploading Child Entries";
     msgDialogProgressBarSetMsg(MSG_PROGRESSBAR_INDEX0, "Uploading Child Entries...");
     debugPrintf("uploadChanges Step 2: Creating files on Google Drive\n");
 
-    std::vector<std::pair<u32, std::string>> files;
     for (u32 i = 0; i < remSize; i++)
     {
         const Json resource = remoteState.Entry(i);
@@ -942,27 +850,16 @@ void uploadChanges()
                 remoteState.ParentId(resource, config.rootFolderId);
             if (parentId)
             {
-                files.push_back(std::make_pair(i, *parentId));
+                const std::string fileParent = *parentId;
+                drive.QueueFile(
+                    resource["path"].Str(), [i, fileParent, &progress](FileToStore &file)
+                    { return prepareFile(i, fileParent, progress, file); },
+                    [i, fileParent, &progress](const Json &file)
+                    { finishFile(i, fileParent, progress, file); });
             }
         }
     }
-    std::vector<u32> outsideQueue;
-    for (const std::pair<u32, std::string> &file : files)
-    {
-        queueFile(queue, file.first, file.second, progress, outsideQueue);
-    }
-    queue.Run(stop);
-    for (const std::pair<u32, std::string> &file : files)
-    {
-        if (stop())
-        {
-            break;
-        }
-        if (std::find(outsideQueue.begin(), outsideQueue.end(), file.first) != outsideQueue.end())
-        {
-            uploadFileOutsideQueue(file.first, file.second, progress);
-        }
-    }
+    drive.RunQueue(stop);
 
     // The upload below sends remote.json as it is on disk, so it must hold every change.
     remoteState.SaveAll();

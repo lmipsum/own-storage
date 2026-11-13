@@ -2,7 +2,7 @@
 #include "sync/SaveScanner.h"
 
 #include "app/DebugLog.h"
-#include "drive/GoogleDrive.h"
+#include "sync/CloudStorage.h"
 #include "sync/SyncState.h"
 
 #include <string>

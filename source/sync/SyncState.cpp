@@ -3,7 +3,7 @@
 
 #include "app/DebugLog.h"
 #include "app/Files.h"
-#include "drive/GoogleDrive.h"
+#include "sync/CloudStorage.h"
 
 #include <cstdio>
 #include <fstream>

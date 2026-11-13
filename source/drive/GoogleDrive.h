@@ -3,28 +3,14 @@
 
 #include "auth/AuthorizedQueue.h"
 #include "net/HttpClient.h"
+#include "sync/CloudStorage.h"
 #include "json/Json.h"
 
 #include <functional>
 #include <string>
+#include <vector>
 
 class GoogleDeviceAuth;
-
-const std::string jsonMime = "application/json";
-const std::string folderMime = "application/vnd.google-apps.folder";
-const std::string octetMime = "application/octet-stream";
-// Drive takes metadata and content in one request up to 5 MB; bigger files go up in a
-// resumable session.
-const long multipartUploadLimit = 5 * 1024 * 1024;
-// Separates metadata and content in a multipart upload; a file that holds it goes up resumable.
-const std::string multipartBoundary = "own_storage_part_7d1c4f0b9a2e";
-
-/** What FindInFolder looks for. */
-enum class ItemKind
-{
-    Folder,
-    File
-};
 
 /** What the app shows while GoogleDrive moves a file by itself. */
 struct TransferDisplay
@@ -38,66 +24,60 @@ struct TransferDisplay
 };
 
 /**
- * Google Drive v2 for the signed-in user: searches, folders, and files sent and fetched, or the
- * requests for them built for AuthorizedQueue. Remembers when Drive refused an upload for lack
- * of room.
+ * Google Drive v2 for the signed-in user. Queued requests go out many at once on an
+ * AuthorizedQueue; a queued file too big for one request goes up the resumable way once the
+ * queue is through. Remembers when Drive refused an upload for lack of room.
  */
-class GoogleDrive
+class GoogleDrive : public CloudStorage
 {
   public:
     /**
      * @param http the connection for requests sent one by one
      * @param auth the sign-in whose token every request carries
-     * @param display what the app shows while a file moves
+     * @param parallel how many queued requests are sent at once at most
+     * @param display what the app shows while a file moves by itself
      */
-    GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, const TransferDisplay &display);
+    GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, unsigned int parallel,
+                const TransferDisplay &display);
+
+    bool FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
+                      Json &item) override;
+    Json CreateFolder(const std::string &title, const std::string &parentId) override;
+    /**
+     * Uploads up to 5 MB in one request, a bigger file (or one that holds the multipart boundary)
+     * in a resumable session.
+     */
+    Json UploadFile(const std::string &path, const std::string &title, const std::string &mimeType,
+                    const std::string &parentId, const std::string &fileId) override;
+    bool DownloadFile(const std::string &fileId, const std::string &localPath) override;
+
+    void QueueFolder(const PrepareFolder &prepare, const Done &done) override;
+    /**
+     * Sends the file as octetMime. A file that cannot go in one request waits until the queue is
+     * through and then goes up the resumable way; prepare runs only then.
+     */
+    void QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done) override;
+    void RunQueue(const Stop &stop) override;
+    /** Not counting a file that goes up the resumable way after the queue. */
+    unsigned int Running() const override;
+
+    bool IsFull() const override;
+    Failure LastFailure() const override;
+
+  private:
+    GoogleDrive(const GoogleDrive &) = delete;
+    GoogleDrive &operator=(const GoogleDrive &) = delete;
 
     /**
-     * The folder or file of a title in a folder, unless it is trashed.
-     * @param title the item's title
-     * @param kind whether a folder or a file is looked for
-     * @param parentId the folder that holds it
-     * @param item receives the item; without "id" when there is none
-     * @return false when the search failed, so whether the item exists is not known
-     */
-    bool FindInFolder(const std::string &title, ItemKind kind, const std::string &parentId,
-                      Json &item);
-    /**
-     * Creates a folder.
-     * @param title the folder's name
-     * @param parentId the folder to create it in; "root" for the top of Drive
-     * @return the folder; without "id" when the request failed
-     */
-    Json CreateFolder(const std::string &title, const std::string &parentId);
-    /**
-     * Builds the request that creates a folder, for AuthorizedQueue.
+     * Builds the request that creates a folder, for the queue.
      * @param title the folder's name
      * @param parentId the folder to create it in
      * @return the request, without the bearer token
      */
     QueuedRequest BuildFolderRequest(const std::string &title, const std::string &parentId);
     /**
-     * Uploads a local file: up to multipartUploadLimit bytes in one request, a bigger one (or one
-     * that holds the multipart boundary) in a resumable session.
-     * @param path the local file
-     * @param title its name on Drive
-     * @param mimeType its type
-     * @param parentId the folder that holds it
-     * @param fileId the Drive file to update; empty to create a new one
-     * @return the stored file; without "id" when the upload failed
-     */
-    Json UploadFile(const std::string &path, const std::string &title, const std::string &mimeType,
-                    const std::string &parentId, const std::string &fileId = std::string());
-    /**
-     * Saves a Drive file to a local path.
-     * @param fileId the Drive file
-     * @param localPath where to save it
-     * @return false when the download failed
-     */
-    bool DownloadFile(const std::string &fileId, const std::string &localPath);
-    /**
      * Builds the request that creates or updates a file with its metadata and content in one
-     * go, for AuthorizedQueue.
+     * go, for the queue.
      * @param meta the file's metadata as JSON
      * @param mimeType the content's type
      * @param content the whole file
@@ -114,14 +94,14 @@ class GoogleDrive
      * @param reply the body Drive answered with
      */
     void NoteFailure(const char *what, long status, const std::string &reply);
-    /** Whether Drive has refused an upload for lack of room. */
-    bool IsFull() const;
-    /** The status of the last failed request, which tells its likely cause. */
-    long LastFailureStatus() const;
-
-  private:
-    GoogleDrive(const GoogleDrive &) = delete;
-    GoogleDrive &operator=(const GoogleDrive &) = delete;
+    /**
+     * Hands Drive's answer to a queued request on, or notes why it failed.
+     * @param what what failed, as the debug log names it
+     * @param status the HTTP status, or below zero when no answer came
+     * @param reply the body Drive answered with
+     * @param done takes the item; without "id" when the request failed
+     */
+    void FinishQueued(const char *what, long status, const std::string &reply, const Done &done);
 
     /**
      * The first item a search finds.
@@ -131,7 +111,7 @@ class GoogleDrive
      */
     bool FindFirst(const std::string &query, Json &item);
 
-    /** Sends a file of up to multipartUploadLimit bytes with its metadata in one request. */
+    /** Sends a file that fits in one request together with its metadata. */
     Json UploadInOneRequest(const std::string &path, const std::string &meta,
                             const std::string &mimeType, const std::string &content,
                             const std::string &fileId);
@@ -142,23 +122,17 @@ class GoogleDrive
     HttpClient &m_http;
     GoogleDeviceAuth &m_auth;
     TransferDisplay m_display;
+    AuthorizedQueue m_queue;
+    /** A queued file that cannot go in one request. */
+    struct ResumableFile
+    {
+        std::string path;
+        PrepareFile prepare;
+        Done done;
+    };
+
+    // The queued files that cannot go in one request, sent once the queue is through.
+    std::vector<ResumableFile> m_resumable;
     bool m_full;
     long m_lastFailureStatus;
 };
-
-/**
- * Builds the metadata Drive needs to create an item.
- * @param title the item's name
- * @param mimeType its type
- * @param parentId the folder that holds it
- * @return the metadata as JSON text
- */
-std::string BuildMetadata(const std::string &title, const std::string &mimeType,
-                          const std::string &parentId);
-
-/**
- * Describes a failed Drive request for the debug log, from its JSON error reply.
- * @param reply the body Drive answered with
- * @return "reason: message", or the start of the body when it is not a Drive error
- */
-std::string DescribeDriveError(const std::string &reply);

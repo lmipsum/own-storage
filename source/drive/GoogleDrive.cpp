@@ -22,6 +22,11 @@ const char kStoredFileFields[] = "fileSize,id,md5Checksum,modifiedDate,parents/i
 const char kCreatedFolderFields[] = "id,modifiedDate,parents/id";
 // Enough of an unexpected reply to recognise it in the debug log.
 const std::size_t kMaxLoggedReplyLength = 200;
+// Drive takes metadata and content in one request up to 5 MB; bigger files go up in a
+// resumable session.
+const long kMultipartUploadLimit = 5 * 1024 * 1024;
+// Separates metadata and content in a multipart upload; a file that holds it goes up resumable.
+const std::string kMultipartBoundary = "own_storage_part_7d1c4f0b9a2e";
 
 /**
  * Quotes a value for the Drive query language, where ' ends a string and \ escapes.
@@ -48,10 +53,49 @@ bool IsDriveFullError(const std::string &reply)
     const std::string reason = ReadErrorReason(reply);
     return reason == "quotaExceeded" || reason == "storageQuotaExceeded";
 }
+
+/**
+ * Builds the metadata Drive needs to create an item.
+ * @param title the item's name
+ * @param mimeType its type
+ * @param parentId the folder that holds it
+ * @return the metadata as JSON text
+ */
+std::string BuildMetadata(const std::string &title, const std::string &mimeType,
+                          const std::string &parentId)
+{
+    Json parent;
+    parent.Add("id", Json(parentId));
+    Json::Array parents;
+    parents.push_back(parent);
+
+    Json meta;
+    meta.Add("title", Json(title));
+    meta.Add("parents", Json(parents));
+    meta.Add("mimeType", Json(mimeType));
+    return meta.Str();
+}
+
+/**
+ * Describes a failed Drive request for the debug log, from its JSON error reply.
+ * @param reply the body Drive answered with
+ * @return "reason: message", or the start of the body when it is not a Drive error
+ */
+std::string DescribeDriveError(const std::string &reply)
+{
+    const Json error = Json::Parse(reply)["error"];
+    if (error.IsEmpty())
+    {
+        return reply.substr(0, kMaxLoggedReplyLength);
+    }
+    return ReadErrorReason(reply) + ": " + error["message"].Str();
+}
 } // namespace
 
-GoogleDrive::GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, const TransferDisplay &display)
-    : m_http(http), m_auth(auth), m_display(display), m_full(false), m_lastFailureStatus(0)
+GoogleDrive::GoogleDrive(HttpClient &http, GoogleDeviceAuth &auth, unsigned int parallel,
+                         const TransferDisplay &display)
+    : m_http(http), m_auth(auth), m_display(display), m_queue(auth, parallel), m_full(false),
+      m_lastFailureStatus(0)
 {
 }
 
@@ -133,8 +177,8 @@ Json GoogleDrive::UploadFile(const std::string &path, const std::string &title,
     }
     const std::string meta = BuildMetadata(title, mimeType, parentId);
     std::string content;
-    if (entry.st_size <= multipartUploadLimit && ReadWholeFile(path, content) &&
-        content.find(multipartBoundary) == std::string::npos)
+    if (entry.st_size <= kMultipartUploadLimit && ReadWholeFile(path, content) &&
+        content.find(kMultipartBoundary) == std::string::npos)
     {
         return UploadInOneRequest(path, meta, mimeType, content, fileId);
     }
@@ -150,12 +194,12 @@ QueuedRequest GoogleDrive::BuildMultipartRequest(const std::string &meta,
     request.method = fileId.empty() ? "POST" : "PUT";
     request.url = std::string(kUploadUrl) + (fileId.empty() ? std::string() : "/" + fileId) +
                   "?uploadType=multipart&fields=" + m_http.Escape(kStoredFileFields);
-    request.headers.push_back("Content-Type: multipart/related; boundary=" + multipartBoundary);
+    request.headers.push_back("Content-Type: multipart/related; boundary=" + kMultipartBoundary);
     request.headers.push_back("Expect:");
-    request.body = "--" + multipartBoundary +
+    request.body = "--" + kMultipartBoundary +
                    "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + meta + "\r\n--" +
-                   multipartBoundary + "\r\nContent-Type: " + mimeType + "\r\n\r\n" + content +
-                   "\r\n--" + multipartBoundary + "--\r\n";
+                   kMultipartBoundary + "\r\nContent-Type: " + mimeType + "\r\n\r\n" + content +
+                   "\r\n--" + kMultipartBoundary + "--\r\n";
     // A create sent twice makes two files, so it is not sent again when it may have been done;
     // the caller looks for the file on the next run instead.
     request.retry = fileId.empty() ? Retry::OnlyRefused : Retry::AnyTransient;
@@ -290,6 +334,88 @@ bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &loc
     return true;
 }
 
+void GoogleDrive::QueueFolder(const PrepareFolder &prepare, const Done &done)
+{
+    m_queue.Add(
+        [this, prepare](QueuedRequest &request)
+        {
+            FolderToCreate folder;
+            if (!prepare(folder))
+            {
+                return false;
+            }
+            request = BuildFolderRequest(folder.title, folder.parentId);
+            return true;
+        },
+        [this, done](long status, const std::string &reply)
+        { FinishQueued("QueueFolder: Could not create folder", status, reply, done); });
+}
+
+void GoogleDrive::QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done)
+{
+    m_queue.Add(
+        [this, path, prepare, done](QueuedRequest &request)
+        {
+            sysFSStat entry;
+            std::string content;
+            if (sysFsStat(path.c_str(), &entry) != 0 || entry.st_size > kMultipartUploadLimit ||
+                !ReadWholeFile(path, content) ||
+                content.find(kMultipartBoundary) != std::string::npos)
+            {
+                m_resumable.push_back(ResumableFile{path, prepare, done});
+                return false;
+            }
+            FileToStore file;
+            if (!prepare(file))
+            {
+                return false;
+            }
+            request = BuildMultipartRequest(BuildMetadata(file.title, octetMime, file.parentId),
+                                            octetMime, content, file.fileId);
+            return true;
+        },
+        [this, done](long status, const std::string &reply)
+        { FinishQueued("QueueFile: Could not upload file", status, reply, done); });
+}
+
+void GoogleDrive::RunQueue(const Stop &stop)
+{
+    m_queue.Run(stop);
+    // A callback may queue more, so the loop goes over a list of its own.
+    std::vector<ResumableFile> resumable;
+    resumable.swap(m_resumable);
+    for (const ResumableFile &queued : resumable)
+    {
+        if (stop())
+        {
+            break;
+        }
+        FileToStore file;
+        if (queued.prepare(file))
+        {
+            queued.done(UploadFile(queued.path, file.title, octetMime, file.parentId, file.fileId));
+        }
+    }
+}
+
+unsigned int GoogleDrive::Running() const
+{
+    return m_queue.Running();
+}
+
+void GoogleDrive::FinishQueued(const char *what, long status, const std::string &reply,
+                               const Done &done)
+{
+    const Json item = Json::Parse(reply);
+    if (!HttpClient::Succeeded(status) || !item.Has("id"))
+    {
+        NoteFailure(what, status, reply);
+        done(Json());
+        return;
+    }
+    done(item);
+}
+
 void GoogleDrive::NoteFailure(const char *what, long status, const std::string &reply)
 {
     debugPrintf("%s..%ld %s\n", what, status, DescribeDriveError(reply).c_str());
@@ -305,32 +431,11 @@ bool GoogleDrive::IsFull() const
     return m_full;
 }
 
-long GoogleDrive::LastFailureStatus() const
+Failure GoogleDrive::LastFailure() const
 {
-    return m_lastFailureStatus;
-}
-
-std::string BuildMetadata(const std::string &title, const std::string &mimeType,
-                          const std::string &parentId)
-{
-    Json parent;
-    parent.Add("id", Json(parentId));
-    Json::Array parents;
-    parents.push_back(parent);
-
-    Json meta;
-    meta.Add("title", Json(title));
-    meta.Add("parents", Json(parents));
-    meta.Add("mimeType", Json(mimeType));
-    return meta.Str();
-}
-
-std::string DescribeDriveError(const std::string &reply)
-{
-    const Json error = Json::Parse(reply)["error"];
-    if (error.IsEmpty())
+    if (m_lastFailureStatus == HttpClient::kLocalError)
     {
-        return reply.substr(0, kMaxLoggedReplyLength);
+        return Failure::LocalFile;
     }
-    return ReadErrorReason(reply) + ": " + error["message"].Str();
+    return m_lastFailureStatus < 0 ? Failure::Unreachable : Failure::Refused;
 }
