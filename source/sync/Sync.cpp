@@ -27,10 +27,10 @@ void Sync::Progress::Advance()
 
 Sync::Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
            const std::string &rootFolderId, const std::string &savedata, const std::string &ownSave,
-           const std::string &workDirectory)
+           const std::string &workDirectory, const SaveTarget *target)
     : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display),
       m_scanner(storage, savedata, ownSave),
-      m_archives(cloud, state, storage, display, savedata, ownSave, workDirectory),
+      m_archives(cloud, state, storage, display, savedata, ownSave, workDirectory, target),
       m_rootFolderId(rootFolderId), m_ownSave(ownSave)
 {
 }
@@ -77,6 +77,11 @@ bool Sync::Run()
         Transfer(Settle(plan.questions));
     }
     return true;
+}
+
+const std::vector<std::string> &Sync::NotResigned() const
+{
+    return m_notResigned;
 }
 
 void Sync::Decide(const std::string &name, const LocalSave *local, const CloudSave *cloud,
@@ -178,9 +183,14 @@ void Sync::Transfer(const Plan &plan)
         {
             break;
         }
-        if (m_archives.BringDown(download.name, download.cloud))
+        const BroughtDown result = m_archives.BringDown(download.name, download.cloud);
+        if (result != BroughtDown::Failed)
         {
             progress.Advance();
+        }
+        if (result == BroughtDown::DoneNotResigned)
+        {
+            m_notResigned.push_back(download.name);
         }
     }
 }

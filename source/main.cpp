@@ -39,6 +39,8 @@
 #include <net/netctl.h>
 #include <netinet/in.h>
 #include <atomic>
+#include <optional>
+#include <sstream>
 
 #include <SDL/SDL.h>
 #include <SDL/SDL_image.h>
@@ -53,6 +55,7 @@
 #include "net/HttpClient.h"
 #include "app/ConsoleStorage.h"
 #include "app/CloudSaveMenu.h"
+#include "app/ConsoleIdentity.h"
 #include "app/Profile.h"
 #include "sync/SaveBrowser.h"
 #include "sync/SaveScanner.h"
@@ -269,20 +272,22 @@ bool findBackupFolder(bool create, std::string &folderId)
 
 /** Brings the user's saves and their backup in line. */
 void runSync(Menu &menu, ConsoleStorage &storage, const std::string &profile,
-             const std::string &savedata)
+             const std::string &savedata, const SaveTarget *target)
 {
     menu.ShowMessage("Syncing... Do not quit or switch off the PS3.");
     syncDialog.Open();
     std::string folderId;
+    std::size_t notResigned = 0;
     bool done = findBackupFolder(true, folderId);
     if (done)
     {
         // Without a state of its own every save starts without a base; the sync works it out.
         SyncState state(stateFile(profile), stateBackup(profile));
         state.Load();
-        Sync sync(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
-                  profile);
+        Sync sync(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave, profile,
+                  target);
         done = sync.Run();
+        notResigned = sync.NotResigned().size();
     }
     const bool full = done && drive.IsFull();
     if (full)
@@ -298,15 +303,31 @@ void runSync(Menu &menu, ConsoleStorage &storage, const std::string &profile,
     {
         menu.ShowMessage("The sync stopped: the Google storage is full.");
     }
+    else if (syncDialog.Cancelled())
+    {
+        menu.ShowMessage("The sync was stopped.");
+    }
+    else if (notResigned == 1)
+    {
+        menu.ShowMessage("The sync is done; a save of another user came down as it was, and the "
+                         "game may refuse it.");
+    }
+    else if (notResigned > 1)
+    {
+        std::ostringstream text;
+        text << "The sync is done; " << notResigned
+             << " saves of other users came down as they were, and the games may refuse them.";
+        menu.ShowMessage(text.str());
+    }
     else
     {
-        menu.ShowMessage(syncDialog.Cancelled() ? "The sync was stopped." : "The sync is done.");
+        menu.ShowMessage("The sync is done.");
     }
 }
 
 /** Lets the user load saves from the backup one by one. */
 void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &profile,
-                      const std::string &savedata)
+                      const std::string &savedata, const SaveTarget *target)
 {
     menu.ShowMessage("Looking for the backup...");
     std::string folderId;
@@ -323,7 +344,7 @@ void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &pr
     SyncState state(stateFile(profile), stateBackup(profile));
     state.Load();
     SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
-                        profile);
+                        profile, target);
     if (!BrowseCloudSaves(menu, syncDialog, browser))
     {
         menu.ShowMessage(driveFailureMessage());
@@ -361,6 +382,14 @@ int runApp(void *arg)
     }
     const std::string profile = MakeProfileDirectory(consoleStorage, *user);
     const std::string savedata = SavedataDirectory(*user);
+    // Saves of another user or console are made this user's as they come down.
+    const std::optional<SaveTarget> target = ReadSaveTarget(*user);
+    const SaveTarget *saveTarget = target ? &*target : nullptr;
+    if (saveTarget == nullptr)
+    {
+        menu.ShowMessage("This PS3's or the user's ids cannot be read, so saves of other users "
+                         "come down as they are.");
+    }
     Config config;
     LoadConfig(profile, config);
     // The first request finds the access token missing and gets one with this.
@@ -387,11 +416,11 @@ int runApp(void *arg)
         }
         else if (row == syncRow)
         {
-            runSync(menu, consoleStorage, profile, savedata);
+            runSync(menu, consoleStorage, profile, savedata, saveTarget);
         }
         else if (row == cloudSavesRow)
         {
-            browseCloudSaves(menu, consoleStorage, profile, savedata);
+            browseCloudSaves(menu, consoleStorage, profile, savedata, saveTarget);
         }
         else if (row == signOutRow)
         {

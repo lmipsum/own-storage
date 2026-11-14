@@ -7,9 +7,9 @@
 SaveBrowser::SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
                          SyncDisplay &display, const std::string &rootFolderId,
                          const std::string &savedata, const std::string &ownSave,
-                         const std::string &workDirectory)
+                         const std::string &workDirectory, const SaveTarget *target)
     : m_state(state), m_display(display), m_cloud(cloud), m_scanner(storage, savedata, ownSave),
-      m_archives(cloud, state, storage, display, savedata, ownSave, workDirectory),
+      m_archives(cloud, state, storage, display, savedata, ownSave, workDirectory, target),
       m_rootFolderId(rootFolderId), m_ownSave(ownSave)
 {
 }
@@ -87,5 +87,13 @@ LoadResult SaveBrowser::Load(const std::string &name)
         }
     }
     debugPrintf("SaveBrowser::Load: %s\n", name.c_str());
-    return m_archives.BringDown(name, Save(name)) ? LoadResult::Loaded : LoadResult::Failed;
+    switch (m_archives.BringDown(name, Save(name)))
+    {
+    case BroughtDown::Done:
+        return LoadResult::Loaded;
+    case BroughtDown::DoneNotResigned:
+        return LoadResult::LoadedNotResigned;
+    default:
+        return LoadResult::Failed;
+    }
 }

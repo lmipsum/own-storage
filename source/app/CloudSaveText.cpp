@@ -58,6 +58,8 @@ std::string ShownResult(const std::string &name, LoadResult result)
     {
     case LoadResult::Loaded:
         return name + " is loaded.";
+    case LoadResult::LoadedNotResigned:
+        return name + " is loaded as it was: it could not be made this user's.";
     case LoadResult::AlreadyThere:
         return name + " is on this PS3 already.";
     case LoadResult::Kept:

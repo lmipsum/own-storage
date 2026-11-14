@@ -32,10 +32,11 @@ class Sync
      * @param savedata the user's savedata directory
      * @param ownSave a save folder of the app itself, which is never backed up
      * @param workDirectory where archives are kept while they move
+     * @param target whom a save brought down is made to belong to; null to leave saves as they are
      */
     Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
          const std::string &rootFolderId, const std::string &savedata, const std::string &ownSave,
-         const std::string &workDirectory);
+         const std::string &workDirectory, const SaveTarget *target);
     Sync(const Sync &) = delete;
     Sync &operator=(const Sync &) = delete;
 
@@ -44,6 +45,8 @@ class Sync
      * @return false when the cloud's saves could not be listed, so nothing was done
      */
     bool Run();
+    /** The saves the run brought down as they were, as they could not be made the user's. */
+    const std::vector<std::string> &NotResigned() const;
 
   private:
     /** A save to send up. */
@@ -149,4 +152,5 @@ class Sync
     SaveArchives m_archives;
     const std::string m_rootFolderId;
     const std::string m_ownSave;
+    std::vector<std::string> m_notResigned;
 };

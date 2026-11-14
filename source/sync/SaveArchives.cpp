@@ -11,9 +11,11 @@
 
 SaveArchives::SaveArchives(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
                            SyncDisplay &display, const std::string &savedata,
-                           const std::string &ownSave, const std::string &workDirectory)
+                           const std::string &ownSave, const std::string &workDirectory,
+                           const SaveTarget *target)
     : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display),
-      m_scanner(storage, savedata, ownSave), m_savedata(savedata), m_workDirectory(workDirectory)
+      m_scanner(storage, savedata, ownSave), m_savedata(savedata), m_workDirectory(workDirectory),
+      m_target(target)
 {
 }
 
@@ -54,7 +56,7 @@ std::string SaveArchives::ArchiveMd5(const LocalSave &save)
     return md5;
 }
 
-bool SaveArchives::BringDown(const std::string &name, const CloudSave &cloudSave)
+BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cloudSave)
 {
     m_display.SetText(ProgressBar::Current, name);
     const std::string path = ArchivePath(name);
@@ -69,9 +71,15 @@ bool SaveArchives::BringDown(const std::string &name, const CloudSave &cloudSave
     if (!whole)
     {
         debugPrintf("SaveArchives::BringDown: %s could not be brought down whole\n", name.c_str());
-        return false;
+        return BroughtDown::Failed;
     }
 
+    const bool resignRefused =
+        m_target != nullptr && ResignSave(files, *m_target) == ResignResult::Refused;
+    if (resignRefused)
+    {
+        debugPrintf("SaveArchives::BringDown: %s cannot be made this user's\n", name.c_str());
+    }
     m_state.Record(name, SaveBase{cloudSave.fileId, cloudSave.md5, std::string(), true});
     const std::string folder = m_savedata + "/" + name;
     m_storage.MakeDirectory(folder);
@@ -82,7 +90,7 @@ bool SaveArchives::BringDown(const std::string &name, const CloudSave &cloudSave
         {
             debugPrintf("SaveArchives::BringDown: %s/%s cannot be written\n", name.c_str(),
                         file.name.c_str());
-            return false;
+            return BroughtDown::Failed;
         }
     }
     for (const std::string &old : before.files)
@@ -97,7 +105,7 @@ bool SaveArchives::BringDown(const std::string &name, const CloudSave &cloudSave
     m_state.Record(name, SaveBase{cloudSave.fileId, cloudSave.md5,
                                   m_scanner.ScanSave(name).fingerprint, false});
     debugPrintf("SaveArchives::BringDown: %s saved\n", name.c_str());
-    return true;
+    return resignRefused ? BroughtDown::DoneNotResigned : BroughtDown::Done;
 }
 
 std::string SaveArchives::LocalTitle(const std::string &name) const
