@@ -74,6 +74,15 @@ bool ConsoleStorage::Read(const std::string &path, std::string &content) const
     return ReadWholeFile(path, content);
 }
 
+bool ConsoleStorage::ReadPart(const std::string &path, unsigned long long offset, std::size_t size,
+                              std::string &content) const
+{
+    std::ifstream file(path.c_str(), std::ios::binary);
+    content.resize(size);
+    return file.seekg(static_cast<std::streamoff>(offset)) &&
+           file.read(&content[0], static_cast<std::streamsize>(size));
+}
+
 bool ConsoleStorage::Write(const std::string &path, const std::string &content)
 {
     std::ofstream file(path.c_str(), std::ios::binary | std::ios::trunc);
@@ -85,6 +94,14 @@ bool ConsoleStorage::Write(const std::string &path, const std::string &content)
     }
     sysFsChmod(path.c_str(), kFileMode);
     return true;
+}
+
+bool ConsoleStorage::Append(const std::string &path, const std::string &content)
+{
+    std::ofstream file(path.c_str(), std::ios::binary | std::ios::app);
+    file.write(content.data(), content.size());
+    file.close();
+    return static_cast<bool>(file);
 }
 
 void ConsoleStorage::Remove(const std::string &path)

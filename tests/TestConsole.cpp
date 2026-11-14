@@ -162,9 +162,24 @@ bool TestConsole::Read(const std::string &path, std::string &content) const
     return true;
 }
 
+bool TestConsole::ReadPart(const std::string &path, unsigned long long offset, std::size_t size,
+                           std::string &content) const
+{
+    std::ifstream file(Map(path).c_str(), std::ios::binary);
+    content.resize(size);
+    return file.seekg(static_cast<std::streamoff>(offset)) &&
+           file.read(&content[0], static_cast<std::streamsize>(size));
+}
+
 bool TestConsole::Write(const std::string &path, const std::string &content)
 {
     std::ofstream file(Map(path).c_str(), std::ios::binary | std::ios::trunc);
+    return static_cast<bool>(file.write(content.data(), content.size()));
+}
+
+bool TestConsole::Append(const std::string &path, const std::string &content)
+{
+    std::ofstream file(Map(path).c_str(), std::ios::binary | std::ios::app);
     return static_cast<bool>(file.write(content.data(), content.size()));
 }
 

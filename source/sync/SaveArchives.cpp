@@ -2,6 +2,7 @@
 #include "sync/SaveArchives.h"
 
 #include "app/DebugLog.h"
+#include "sync/ParamPfd.h"
 #include "sync/ParamSfo.h"
 #include "sync/Tar.h"
 
@@ -13,6 +14,12 @@
 
 namespace
 {
+// What one read or write of a large file moves: small next to the console's memory, which a
+// whole save could fill.
+const unsigned long long kPieceBytes = 1024 * 1024;
+// More than a PARAM.SFO or a PARAM.PFD ever holds; a larger one would fill the console's memory.
+const unsigned long long kSigningFileLimit = 64 * 1024;
+
 /**
  * A time as Drive writes modifiedDate.
  * @param time seconds since 1970, UTC
@@ -47,26 +54,94 @@ std::string SaveArchives::ArchivePath(const std::string &name) const
 
 std::string SaveArchives::WriteArchive(const LocalSave &save, const std::string &path)
 {
-    std::vector<TarFile> files;
-    for (const std::string &name : save.files)
-    {
-        TarFile file{name, std::string()};
-        if (!IsArchivableName(name) ||
-            !m_storage.Read(m_savedata + "/" + save.name + "/" + name, file.content))
-        {
-            debugPrintf("SaveArchives::WriteArchive: %s/%s cannot be archived\n", save.name.c_str(),
-                        name.c_str());
-            return std::string();
-        }
-        // A save can be large; its content is moved, never copied.
-        files.push_back(std::move(file));
-    }
-    if (!m_storage.Write(path, MakeTar(std::move(files))))
+    // Written a file at a time, so a large save never sits in memory whole; the files come
+    // sorted by name, as an archive has them.
+    if (!m_storage.Write(path, std::string()))
     {
         debugPrintf("SaveArchives::WriteArchive: %s cannot be written\n", path.c_str());
         return std::string();
     }
+    for (const std::string &name : save.files)
+    {
+        const std::string file = m_savedata + "/" + save.name + "/" + name;
+        FileStatus status;
+        if (!IsArchivableName(name) || !m_storage.Status(file, status) ||
+            !m_storage.Append(path, TarHeader(name, status.size)) ||
+            !CopyPart(path, file, 0, status.size) ||
+            !m_storage.Append(path, std::string(TarPadding(status.size), '\0')))
+        {
+            debugPrintf("SaveArchives::WriteArchive: %s/%s cannot be archived\n", save.name.c_str(),
+                        name.c_str());
+            m_storage.Remove(path);
+            return std::string();
+        }
+    }
+    if (!m_storage.Append(path, TarEnd()))
+    {
+        debugPrintf("SaveArchives::WriteArchive: %s cannot be written\n", path.c_str());
+        m_storage.Remove(path);
+        return std::string();
+    }
     return m_storage.Md5(path);
+}
+
+bool SaveArchives::CopyPart(const std::string &to, const std::string &from,
+                            unsigned long long offset, unsigned long long size)
+{
+    std::string piece;
+    for (unsigned long long done = 0; done < size; done += piece.size())
+    {
+        const std::size_t bytes = static_cast<std::size_t>(std::min(kPieceBytes, size - done));
+        if (!m_storage.ReadPart(from, offset + done, bytes, piece) || !m_storage.Append(to, piece))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool SaveArchives::ListArchive(const std::string &path, std::vector<ArchivedFile> &files,
+                               std::vector<TarFile> &signing) const
+{
+    FileStatus archive;
+    if (!m_storage.Status(path, archive))
+    {
+        return false;
+    }
+    std::string block;
+    unsigned long long offset = 0;
+    while (m_storage.ReadPart(path, offset, kTarBlock, block))
+    {
+        ArchivedFile file{std::string(), 0, 0};
+        const TarBlock read = ReadTarHeader(block, file.name, file.size);
+        if (read != TarBlock::File)
+        {
+            return read == TarBlock::End;
+        }
+        file.offset = offset + kTarBlock;
+        if (file.size > archive.size - file.offset)
+        {
+            return false;
+        }
+        if (file.name == paramSfoName || file.name == paramPfdName)
+        {
+            TarFile small{file.name, std::string()};
+            if (file.size > kSigningFileLimit)
+            {
+                return false;
+            }
+            if (!m_storage.ReadPart(path, file.offset, static_cast<std::size_t>(file.size),
+                                    small.content))
+            {
+                return false;
+            }
+            signing.push_back(std::move(small));
+        }
+        offset = file.offset + file.size + TarPadding(file.size);
+        files.push_back(std::move(file));
+    }
+    // Without the end blocks the archive was cut short.
+    return false;
 }
 
 std::string SaveArchives::ArchiveMd5(const LocalSave &save)
@@ -81,22 +156,20 @@ BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cl
 {
     m_display.SetText(ProgressBar::Current, name);
     const std::string path = ArchivePath(name);
-    std::string archive;
-    std::vector<TarFile> files;
+    std::vector<ArchivedFile> files;
+    // Only these are held in memory: a resign changes them, and they are small.
+    std::vector<TarFile> signing;
     const bool whole = m_cloud.DownloadFile(cloudSave.fileId, path) &&
-                       m_storage.Md5(path) == cloudSave.md5 && m_storage.Read(path, archive) &&
-                       ReadTar(archive, files);
-    m_storage.Remove(path);
-    // The files hold their own copy now; the console's memory is small.
-    std::string().swap(archive);
+                       m_storage.Md5(path) == cloudSave.md5 && ListArchive(path, files, signing);
     if (!whole)
     {
+        m_storage.Remove(path);
         debugPrintf("SaveArchives::BringDown: %s could not be brought down whole\n", name.c_str());
         return BroughtDown::Failed;
     }
 
     const bool resignRefused =
-        m_target != nullptr && ResignSave(files, *m_target) == ResignResult::Refused;
+        m_target != nullptr && ResignSave(signing, *m_target) == ResignResult::Refused;
     if (resignRefused)
     {
         debugPrintf("SaveArchives::BringDown: %s cannot be made this user's\n", name.c_str());
@@ -105,19 +178,16 @@ BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cl
     const std::string folder = m_savedata + "/" + name;
     m_storage.MakeDirectory(folder);
     const LocalSave before = m_scanner.ScanSave(name);
-    for (const TarFile &file : files)
+    const bool written = WriteSaveFiles(folder, path, files, signing);
+    m_storage.Remove(path);
+    if (!written)
     {
-        if (!m_storage.Write(folder + "/" + file.name, file.content))
-        {
-            debugPrintf("SaveArchives::BringDown: %s/%s cannot be written\n", name.c_str(),
-                        file.name.c_str());
-            return BroughtDown::Failed;
-        }
+        return BroughtDown::Failed;
     }
     for (const std::string &old : before.files)
     {
-        const bool kept = std::any_of(files.begin(), files.end(),
-                                      [&old](const TarFile &file) { return file.name == old; });
+        const bool kept = std::any_of(files.begin(), files.end(), [&old](const ArchivedFile &file)
+                                      { return file.name == old; });
         if (!kept)
         {
             m_storage.Remove(folder + "/" + old);
@@ -127,6 +197,29 @@ BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cl
                                   m_scanner.ScanSave(name).fingerprint, false});
     debugPrintf("SaveArchives::BringDown: %s saved\n", name.c_str());
     return resignRefused ? BroughtDown::DoneNotResigned : BroughtDown::Done;
+}
+
+bool SaveArchives::WriteSaveFiles(const std::string &folder, const std::string &path,
+                                  const std::vector<ArchivedFile> &files,
+                                  const std::vector<TarFile> &signing)
+{
+    for (const ArchivedFile &file : files)
+    {
+        const std::string target = folder + "/" + file.name;
+        const auto held = std::find_if(signing.begin(), signing.end(), [&file](const TarFile &each)
+                                       { return each.name == file.name; });
+        const bool written = held != signing.end()
+                                 ? m_storage.Write(target, held->content)
+                                 : m_storage.Write(target, std::string()) &&
+                                       CopyPart(target, path, file.offset, file.size);
+        if (!written)
+        {
+            debugPrintf("SaveArchives::WriteSaveFiles: %s/%s cannot be written\n", folder.c_str(),
+                        file.name.c_str());
+            return false;
+        }
+    }
+    return true;
 }
 
 SaveTexts SaveArchives::LocalTexts(const std::string &name) const

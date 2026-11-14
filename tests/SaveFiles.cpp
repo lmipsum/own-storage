@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SaveFiles.h"
 
+#include <algorithm>
+
 #include <mbedtls/aes.h>
 #include <mbedtls/md.h>
 
@@ -107,6 +109,44 @@ SaveOwner TestOwner(std::uint32_t userId, char psidByte, const std::string &acco
     std::string account = accountId;
     account.resize(kAccountIdSize, '\0');
     return SaveOwner{userId, std::string(kPsidSize, psidByte), account};
+}
+
+std::string MakeTar(std::vector<TarFile> files)
+{
+    std::sort(files.begin(), files.end(),
+              [](const TarFile &a, const TarFile &b) { return a.name < b.name; });
+    std::string archive;
+    for (const TarFile &file : files)
+    {
+        archive += TarHeader(file.name, file.content.size());
+        archive += file.content;
+        archive.append(TarPadding(file.content.size()), '\0');
+    }
+    return archive + TarEnd();
+}
+
+bool ReadTar(const std::string &archive, std::vector<TarFile> &files)
+{
+    files.clear();
+    std::size_t offset = 0;
+    while (offset + kTarBlock <= archive.size())
+    {
+        std::string name;
+        unsigned long long size;
+        const TarBlock block = ReadTarHeader(archive.substr(offset, kTarBlock), name, size);
+        if (block != TarBlock::File)
+        {
+            return block == TarBlock::End;
+        }
+        offset += kTarBlock;
+        if (size > archive.size() - offset)
+        {
+            return false;
+        }
+        files.push_back(TarFile{name, archive.substr(offset, size)});
+        offset += size + TarPadding(size);
+    }
+    return false;
 }
 
 std::string MakeSfo(const SaveTexts &texts, const SaveOwner &owner)
