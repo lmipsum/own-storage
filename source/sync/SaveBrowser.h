@@ -40,6 +40,8 @@ enum class LoadResult
     Loaded,
     /** The console had the cloud's copy already. */
     AlreadyThere,
+    /** Loaded as it was, as it could not be made the user's; the game may refuse it. */
+    LoadedNotResigned,
     /** The user kept the console's own copy. */
     Kept,
     Failed
@@ -61,10 +63,12 @@ class SaveBrowser
      * @param savedata the user's savedata directory
      * @param ownSave a save folder of the app itself, which is never backed up
      * @param workDirectory where archives are kept while they move
+     * @param target whom a save brought down is made to belong to; null to leave saves as they are
      */
     SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
                 const std::string &rootFolderId, const std::string &savedata,
-                const std::string &ownSave, const std::string &workDirectory);
+                const std::string &ownSave, const std::string &workDirectory,
+                const SaveTarget *target);
     SaveBrowser(const SaveBrowser &) = delete;
     SaveBrowser &operator=(const SaveBrowser &) = delete;
 

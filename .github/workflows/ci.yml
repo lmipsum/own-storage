@@ -43,7 +43,7 @@ jobs:
       - name: Sync tests on the PC
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libjson-c-dev
+          sudo apt-get install -y --no-install-recommends libjson-c-dev libmbedtls-dev
           make -C tests test
 
   big-endian-tests:
@@ -52,9 +52,11 @@ jobs:
     permissions:
       contents: read
     env:
-      # json-c for the big-endian build, pinned by hash.
+      # json-c and mbedTLS for the big-endian build, pinned by hash.
       JSON_C_URL: https://github.com/json-c/json-c/archive/refs/tags/json-c-0.18-20240915.tar.gz
       JSON_C_SHA256: 3112c1f25d39eca661fe3fc663431e130cc6e2f900c081738317fba49d29e298
+      MBEDTLS_URL: https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.6/mbedtls-3.6.6.tar.bz2
+      MBEDTLS_SHA256: 8fb65fae8dcae5840f793c0a334860a411f884cc537ea290ce1c52bb64ca007a
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -73,8 +75,20 @@ jobs:
             -DDISABLE_EXTRA_LIBS=ON -DDISABLE_WERROR=ON -DBUILD_APPS=OFF \
             -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX=/tmp/json-c-ppc64
           cmake --build /tmp/json-c/build --target install
+      - name: mbedTLS for big-endian
+        run: |
+          curl -fsSL "$MBEDTLS_URL" -o /tmp/mbedtls.tar.bz2
+          echo "$MBEDTLS_SHA256  /tmp/mbedtls.tar.bz2" | sha256sum -c -
+          mkdir /tmp/mbedtls && tar xjf /tmp/mbedtls.tar.bz2 -C /tmp/mbedtls --strip-components=1
+          cmake -S /tmp/mbedtls -B /tmp/mbedtls/build -DCMAKE_C_COMPILER=powerpc64-linux-gnu-gcc \
+            -DCMAKE_SYSTEM_NAME=Linux -DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF -DGEN_FILES=OFF \
+            -DMBEDTLS_FATAL_WARNINGS=OFF \
+            -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX=/tmp/mbedtls-ppc64
+          cmake --build /tmp/mbedtls/build --parallel --target install
       - name: Sync tests on a big-endian CPU (the PS3's byte order)
-        run: make -C tests test CROSS=powerpc64-linux-gnu- RUN=qemu-ppc64 JSON_C=/tmp/json-c-ppc64
+        run: |
+          make -C tests test CROSS=powerpc64-linux-gnu- RUN=qemu-ppc64 JSON_C=/tmp/json-c-ppc64 \
+            MBEDTLS=/tmp/mbedtls-ppc64
 
   actionlint:
     runs-on: ubuntu-24.04

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Check.h"
+#include "SaveFiles.h"
 #include "TestCloud.h"
 #include "TestConsole.h"
 
 #include "app/CloudSaveText.h"
+#include "sync/ParamPfd.h"
 #include "sync/ParamSfo.h"
 #include "sync/SaveBrowser.h"
 #include "sync/SaveScanner.h"
@@ -12,7 +14,6 @@
 #include "sync/SyncState.h"
 #include "sync/Tar.h"
 
-#include <cstdint>
 #include <ctime>
 #include <string>
 #include <vector>
@@ -54,33 +55,6 @@ class ScriptedDisplay : public SyncDisplay
     std::vector<std::string> questions;
 };
 
-/** Appends a little-endian number of a byte count. */
-void PutLittleEndian(std::string &bytes, std::uint32_t value, int count)
-{
-    for (int i = 0; i < count; ++i)
-    {
-        bytes += static_cast<char>((value >> (8 * i)) & 0xff);
-    }
-}
-
-/** A PARAM.SFO with a title alone, laid out as the console lays it out. */
-std::string MakeSfo(const std::string &title)
-{
-    const std::uint32_t keyTable = 20 + 16;
-    const std::string keys("TITLE\0\0\0", 8);
-    std::string sfo("\0PSF", 4);
-    PutLittleEndian(sfo, 0x0101, 4);
-    PutLittleEndian(sfo, keyTable, 4);
-    PutLittleEndian(sfo, keyTable + keys.size(), 4);
-    PutLittleEndian(sfo, 1, 4);
-    PutLittleEndian(sfo, 0, 2);
-    PutLittleEndian(sfo, 0x0204, 2);
-    PutLittleEndian(sfo, title.size() + 1, 4);
-    PutLittleEndian(sfo, title.size() + 1, 4);
-    PutLittleEndian(sfo, 0, 4);
-    return sfo + keys + title + '\0';
-}
-
 // Saves written before the first sync.
 const std::time_t kWritten = std::time(nullptr) - 3600;
 // A later change on the console.
@@ -116,6 +90,8 @@ struct Setup
     TestCloud cloud;
     ScriptedDisplay display;
     std::string rootId;
+    /** Whom saves brought down are made to belong to; null to leave them as they are. */
+    const SaveTarget *target = nullptr;
 
     Setup()
     {
@@ -127,7 +103,8 @@ struct Setup
     {
         SyncState state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup");
         state.Load();
-        return Sync(cloud, state, on, display, rootId, savedata, kOwnSave, on.Scratch()).Run();
+        return Sync(cloud, state, on, display, rootId, savedata, kOwnSave, on.Scratch(), target)
+            .Run();
     }
 
     /** One run of the app on the logged-in user's console. */
@@ -194,7 +171,7 @@ struct Browsing
     Browsing(Setup &setup, TestConsole &on)
         : state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup"),
           browser(setup.cloud, state, on, setup.display, setup.rootId, kSavedata, kOwnSave,
-                  on.Scratch())
+                  on.Scratch(), setup.target)
     {
         state.Load();
         browser.Refresh();
@@ -728,4 +705,85 @@ TEST(SizesAndTimesReadAsAPersonReadsThem)
     CHECK_EQUAL(std::string("4.4 MB"), ShownSize(4613734));
     CHECK_EQUAL(std::string("2026-11-13 21:13 UTC"), ShownTime("2026-11-13T21:13:21.672Z"));
     CHECK_EQUAL(std::string("soon"), ShownTime("soon"));
+}
+
+namespace
+{
+const SaveTarget kHere{TestOwner(2, 'b', ""), std::string(kIdpsSize, '\x22')};
+const char kForeignSave[] = "BLES00005-SAVE";
+
+/** Puts a save of another console's user in the cloud, signed with a disc hash key. */
+void StoreForeignSave(Setup &setup, const std::string &discHashKey)
+{
+    const std::string sfo = MakeSfo("Game Five", TestOwner(1, 'a', "0123456789abcdef"));
+    setup.cloud.Store(TestCloudItem{
+        std::string(kForeignSave) + ".tar", setup.rootId, octetMime,
+        MakeTar({{paramSfoName, sfo},
+                 {paramPfdName, MakePfd(sfo, std::string(kIdpsSize, '\x11'), discHashKey, 3)},
+                 {"DATA.BIN", "five"}})});
+}
+} // namespace
+
+TEST(SaveOfAnotherConsoleComesDownAsThisUsersOwn)
+{
+    Setup setup;
+    setup.console.MakeDirectories(kSavedata);
+    StoreForeignSave(setup, FallbackDiscHashKey());
+    setup.target = &kHere;
+    setup.Run();
+    const std::string folder = std::string(kSavedata) + "/" + kForeignSave;
+    SaveOwner owner;
+    CHECK(ReadSfoOwner(setup.console.Content(folder + "/PARAM.SFO"), owner) &&
+          owner == kHere.owner);
+    CHECK_EQUAL(std::string("five"), setup.console.Content(folder + "/DATA.BIN"));
+    // Made this user's as it came down, the save is not taken for a change of the user's.
+    const int creates = setup.cloud.Creates();
+    setup.Run();
+    CHECK_EQUAL(creates, setup.cloud.Creates());
+    CHECK_EQUAL(0, setup.cloud.Updates());
+}
+
+TEST(SaveThatCannotBeMadeThisUsersComesDownAsItIsAndIsNamed)
+{
+    Setup setup;
+    setup.console.MakeDirectories(kSavedata);
+    StoreForeignSave(setup, std::string(16, '\x77'));
+    SyncState state(setup.console.Scratch() + "/state.json",
+                    setup.console.Scratch() + "/state.backup");
+    state.Load();
+    Sync sync(setup.cloud, state, setup.console, setup.display, setup.rootId, kSavedata, kOwnSave,
+              setup.console.Scratch(), &kHere);
+    CHECK(sync.Run());
+    CHECK(sync.NotResigned() == std::vector<std::string>{kForeignSave});
+    SaveOwner owner;
+    CHECK(ReadSfoOwner(
+              setup.console.Content(std::string(kSavedata) + "/" + kForeignSave + "/PARAM.SFO"),
+              owner) &&
+          owner.userId == 1);
+}
+
+TEST(MenuSaysWhetherALoadedSaveWasMadeThisUsers)
+{
+    Setup setup;
+    setup.console.MakeDirectories(kSavedata);
+    StoreForeignSave(setup, FallbackDiscHashKey());
+    setup.target = &kHere;
+    {
+        Browsing browsing(setup, setup.console);
+        CHECK(browsing.browser.Load(kForeignSave) == LoadResult::Loaded);
+    }
+    SaveOwner owner;
+    CHECK(ReadSfoOwner(
+              setup.console.Content(std::string(kSavedata) + "/" + kForeignSave + "/PARAM.SFO"),
+              owner) &&
+          owner == kHere.owner);
+
+    Setup other;
+    other.console.MakeDirectories(kSavedata);
+    StoreForeignSave(other, std::string(16, '\x77'));
+    other.target = &kHere;
+    Browsing browsing(other, other.console);
+    CHECK(browsing.browser.Load(kForeignSave) == LoadResult::LoadedNotResigned);
+    CHECK(ShownResult(kForeignSave, LoadResult::LoadedNotResigned).find("as it was") !=
+          std::string::npos);
 }
