@@ -714,15 +714,26 @@ namespace
 const SaveTarget kHere{TestOwner(2, 'b', ""), std::string(kIdpsSize, '\x22')};
 const char kForeignSave[] = "BLES00005-SAVE";
 
-/** Puts a save of another console's user in the cloud, signed with a disc hash key. */
-void StoreForeignSave(Setup &setup, const std::string &discHashKey)
+// Whether StoreForeignSave() damages a signature of the save's PARAM.PFD.
+const bool kDamaged = true;
+const bool kSound = false;
+
+/**
+ * Puts a save of another console's user in the cloud, signed with a disc hash key of its game's
+ * own.
+ * @param damaged kDamaged when a signature of its PARAM.PFD is not to hold, else kSound
+ */
+void StoreForeignSave(Setup &setup, bool damaged)
 {
     const std::string sfo = MakeSfo("Game Five", TestOwner(1, 'a', "0123456789abcdef"));
-    setup.cloud.Store(TestCloudItem{
-        std::string(kForeignSave) + ".tar", setup.rootId, octetMime,
-        MakeTar({{paramSfoName, sfo},
-                 {paramPfdName, MakePfd(sfo, std::string(kIdpsSize, '\x11'), discHashKey, 3)},
-                 {"DATA.BIN", "five"}})});
+    std::string pfd = MakePfd(sfo, std::string(kIdpsSize, '\x11'), std::string(16, '\x77'), 3);
+    if (damaged)
+    {
+        pfd[0x7B60] ^= 1;
+    }
+    setup.cloud.Store(
+        TestCloudItem{std::string(kForeignSave) + ".tar", setup.rootId, octetMime,
+                      MakeTar({{paramSfoName, sfo}, {paramPfdName, pfd}, {"DATA.BIN", "five"}})});
 }
 } // namespace
 
@@ -730,7 +741,7 @@ TEST(SaveOfAnotherConsoleComesDownAsThisUsersOwn)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);
-    StoreForeignSave(setup, FallbackDiscHashKey());
+    StoreForeignSave(setup, kSound);
     setup.target = &kHere;
     setup.Run();
     const std::string folder = std::string(kSavedata) + "/" + kForeignSave;
@@ -749,7 +760,7 @@ TEST(SaveThatCannotBeMadeThisUsersComesDownAsItIsAndIsNamed)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);
-    StoreForeignSave(setup, std::string(16, '\x77'));
+    StoreForeignSave(setup, kDamaged);
     SyncState state(setup.console.Scratch() + "/state.json",
                     setup.console.Scratch() + "/state.backup");
     state.Load();
@@ -768,7 +779,7 @@ TEST(MenuSaysWhetherALoadedSaveWasMadeThisUsers)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);
-    StoreForeignSave(setup, FallbackDiscHashKey());
+    StoreForeignSave(setup, kSound);
     setup.target = &kHere;
     {
         Browsing browsing(setup, setup.console);
@@ -782,7 +793,7 @@ TEST(MenuSaysWhetherALoadedSaveWasMadeThisUsers)
 
     Setup other;
     other.console.MakeDirectories(kSavedata);
-    StoreForeignSave(other, std::string(16, '\x77'));
+    StoreForeignSave(other, kDamaged);
     other.target = &kHere;
     Browsing browsing(other, other.console);
     CHECK(browsing.browser.Load(kForeignSave) == LoadResult::LoadedNotResigned);
