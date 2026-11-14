@@ -9,9 +9,9 @@
 #include <utility>
 
 Sync::Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-           const std::string &rootFolderId, const std::string &savedata, const std::string &ownSave,
-           const std::string &workDirectory, const SaveTarget *target)
-    : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display),
+           const Clock &clock, const std::string &rootFolderId, const std::string &savedata,
+           const std::string &ownSave, const std::string &workDirectory, const SaveTarget *target)
+    : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display), m_clock(clock),
       m_scanner(storage, savedata, ownSave),
       m_archives(cloud, state, storage, display, savedata, ownSave, workDirectory, target),
       m_rootFolderId(rootFolderId), m_ownSave(ownSave)
@@ -108,7 +108,7 @@ void Sync::Decide(const std::string &name, const LocalSave *local, const CloudSa
                                                         : Doubt::DeletedOnConsoleChangedInCloud;
             plan.questions.push_back(Question{doubt, name, *cloud, nullptr});
         }
-        // A save kept in the cloud only comes down when the user picks it in the XMB.
+        // A save kept in the cloud only is downloaded only when the user picks it in the XMB.
         else if (!cloud->cloudOnly)
         {
             plan.downloads.push_back(Download{name, *cloud});
@@ -125,8 +125,8 @@ void Sync::Decide(const std::string &name, const LocalSave *local, const CloudSa
         else if (localChanged)
         {
             // A changed fingerprint may still mean the same content; the archive tells. It is
-            // written again when its turn to go up comes, so archives are not all on the disk at
-            // the same time.
+            // written again when its turn to be uploaded comes, so archives are not all on the disk
+            // at the same time.
             const std::string md5 = m_archives.ArchiveMd5(*local);
             if (!md5.empty() && md5 == cloud->md5)
             {
@@ -146,8 +146,17 @@ void Sync::Decide(const std::string &name, const LocalSave *local, const CloudSa
 
 void Sync::Transfer(const Plan &plan)
 {
-    SaveProgress progress(m_display, plan.uploads.size() + plan.downloads.size());
-    debugPrintf("Sync::Transfer: %u saves to send, %u to bring down\n",
+    unsigned long long bytes = 0;
+    for (const Upload &upload : plan.uploads)
+    {
+        bytes += upload.save->bytes;
+    }
+    for (const Download &download : plan.downloads)
+    {
+        bytes += download.cloud.size;
+    }
+    SaveProgress progress(m_display, m_clock, plan.uploads.size() + plan.downloads.size(), bytes);
+    debugPrintf("Sync::Transfer: %u saves to upload, %u to download\n",
                 static_cast<unsigned int>(plan.uploads.size()),
                 static_cast<unsigned int>(plan.downloads.size()));
     std::vector<std::string> names;
@@ -156,20 +165,20 @@ void Sync::Transfer(const Plan &plan)
         QueueUpload(*upload.save, upload.fileId, progress);
         names.push_back(upload.save->name);
     }
-    m_archives.SendQueue(names);
-    // A full cloud stops only uploads; bringing saves down needs no room there.
+    m_archives.UploadQueue(names);
+    // A full cloud stops only uploads; downloading saves needs no room there.
     for (const Download &download : plan.downloads)
     {
         if (m_display.Cancelled())
         {
             break;
         }
-        const BroughtDown result = m_archives.BringDown(download.name, download.cloud);
-        if (result != BroughtDown::Failed)
+        const Downloaded result = m_archives.Download(download.name, download.cloud);
+        if (result != Downloaded::Failed)
         {
-            progress.Advance();
+            progress.Advance(download.cloud.size);
         }
-        if (result == BroughtDown::DoneNotResigned)
+        if (result == Downloaded::DoneNotResigned)
         {
             m_notResigned.push_back(download.name);
         }
@@ -194,7 +203,7 @@ Sync::Plan Sync::Settle(const std::vector<Question> &questions)
         {
             break;
         }
-        // A save changed on both sides goes up only when the user says so too, as that replaces
+        // A save changed on both sides is uploaded only when the user says so too, as that replaces
         // the cloud's copy.
         bool upload = false;
         if (answer == Answer::No && doubt == Doubt::ChangedOnBothSides)
@@ -281,8 +290,8 @@ std::string Sync::QuestionText(Doubt doubt, const std::string &game, std::size_t
         }
         else
         {
-            text << ", but another PS3 has sent " << (one ? "a newer copy of it" : "newer copies")
-                 << " to the cloud since. ";
+            text << ", but another PS3 has uploaded "
+                 << (one ? "a newer copy of it" : "newer copies") << " to the cloud since. ";
         }
         text << "Bring " << them << " back to this PS3?";
     }
@@ -302,7 +311,7 @@ void Sync::QueueUpload(const LocalSave &save, const std::string &fileId, SavePro
                                m_state.Record(save.name, SaveBase{stored["id"].Str(),
                                                                   stored["md5Checksum"].Str(),
                                                                   save.fingerprint, false});
-                               progress.Advance();
+                               progress.Advance(save.bytes);
                            });
 }
 

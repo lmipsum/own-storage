@@ -31,10 +31,10 @@ const char kFileListKind[] = "drive#fileList";
 const char kListPageSize[] = "1000";
 // Enough of an unexpected reply to recognise it in the debug log.
 const std::size_t kMaxLoggedReplyLength = 200;
-// Drive takes metadata and content in one request up to 5 MB; bigger files go up in a
+// Drive takes metadata and content in one request up to 5 MB; bigger files are uploaded in a
 // resumable session.
 const long kMultipartUploadLimit = 5 * 1024 * 1024;
-// Separates metadata and content in a multipart upload; a file that holds it goes up resumable.
+// Separates metadata and content in a multipart upload; a file that holds it is uploaded resumable.
 const std::string kMultipartBoundary = "own_storage_part_7d1c4f0b9a2e";
 
 /**
@@ -131,7 +131,7 @@ bool NeedsDate(const FileToStore &file, const Json &stored)
  */
 void NoteDate(long status, const std::string &reply)
 {
-    // The file is stored either way; it is dated by its upload until it goes up again.
+    // The file is stored either way; it is dated by its upload until it is uploaded again.
     if (!HttpClient::Succeeded(status) || !Json::Parse(reply).Has("id"))
     {
         debugPrintf("NoteDate: the file keeps the time of its upload, status %ld\n", status);
@@ -536,11 +536,6 @@ void GoogleDrive::RunQueue(const Stop &stop)
         }
         queued.done(UploadFile(queued.path, queued.file, octetMime));
     }
-}
-
-unsigned int GoogleDrive::Running() const
-{
-    return m_queue.Running();
 }
 
 Json GoogleDrive::FinishQueued(const char *what, long status, const std::string &reply,

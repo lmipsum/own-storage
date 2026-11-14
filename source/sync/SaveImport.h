@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "sync/Clock.h"
 #include "sync/CloudStorage.h"
 #include "sync/LocalStorage.h"
 #include "sync/SyncDisplay.h"
@@ -19,16 +20,16 @@ struct ImportResult
     std::size_t imported;
     /** Saves the cloud had already under the same name, which keeps its copy. */
     std::size_t skipped;
-    /** Saves on more than one drive, sent from the first one only. */
+    /** Saves on more than one drive, uploaded from the first one only. */
     std::size_t duplicates;
-    /** Saves that did not go up, as one could not be read or the import was stopped. */
+    /** Saves that were not uploaded, as one could not be read or the import was stopped. */
     std::size_t failed;
 };
 
 /**
- * Brings saves copied off the console, such as to a USB drive, into the cloud, so they need not
- * be kept there. They go among the user's saves marked as kept in the cloud only: no sync brings
- * them down by itself, and the user picks the ones wanted in the XMB. For the app thread only.
+ * Uploads saves copied off the console, such as to a USB drive, to the cloud, so they need not
+ * be kept there. They go among the user's saves marked as kept in the cloud only: no sync downloads
+ * them by itself, and the user picks the ones wanted in the XMB. For the app thread only.
  */
 class SaveImport
 {
@@ -38,21 +39,22 @@ class SaveImport
      * @param state the base of every save, which settles two archives of one save in the cloud
      * @param storage the console's disks
      * @param display what the user sees of the import
+     * @param clock tells how long the import has taken, and so about how long the rest will
      * @param rootFolderId the cloud id of the Own Storage folder
      * @param ownSave a save folder of the app itself, which is never backed up
      * @param workDirectory where archives are kept while they move
      */
     SaveImport(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-               const std::string &rootFolderId, const std::string &ownSave,
+               const Clock &clock, const std::string &rootFolderId, const std::string &ownSave,
                const std::string &workDirectory);
     SaveImport(const SaveImport &) = delete;
     SaveImport &operator=(const SaveImport &) = delete;
 
     /**
-     * Sends up every save in the folders that the cloud has not got under its name.
+     * Uploads every save in the folders that the cloud has not got under its name.
      * @param folders folders that hold save folders, such as a USB drive's PS3/SAVEDATA
      * @param result receives what came of it
-     * @return false when the cloud's saves could not be listed, so nothing was sent
+     * @return false when the cloud's saves could not be listed, so nothing was uploaded
      */
     bool Run(const std::vector<std::string> &folders, ImportResult &result);
 
@@ -61,6 +63,7 @@ class SaveImport
     SyncState &m_state;
     LocalStorage &m_storage;
     SyncDisplay &m_display;
+    const Clock &m_clock;
     const std::string m_rootFolderId;
     const std::string m_ownSave;
     const std::string m_workDirectory;

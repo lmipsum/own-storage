@@ -13,17 +13,17 @@
 #include <string>
 #include <vector>
 
-/** What bringing a save down came to. */
-enum class BroughtDown
+/** What downloading a save came to. */
+enum class Downloaded
 {
     Failed,
     Done,
-    /** Brought down as it was, as it could not be made the target's; the game may refuse it. */
+    /** Downloaded as it was, as it could not be made the target's; the game may refuse it. */
     DoneNotResigned
 };
 
 /**
- * A user's saves as archives: writing a save's archive, and bringing an archive down from the
+ * A user's saves as archives: writing a save's archive, and downloading an archive from the
  * cloud into its save folder, made the user's own on the way. For the app thread only.
  */
 class SaveArchives
@@ -37,7 +37,7 @@ class SaveArchives
      * @param savedata the user's savedata directory
      * @param ownSave a save folder of the app itself, which is never backed up
      * @param workDirectory where archives are kept while they move
-     * @param target whom a save brought down is made to belong to; null to leave saves as they are
+     * @param target whom a save downloaded is made to belong to; null to leave saves as they are
      */
     SaveArchives(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
                  const std::string &savedata, const std::string &ownSave,
@@ -61,20 +61,20 @@ class SaveArchives
      */
     std::string ArchiveMd5(const LocalSave &save);
     /**
-     * Brings a save down from the cloud. The archive's MD5 and every header are checked before
+     * Downloads a save from the cloud. The archive's MD5 and every header are checked before
      * any file of the save is replaced, and the base says a download is under way until every file
      * is written, so a disk failure halfway is known to the next run. A save of another user or
-     * console is made the target's; one that cannot be still comes down, as it is.
+     * console is made the target's; one that cannot be is still downloaded, as it is.
      * @param name the save
      * @param cloudSave its archive in the cloud
      * @return what came of it
      */
-    BroughtDown BringDown(const std::string &name, const CloudSave &cloudSave);
+    Downloaded Download(const std::string &name, const CloudSave &cloudSave);
     /** The texts of a save's PARAM.SFO on the console; empty when it cannot be read. */
     SaveTexts LocalTexts(const std::string &name) const;
     /**
-     * Queues a save's archive to go up; the archive is written when its turn comes and removed
-     * once it is up.
+     * Queues a save's archive for upload; the archive is written when its turn comes and removed
+     * once it is uploaded.
      * @param save the save; it must outlive the queue's run
      * @param folderId the cloud folder of the archives
      * @param fileId the archive to replace in the cloud; empty to create one
@@ -85,12 +85,12 @@ class SaveArchives
     void QueueUpload(const LocalSave &save, const std::string &folderId, const std::string &fileId,
                      bool cloudOnly, const std::function<void(const Json &)> &stored);
     /**
-     * Sends the cloud's whole queue, until all is up, the user stops or the cloud is full; the
-     * archives a stopped queue leaves behind are removed.
+     * Uploads the cloud's whole queue, until all is uploaded, the user stops or the cloud is full;
+     * the archives a stopped queue leaves behind are removed.
      * @param names the saves whose archives were queued, by this or by another SaveArchives with
      * the same work directory
      */
-    void SendQueue(const std::vector<std::string> &names);
+    void UploadQueue(const std::vector<std::string> &names);
     /** True when the user stopped or the cloud has no room left. */
     bool Stopped() const;
 

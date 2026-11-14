@@ -191,9 +191,9 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
     else
     {
         addAction("owns_sync", kSyncIcon, "Full sync",
-                  "Backs up this user's saves and brings down the newer ones.", xmbSync);
+                  "Backs up this user's saves and downloads the newer ones.", xmbSync);
         addAction("owns_usb", kUsbIcon, "Upload from USB",
-                  "Sends the saves on a USB drive to your Google Drive.", xmbUsbImport);
+                  "Uploads the saves on a USB drive to your Google Drive.", xmbUsbImport);
         tables += Table("owns_cloud", Pair("icon_rsc", kDownloadedIcon) +
                                           Pair("title", "Saves in the cloud") +
                                           Pair("info", "The saves in your Google Drive."));

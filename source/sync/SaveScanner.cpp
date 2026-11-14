@@ -47,6 +47,7 @@ LocalSave SaveScanner::ScanSave(const std::string &name) const
         m_storage.Status(folder + "/" + file, status);
         fingerprint << file << ' ' << status.size << ' ' << status.modified << '\n';
         save.modified = std::max(save.modified, status.modified);
+        save.bytes += status.size;
     }
     save.fingerprint = fingerprint.str();
     return save;

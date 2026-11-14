@@ -31,6 +31,8 @@ struct LocalSave
     std::string fingerprint;
     /** When a file in it last changed; 0 when it has none. */
     std::time_t modified = 0;
+    /** Its files' sizes together. */
+    unsigned long long bytes = 0;
 };
 
 /** Finds what there is to back up of one user: the save folders. */

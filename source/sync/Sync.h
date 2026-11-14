@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "sync/Clock.h"
 #include "sync/CloudSaves.h"
 #include "sync/CloudStorage.h"
 #include "sync/LocalStorage.h"
@@ -17,8 +18,8 @@
 
 /**
  * Keeps a user's saves and their backup in line. Every save is one archive in the cloud. A save
- * that changed since its base only on the console goes up, one that changed only in the cloud
- * comes down. A save that changed on both sides, or was deleted on the console, needs the user's
+ * that changed since its base only on the console is uploaded, one that changed only in the cloud
+ * is downloaded. A save that changed on both sides, or was deleted on the console, needs the user's
  * say: once the rest is done, the user is asked once per game. For the app thread only.
  */
 class Sync
@@ -29,15 +30,16 @@ class Sync
      * @param state the base of every save
      * @param storage the console's hard disk
      * @param display what the user sees of the sync
+     * @param clock tells how long the sync has taken, and so about how long the rest will
      * @param rootFolderId the cloud id of the Own Storage folder
      * @param savedata the user's savedata directory
      * @param ownSave a save folder of the app itself, which is never backed up
      * @param workDirectory where archives are kept while they move
-     * @param target whom a save brought down is made to belong to; null to leave saves as they are
+     * @param target whom a save downloaded is made to belong to; null to leave saves as they are
      */
     Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-         const std::string &rootFolderId, const std::string &savedata, const std::string &ownSave,
-         const std::string &workDirectory, const SaveTarget *target);
+         const Clock &clock, const std::string &rootFolderId, const std::string &savedata,
+         const std::string &ownSave, const std::string &workDirectory, const SaveTarget *target);
     Sync(const Sync &) = delete;
     Sync &operator=(const Sync &) = delete;
 
@@ -46,11 +48,11 @@ class Sync
      * @return false when the cloud's saves could not be listed, so nothing was done
      */
     bool Run();
-    /** The saves the run brought down as they were, as they could not be made the user's. */
+    /** The saves the run downloaded as they were, as they could not be made the user's. */
     const std::vector<std::string> &NotResigned() const;
 
   private:
-    /** A save to send up. */
+    /** A save to upload. */
     struct Upload
     {
         const LocalSave *save;
@@ -58,7 +60,7 @@ class Sync
         std::string fileId;
     };
 
-    /** A save to bring down. */
+    /** A save to download. */
     struct Download
     {
         std::string name;
@@ -70,7 +72,10 @@ class Sync
     {
         ChangedOnBothSides,
         DeletedOnConsole,
-        /** Deleted here after another console had sent a newer copy, which the user should know. */
+        /**
+         * Deleted here after another console had uploaded a newer copy, which the user should
+         * know.
+         */
         DeletedOnConsoleChangedInCloud
     };
 
@@ -102,7 +107,7 @@ class Sync
      */
     void Decide(const std::string &name, const LocalSave *local, const CloudSave *cloud,
                 Plan &plan);
-    /** Sends the plan's uploads, then brings its downloads down, on fresh progress bars. */
+    /** Carries out the plan's uploads, then its downloads, on fresh progress bars. */
     void Transfer(const Plan &plan);
     /**
      * Asks the user once per game what to do with the saves in doubt.
@@ -127,10 +132,10 @@ class Sync
      */
     static std::string QuestionText(Doubt doubt, const std::string &game, std::size_t saves);
     /**
-     * Queues a save's archive to go up.
+     * Queues a save's archive for upload.
      * @param save the save
      * @param fileId the archive to replace in the cloud; empty to create one
-     * @param progress the bar to move when it is up
+     * @param progress the bar to move when it is uploaded
      */
     void QueueUpload(const LocalSave &save, const std::string &fileId, SaveProgress &progress);
     /** True when the user stopped the sync or the cloud has no room left. */
@@ -140,6 +145,7 @@ class Sync
     SyncState &m_state;
     LocalStorage &m_storage;
     SyncDisplay &m_display;
+    const Clock &m_clock;
     const SaveScanner m_scanner;
     SaveArchives m_archives;
     const std::string m_rootFolderId;

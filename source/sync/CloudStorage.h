@@ -8,12 +8,12 @@
 
 /** The type Drive gives a folder. */
 const std::string folderMime = "application/vnd.google-apps.folder";
-/** The type a save file is sent with. */
+/** The type a save file is uploaded with. */
 const std::string octetMime = "application/octet-stream";
 /** The type of the metadata that creates a folder. */
 const std::string jsonMime = "application/json";
 /**
- * The property of a stored file that marks it as kept in the cloud only: no sync brings it down
+ * The property of a stored file that marks it as kept in the cloud only: no sync downloads it
  * by itself. Public, so a sign-in with a Google client of the user's own sees it too.
  */
 const std::string cloudOnlyProperty = "ownStorageCloudOnly";
@@ -53,12 +53,12 @@ struct FileToStore
 
 /**
  * Where the backup is kept, as the sync needs it: searches, listings, folders and files one by
- * one, and a queue that sends many files at once. Google Drive is one.
+ * one, and a queue that uploads many files at once. Google Drive is one.
  */
 class CloudStorage
 {
   public:
-    /** Fills in a queued file when its turn comes; false when nothing is to be sent. */
+    /** Fills in a queued file when its turn comes; false when nothing is to be uploaded. */
     typedef std::function<bool(FileToStore &file)> PrepareFile;
     /** Takes what the cloud says about the item; without "id" when the request failed. */
     typedef std::function<void(const Json &item)> Done;
@@ -124,8 +124,6 @@ class CloudStorage
                            const Done &done) = 0;
     /** Sends the queued requests, many at once, until all are done or stop says so. */
     virtual void RunQueue(const Stop &stop) = 0;
-    /** How many queued requests are being sent right now. */
-    virtual unsigned int Running() const = 0;
 
     /** Whether the cloud has refused an upload for lack of room since the queue last ran. */
     virtual bool IsFull() const = 0;

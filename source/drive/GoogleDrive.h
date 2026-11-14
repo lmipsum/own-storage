@@ -25,7 +25,7 @@ struct TransferDisplay
 
 /**
  * Google Drive v2 for the signed-in user. Queued requests go out many at once on an
- * AuthorizedQueue; a queued file too big for one request goes up the resumable way once the
+ * AuthorizedQueue; a queued file too big for one request is uploaded the resumable way once the
  * queue is through. Remembers when Drive refused an upload for lack of room.
  */
 class GoogleDrive : public CloudStorage
@@ -53,14 +53,12 @@ class GoogleDrive : public CloudStorage
     bool TrashFile(const std::string &fileId) override;
 
     /**
-     * Sends the file as octetMime. A file that cannot go in one request waits until the queue is
-     * through and then goes up the resumable way.
+     * Uploads the file as octetMime. A file that cannot go in one request waits until the queue is
+     * through and then is uploaded the resumable way.
      */
     void QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done) override;
     /** Forgets that Drive was full, then sends. */
     void RunQueue(const Stop &stop) override;
-    /** Not counting a file that goes up the resumable way after the queue. */
-    unsigned int Running() const override;
 
     bool IsFull() const override;
     Failure LastFailure() const override;
@@ -127,10 +125,10 @@ class GoogleDrive : public CloudStorage
      */
     bool FindFirst(const std::string &query, Json &item);
 
-    /** Sends a file that fits in one request together with its metadata. */
+    /** Uploads a file that fits in one request together with its metadata. */
     Json UploadInOneRequest(const std::string &path, const FileToStore &file,
                             const std::string &mimeType, const std::string &content);
-    /** Sends a file in a resumable session: the metadata first, then the content. */
+    /** Uploads a file in a resumable session: the metadata first, then the content. */
     Json UploadResumable(const std::string &path, const FileToStore &file,
                          const std::string &mimeType, long long size);
 
@@ -146,7 +144,7 @@ class GoogleDrive : public CloudStorage
         Done done;
     };
 
-    // The queued files that cannot go in one request, sent once the queue is through.
+    // The queued files that cannot go in one request, uploaded once the queue is through.
     std::vector<ResumableFile> m_resumable;
     bool m_full;
     long m_lastFailureStatus;

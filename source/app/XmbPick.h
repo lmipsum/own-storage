@@ -8,7 +8,7 @@
 
 /**
  * Does what picking a save in the XMB means: a save the console does not have is offered to be
- * brought down and, when the user does not want it, to be deleted from the cloud; one the console
+ * downloaded and, when the user does not want it, to be deleted from the cloud; one the console
  * has otherwise is offered to replace it; one the console has already is only said to be there.
  * @param browser the saves in the cloud, listed already
  * @param display asks the user
