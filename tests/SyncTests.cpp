@@ -920,9 +920,28 @@ TEST(XmbListsRowsThatStartTheAppThroughWebman)
             saveScript || (script.key == "owns_save_0" && script.action == "save:BLES00001-SAVE");
     }
     CHECK(saveScript);
-    CHECK_EQUAL(std::string("fcopy /dev_hdd0/game/OWNS00001/USRDIR/xmb/owns_sync.txt="
-                            "/dev_hdd0/game/OWNS00001/USRDIR/act.txt\n/play.ps3?OWNS00001\n"),
-                XmbScriptText(kXmbPlace, "owns_sync"));
+    CHECK_EQUAL(std::string("del /dev_hdd0/game/OWNS00001/USRDIR/act.txt\n"
+                            "logfile /dev_hdd0/game/OWNS00001/USRDIR/act.txt\n"
+                            "log sync\n/play.ps3?col=game&seg=OWNS00001\n"),
+                XmbScriptText(kXmbPlace, XmbScript{"owns_sync", xmbSync}));
+    CHECK(XmbScriptText(kXmbPlace, XmbScript{"owns_save_0", "save:BLES00001-SAVE"})
+              .find("\nlog save:BLES00001-SAVE\n") != std::string::npos);
+}
+
+TEST(XmbSaveOfANameNoConsoleGivesIsOnlyListed)
+{
+    // Such a name, from a file put in the Drive by hand, could add a command to a script.
+    const XmbSave odd{"X;reboot", "Odd", "Odd", "", false};
+    const XmbSave lower{"bles00001-save", "Lower", "Lower", "", false};
+    const XmbLists lists = MakeXmbLists(kXmbPlace, true, true, {odd, lower});
+    CHECK(lists.saves.find("Odd") != std::string::npos);
+    CHECK(lists.saves.find("Lower") != std::string::npos);
+    CHECK(lists.saves.find("owns_save_0.bat") == std::string::npos);
+    CHECK(lists.saves.find("owns_save_1.bat") == std::string::npos);
+    for (const XmbScript &script : lists.scripts)
+    {
+        CHECK(script.key.compare(0, 10, "owns_save_") != 0);
+    }
 }
 
 TEST(XmbListsWithoutWebmanOnlyListTheSaves)

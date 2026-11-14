@@ -15,9 +15,9 @@ struct XmbPlace
     std::string directory;
     /** The folder of the rows' webMAN scripts, ending in a slash. */
     std::string scriptDirectory;
-    /** The file a row's script copies its action to before it starts the app. */
+    /** The file a row's script writes its action to before it starts the app. */
     std::string actionFile;
-    /** The app's title ID, which webMAN starts it by. */
+    /** The app's title ID, which is the key of its icon in the Game column. */
     std::string appId;
 };
 
@@ -37,21 +37,19 @@ struct XmbSave
 };
 
 /**
- * What a row of the XMB starts: a webMAN script that copies the row's action to the action file
- * and starts the app. webMAN runs scripts in its user mode, where it does not write files itself.
+ * What a row of the XMB starts: a webMAN script that writes the row's action to the action file
+ * and starts the app. webMAN runs scripts in its user mode, where its web commands write no files.
  */
 struct XmbScript
 {
-    /** The row's key, which names the script and the file of its action. */
+    /** The row's key, which names the script. */
     std::string key;
     /** The action, as the action file holds it. */
     std::string action;
 };
 
-// How a row's script and the file of its action are named in XmbPlace::scriptDirectory, after
-// the row's key.
+// How a row's script is named in XmbPlace::scriptDirectory, after the row's key.
 const char xmbScriptSuffix[] = ".bat";
-const char xmbActionSuffix[] = ".txt";
 
 // The list files' names in XmbPlace::directory. Each level of folders is a file of its own, as
 // the XMB opens a folder only from a file other than the one that lists it.
@@ -82,7 +80,7 @@ const char xmbSave[] = "save:";
 /**
  * The XMB's lists. Each row starts a webMAN script, which leaves its action for the app and
  * starts it; the XMB cannot start the app by itself. Without webMAN the rows that act give way to
- * a row that says so, and the saves are only listed.
+ * a row that says so, and the saves are only listed, as is a save of a name no console gives.
  * @param place where the lists are, and how the app is started
  * @param signedIn whether the user is signed in; without it only the sign-in row is listed
  * @param webman whether webMAN MOD is there to run the rows' scripts
@@ -94,11 +92,12 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
 
 /**
  * A row's webMAN script.
- * @param place where the scripts and the action file are, and the app's ID
- * @param key the row's key
- * @return the script: it copies the row's action to the action file, then starts the app
+ * @param place where the action file is, and the app's ID
+ * @param script the row's script
+ * @return the script: it writes the row's action to the action file anew, so that the file is as
+ *         old as the row's choice, then starts the app from its icon in the Game column
  */
-std::string XmbScriptText(const XmbPlace &place, const std::string &key);
+std::string XmbScriptText(const XmbPlace &place, const XmbScript &script);
 
 /**
  * The line of category_game.xml that puts the Own Storage folder in the XMB's Game column.

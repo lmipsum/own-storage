@@ -153,11 +153,8 @@ bool WriteXmbLists(LocalStorage &storage, const XmbPlace &place, const XmbLists 
     }
     for (const XmbScript &script : lists.scripts)
     {
-        written =
-            written &&
-            storage.Write(place.scriptDirectory + script.key + xmbActionSuffix, script.action) &&
-            storage.Write(place.scriptDirectory + script.key + xmbScriptSuffix,
-                          XmbScriptText(place, script.key));
+        written = written && storage.Write(place.scriptDirectory + script.key + xmbScriptSuffix,
+                                           XmbScriptText(place, script));
     }
     if (!written)
     {
@@ -180,7 +177,7 @@ std::string TakeXmbAction(LocalStorage &storage, const XmbPlace &place)
         debugPrintf("TakeXmbAction: an old action is left undone\n");
         return std::string();
     }
-    // webMAN writes the text as it is; a line end some editor added is no part of it.
+    // The script's "log" ends the action with a line end, which is no part of it.
     while (!action.empty() && (action.back() == '\n' || action.back() == '\r'))
     {
         action.pop_back();
