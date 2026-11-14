@@ -98,7 +98,10 @@ const char targetUnknownMessage[] =
     "This PS3's or the user's ids cannot be read, so saves of other users come down as they are.";
 
 // Where the XMB's lists go, beside webMAN MOD's own, and how their rows start the app.
-const XmbPlace xmbPlace{"/dev_hdd0/xmlhost/game_plugin/", APP_DIR "xmb_action.txt", APP_ID};
+const XmbPlace xmbPlace{"/dev_hdd0/xmlhost/game_plugin/", APP_DIR "xmb/", APP_DIR "xmb_action.txt",
+                        APP_ID};
+// webMAN MOD's proxy, which runs what the XMB's rows ask for.
+const char webmanProxy[] = "/dev_hdd0/tmp/wm_res/wm_proxy.sprx";
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then sync again.";
@@ -392,7 +395,9 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
         }
         saves = XmbSaves(browser, storage, savedata, ReadDateStyle());
     }
-    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, saves));
+    FileStatus proxy;
+    const bool webman = storage.Status(webmanProxy, proxy);
+    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, webman, saves));
 }
 
 /**
@@ -516,7 +521,7 @@ void runApp(Screen &screen)
     {
         return;
     }
-    screen.ShowMessage("Listing the saves in the cloud...");
+    screen.ShowMessage("Updating the list...");
     refreshXmb(consoleStorage, profile, savedata, saveTarget, !config.refreshToken.empty());
     if (saveTarget == nullptr)
     {

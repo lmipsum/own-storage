@@ -848,7 +848,7 @@ TEST(BrowserAsksBeforeItReplacesADifferentSave)
 
 namespace
 {
-const XmbPlace kXmbPlace{"/dev_hdd0/xmlhost/game_plugin/",
+const XmbPlace kXmbPlace{"/dev_hdd0/xmlhost/game_plugin/", "/dev_hdd0/game/OWNS00001/USRDIR/xmb/",
                          "/dev_hdd0/game/OWNS00001/USRDIR/act.txt", "OWNS00001"};
 const DateStyle kXmbDates{DateOrder::DayMonthYear, false, 0};
 } // namespace
@@ -883,14 +883,14 @@ TEST(XmbListsTheSavesWithTheirIcons)
 
 TEST(XmbListsRowsThatStartTheAppThroughWebman)
 {
-    const XmbLists signedOut = MakeXmbLists(kXmbPlace, false, {});
+    const XmbLists signedOut = MakeXmbLists(kXmbPlace, false, true, {});
     CHECK(signedOut.menu.find("Sign in") != std::string::npos);
     CHECK(signedOut.menu.find("Full sync") == std::string::npos);
     CHECK(signedOut.menu.find("Saves in the cloud") == std::string::npos);
     const XmbSave inCloud{"BLES00001-SAVE", "Game One (BLES00001)", "Chapter \"3\" & more", "",
                           false};
     const XmbSave downloaded{"BLES00001-AUTO", "Game One (BLES00001)", "Auto", "", true};
-    const XmbLists lists = MakeXmbLists(kXmbPlace, true, {inCloud, downloaded});
+    const XmbLists lists = MakeXmbLists(kXmbPlace, true, true, {inCloud, downloaded});
     CHECK(lists.folder.find("src=\"xmb://localhost/dev_hdd0/xmlhost/game_plugin/owns_menu.xml#") !=
           std::string::npos);
     CHECK(lists.menu.find("Full sync") != std::string::npos);
@@ -908,10 +908,33 @@ TEST(XmbListsRowsThatStartTheAppThroughWebman)
     CHECK(lists.saves.find("Game One (BLES00001)") != std::string::npos);
     CHECK(lists.saves.find("<String>tex_album_icon</String>") != std::string::npos);
     CHECK(lists.saves.find("<String>item_tex_ps3util</String>") != std::string::npos);
-    // The texts are escaped, and the row writes its action, then starts the app.
+    // The texts are escaped, and the row runs its script, which leaves its action and starts the
+    // app: webMAN does not write files for the XMB in its user mode, but its scripts do.
     CHECK(lists.saves.find("Chapter &quot;3&quot; &amp; more") != std::string::npos);
-    CHECK(lists.saves.find("<String>/write.ps3/dev_hdd0/game/OWNS00001/USRDIR/act.txt&amp;t=save:"
-                           "BLES00001-SAVE;/play.ps3?OWNS00001</String>") != std::string::npos);
+    CHECK(lists.saves.find("<String>/play.ps3/dev_hdd0/game/OWNS00001/USRDIR/xmb/owns_save_0.bat"
+                           "</String>") != std::string::npos);
+    bool saveScript = false;
+    for (const XmbScript &script : lists.scripts)
+    {
+        saveScript =
+            saveScript || (script.key == "owns_save_0" && script.action == "save:BLES00001-SAVE");
+    }
+    CHECK(saveScript);
+    CHECK_EQUAL(std::string("fcopy /dev_hdd0/game/OWNS00001/USRDIR/xmb/owns_sync.txt="
+                            "/dev_hdd0/game/OWNS00001/USRDIR/act.txt\n/play.ps3?OWNS00001\n"),
+                XmbScriptText(kXmbPlace, "owns_sync"));
+}
+
+TEST(XmbListsWithoutWebmanOnlyListTheSaves)
+{
+    const XmbSave save{"BLES00001-SAVE", "Game One", "Save", "", false};
+    const XmbLists lists = MakeXmbLists(kXmbPlace, true, false, {save});
+    CHECK(lists.menu.find("Install webMAN MOD") != std::string::npos);
+    CHECK(lists.menu.find("Full sync") == std::string::npos);
+    CHECK(lists.menu.find("Saves in the cloud") != std::string::npos);
+    CHECK(lists.saves.find("Game One") != std::string::npos);
+    CHECK(lists.saves.find("/play.ps3") == std::string::npos);
+    CHECK(lists.scripts.empty());
 }
 
 TEST(XmbFolderGoesAfterTheSavedDataUtilityOnce)
