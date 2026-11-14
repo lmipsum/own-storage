@@ -63,7 +63,7 @@ void SyncDialog::ShowError(const std::string &message)
     m_button = kNoButton;
     if (OpenWhenFree(kErrorType, message))
     {
-        // OK and the circle both close an error.
+        // OK and the back button both close an error.
         WaitForButton();
     }
 }

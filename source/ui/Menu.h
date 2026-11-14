@@ -25,6 +25,13 @@ enum class PadButton
     Import
 };
 
+/** How the screen names the buttons that confirm and go back, which a console setting swaps. */
+struct ButtonNames
+{
+    std::string confirm;
+    std::string back;
+};
+
 /** What the user did in a menu that takes more than picking a row. */
 struct MenuChoice
 {
@@ -47,8 +54,9 @@ class Menu
     /**
      * @param screen where the menu is drawn
      * @param quit set when the app is closing, which ends any wait for a choice
+     * @param buttons how the hints name the buttons that confirm and go back
      */
-    Menu(Screen &screen, const std::atomic<int> &quit);
+    Menu(Screen &screen, const std::atomic<int> &quit, const ButtonNames &buttons);
     Menu(const Menu &) = delete;
     Menu &operator=(const Menu &) = delete;
 
@@ -77,6 +85,10 @@ class Menu
                             const std::vector<PadButton> &actions);
     /** Shows a line about what the app is doing; it stays under the next menu too. */
     void ShowMessage(const std::string &text);
+    /** Shows a line at the top of the screen while a menu is under the logo; it stays. */
+    void ShowCaption(const std::string &text);
+    /** How the hints name the buttons that confirm and go back. */
+    const ButtonNames &Buttons() const;
     /** Whether the user pressed Back since the last call; for waits that the user may end. */
     bool TakeBack();
     /** Hands over a press of a pad button; main thread only. */
@@ -91,4 +103,5 @@ class Menu
     // The button pressed and not yet taken; kNoPress when none.
     std::atomic<int> m_pressed;
     ScreenView m_view;
+    const ButtonNames m_buttons;
 };

@@ -72,7 +72,7 @@ LIBDIRS	:= $(PORTLIBS)
 LIBS	:=	-lSDLmain -lSDL_gfx -lSDL_image -lSDL_mixer -lSDL_ttf -lSDL \
 			-lpngdec -ljpgdec -ltiff -lpng -ljpeg -lvorbisfile -lvorbis -logg -lmikmod -lfreetype -lpixman-1 \
 			-lcurl -lmbedtls -lmbedx509 -lmbedcrypto -ljson-c -lz \
-			-lrsx -lgcm_sys -lio -laudio -lsysutil -lsysfs -lssl -lnet -lsysmodule -lrt -llv2 -lm
+			-lrsx -lgcm_sys -lio -laudio -lsysutil -lsysfs -lssl -lnetctl -lnet -lsysmodule -lrt -llv2 -lm
 
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional
