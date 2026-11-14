@@ -59,6 +59,7 @@
 #include "app/CloudSaveMenu.h"
 #include "app/ConsoleIdentity.h"
 #include "app/ConsoleSettings.h"
+#include "app/NetworkStart.h"
 #include "app/Profile.h"
 #include "sync/SaveBrowser.h"
 #include "sync/SaveImport.h"
@@ -95,6 +96,7 @@ TTF_Font *Sans;
 std::atomic<int> exitapp(0);
 
 SyncDialog syncDialog(exitapp);
+NetworkStart networkStart(exitapp);
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then sync again.";
@@ -105,7 +107,6 @@ const char signInExpiredMessage[] =
 const char localFileMessage[] =
     "Own Storage cannot write to the PS3 hard disk. Check the free space.";
 const char unknownUserMessage[] = "Own Storage cannot tell which user is logged in.";
-const char menuHint[] = "X: select";
 
 // The main menu's rows.
 const char signInRow[] = "Sign in to Google Drive";
@@ -133,6 +134,7 @@ void get_free_memory()
 
 void sysevent_callback(u64 status, u64 param, void *userdata)
 {
+    networkStart.OnSystemEvent(status);
     switch (status)
     {
     case SYSUTIL_EXIT_GAME:
@@ -174,6 +176,12 @@ const char *driveFailureMessage()
     }
 }
 
+/** The hint of a menu that only takes a pick. */
+std::string selectHint(const Menu &menu)
+{
+    return menu.Buttons().confirm + ": select";
+}
+
 /** Where a user's sync state is kept. */
 std::string stateFile(const std::string &profile)
 {
@@ -190,7 +198,7 @@ std::string stateBackup(const std::string &profile)
 void waitForQuit(Menu &menu, const std::string &message)
 {
     menu.ShowMessage(message);
-    while (exitapp == 0 && menu.Choose("", {quitRow}, menuHint, 0) == Menu::kNone)
+    while (exitapp == 0 && menu.Choose("", {quitRow}, selectHint(menu), 0) == Menu::kNone)
     {
     }
 }
@@ -212,7 +220,7 @@ void signIn(Menu &menu, const std::string &profile, Config &config)
         return;
     }
     menu.ShowMessage("On a phone or computer, open " + googleAuth.VerificationUrl() +
-                     " and enter " + code + "    O: cancel");
+                     " and enter " + code + "    " + menu.Buttons().back + ": cancel");
     GoogleDeviceAuth::Status status = GoogleDeviceAuth::Pending;
     while (status == GoogleDeviceAuth::Pending)
     {
@@ -414,6 +422,12 @@ void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &pr
  */
 void runApp(Menu &menu)
 {
+    if (!networkStart.Connect())
+    {
+        waitForQuit(menu, "Own Storage needs a network connection.");
+        exitapp = 1;
+        return;
+    }
     ClientCredentials client = LoadUserCredentials(userClientFile, "google");
     if (!client.IsComplete())
     {
@@ -450,14 +464,21 @@ void runApp(Menu &menu)
     // The first request finds the access token missing and gets one with this.
     googleAuth.SetRefreshToken(config.refreshToken);
 
+    // Read once: the user cannot change while the app runs.
+    const std::string userName = CurrentUserName();
     std::size_t cursor = 0;
     while (exitapp == 0)
     {
         const bool signedIn = !config.refreshToken.empty();
+        if (!userName.empty())
+        {
+            menu.ShowCaption(userName +
+                             (signedIn ? ": signed in to Google Drive" : ": not signed in"));
+        }
         const std::vector<std::string> rows =
             signedIn ? std::vector<std::string>{syncRow, cloudSavesRow, signOutRow, quitRow}
                      : std::vector<std::string>{signInRow, quitRow};
-        const int chosen = menu.Choose("", rows, menuHint, cursor);
+        const int chosen = menu.Choose("", rows, selectHint(menu), cursor);
         if (chosen == Menu::kNone)
         {
             continue;
@@ -527,17 +548,22 @@ unsigned int heldButtons(const padData &data)
  * Hands the menu every button that went down on a pad since its last report.
  * @param menu takes the presses
  * @param held what each pad held down at its last report; updated
+ * @param circleConfirms whether Circle selects and Cross goes back, as the console is set
  */
-void readPads(Menu &menu, unsigned int held[MAX_PADS])
+void readPads(Menu &menu, unsigned int held[MAX_PADS], bool circleConfirms)
 {
-    static const struct
+    const struct
     {
         unsigned int bit;
         PadButton button;
-    } presses[] = {{padUp, PadButton::Up},           {padDown, PadButton::Down},
-                   {padLeft, PadButton::PageUp},     {padRight, PadButton::PageDown},
-                   {padCross, PadButton::Select},    {padCircle, PadButton::Back},
-                   {padTriangle, PadButton::Remove}, {padSquare, PadButton::Import}};
+    } presses[] = {{padUp, PadButton::Up},
+                   {padDown, PadButton::Down},
+                   {padLeft, PadButton::PageUp},
+                   {padRight, PadButton::PageDown},
+                   {circleConfirms ? padCircle : padCross, PadButton::Select},
+                   {circleConfirms ? padCross : padCircle, PadButton::Back},
+                   {padTriangle, PadButton::Remove},
+                   {padSquare, PadButton::Import}};
     padInfo info;
     ioPadGetInfo(&info);
     for (int pad = 0; pad < MAX_PADS; ++pad)
@@ -573,6 +599,7 @@ int main(int argc, char **argv)
 
     netInitialize();
     debugInit();
+    networkStart.Start();
 
     SDL_Init(SDL_INIT_EVERYTHING);
     IMG_Init(IMG_INIT_PNG);
@@ -619,7 +646,10 @@ int main(int argc, char **argv)
     {
         // Gone before SDL shuts down, which the screen's surfaces need.
         Screen appScreen(screen, image, Sans);
-        Menu menu(appScreen, exitapp);
+        // The font has no button symbols, so the hints name them.
+        const bool circleConfirms = CircleConfirms();
+        Menu menu(appScreen, exitapp,
+                  circleConfirms ? ButtonNames{"O", "X"} : ButtonNames{"X", "O"});
         sys_ppu_thread_t appThread;
         const s32 created =
             sysThreadCreate(&appThread, runAppThread, &menu, appThreadPriority, appThreadStackSize,
@@ -637,7 +667,7 @@ int main(int argc, char **argv)
 
             if (xmbopen != 1)
             {
-                readPads(menu, held);
+                readPads(menu, held, circleConfirms);
             }
             appScreen.Draw();
             SDL_Flip(screen);
@@ -662,6 +692,7 @@ int main(int argc, char **argv)
     TTF_Quit();
     SDL_Quit();
 
+    networkStart.Stop();
     debugClose();
     netDeinitialize();
     ioPadEnd();

@@ -10,6 +10,7 @@ const s32 kDateYearMonthDay = 0;
 const s32 kDateMonthDayYear = 2;
 const s32 kClock12 = 0;
 const int kSummerTimeMinutes = 60;
+const s32 kEnterButtonCircle = 0;
 
 /** A setting's value; fallback when it cannot be read. */
 s32 Setting(s32 id, s32 fallback)
@@ -31,4 +32,18 @@ DateStyle ReadDateStyle()
         Setting(SYSUTIL_SYSTEMPARAM_ID_TIMEZONE, 0) +
         (Setting(SYSUTIL_SYSTEMPARAM_ID_SUMMERTIME, 0) != 0 ? kSummerTimeMinutes : 0);
     return DateStyle{order, clock12, offset};
+}
+
+bool CircleConfirms()
+{
+    return Setting(SYSUTIL_SYSTEMPARAM_ID_ENTER_BUTTON_ASSIGN, -1) == kEnterButtonCircle;
+}
+
+std::string CurrentUserName()
+{
+    char name[SYSUTIL_SYSTEMPARAM_CURRENT_USERNAME_SIZE + 1] = {};
+    return sysUtilGetSystemParamString(SYSUTIL_SYSTEMPARAM_ID_CURRENT_USERNAME, name,
+                                       SYSUTIL_SYSTEMPARAM_CURRENT_USERNAME_SIZE) == 0
+               ? std::string(name)
+               : std::string();
 }

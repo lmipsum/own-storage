@@ -78,6 +78,9 @@ void Screen::Draw()
         // has.
         const int menuTop =
             messageTop - static_cast<int>(view.rows.size()) * rowHeight - kRowSpacing;
+        // Where a list's heading goes, so it stays put however many rows the menu has.
+        DrawText(view.caption, kListLeftPercent * width / 100, kHeadingTopPercent * height / 100,
+                 kTextColor);
         DrawRows(view, -1, menuTop, messageTop);
         DrawText(view.message, -1, messageTop, kTextColor);
     }

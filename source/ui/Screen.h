@@ -21,6 +21,8 @@ struct ScreenView
     std::size_t cursor;
     /** The buttons the menu takes. */
     std::string hint;
+    /** A line at the top while a menu is under the logo, such as whose app it is; may be empty. */
+    std::string caption;
 };
 
 /**

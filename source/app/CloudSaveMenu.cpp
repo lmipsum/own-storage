@@ -11,9 +11,6 @@
 namespace
 {
 const char kGamesHeading[] = "Saves in the cloud";
-const char kGamesHint[] = "X: open    Square: import from USB    O: back";
-// The font has no button symbols, so the triangle is named.
-const char kSavesHint[] = "X: load to this PS3    Triangle: delete from the cloud    O: back";
 
 /**
  * Lists a game's saves and loads or deletes the one the user picks, until the user goes back or
@@ -37,8 +34,12 @@ bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame 
                            " " + ShownSize(save.size) + " | " + ShownStatus(browser.Status(name)));
         }
         menu.ShowMessage(result);
+        // The font has no button symbols, so the triangle is named.
+        const std::string hint = menu.Buttons().confirm +
+                                 ": load to this PS3    Triangle: delete from the cloud    " +
+                                 menu.Buttons().back + ": back";
         const MenuChoice chosen =
-            menu.ChooseAction(game.label, rows, kSavesHint, cursor, {PadButton::Remove});
+            menu.ChooseAction(game.label, rows, hint, cursor, {PadButton::Remove});
         if (chosen.button == PadButton::Back)
         {
             return deleted;
@@ -96,9 +97,11 @@ bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, cons
                 << (game.saves.size() == 1 ? " save" : " saves");
             rows.push_back(row.str());
         }
+        const std::string hint = menu.Buttons().confirm + ": open    Square: import from USB    " +
+                                 menu.Buttons().back + ": back";
         // The list is shown even when empty, so that saves can be imported into it.
         const MenuChoice chosen =
-            menu.ChooseAction(kGamesHeading, rows, kGamesHint, cursor, {PadButton::Import});
+            menu.ChooseAction(kGamesHeading, rows, hint, cursor, {PadButton::Import});
         if (chosen.button == PadButton::Back)
         {
             return true;

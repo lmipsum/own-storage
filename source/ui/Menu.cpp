@@ -38,9 +38,9 @@ std::size_t MoveCursor(std::size_t cursor, PadButton button, std::size_t last)
 }
 } // namespace
 
-Menu::Menu(Screen &screen, const std::atomic<int> &quit)
+Menu::Menu(Screen &screen, const std::atomic<int> &quit, const ButtonNames &buttons)
     : m_screen(screen), m_quit(quit), m_pressed(kNoPress),
-      m_view{std::string(), std::string(), {}, 0, std::string()}
+      m_view{std::string(), std::string(), {}, 0, std::string(), std::string()}, m_buttons(buttons)
 {
 }
 
@@ -108,6 +108,17 @@ void Menu::ShowMessage(const std::string &text)
 {
     m_view.message = text;
     Show();
+}
+
+void Menu::ShowCaption(const std::string &text)
+{
+    m_view.caption = text;
+    Show();
+}
+
+const ButtonNames &Menu::Buttons() const
+{
+    return m_buttons;
 }
 
 bool Menu::TakeBack()
