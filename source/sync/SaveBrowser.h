@@ -17,9 +17,11 @@
 struct CloudGame
 {
     std::string titleId;
-    /** How the user sees the game named. */
+    /** The game's title as the user sees it; its ID when the title is not known. */
+    std::string name;
+    /** How the user sees the game named, with its ID. */
     std::string label;
-    /** Its saves in the cloud, sorted by name. */
+    /** Its saves in the cloud, the one stored last first. */
     std::vector<std::string> saves;
 };
 
@@ -87,7 +89,7 @@ class SaveBrowser
 
     /** Lists the saves in the cloud anew; false when they cannot be listed. */
     bool Refresh();
-    /** The games with saves in the cloud, sorted by ID. */
+    /** The games with saves in the cloud, sorted by name from A to Z. */
     std::vector<CloudGame> Games() const;
     /**
      * A save's archive in the cloud.

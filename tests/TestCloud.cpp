@@ -63,6 +63,11 @@ void TestCloud::SetDescription(const std::string &id, const std::string &descrip
     m_descriptions[id] = description;
 }
 
+void TestCloud::SetModified(const std::string &id, const std::string &modified)
+{
+    m_modified[id] = modified;
+}
+
 const std::map<std::string, TestCloudItem> &TestCloud::Items() const
 {
     return m_items;
@@ -252,7 +257,8 @@ Json TestCloud::Describe(const std::string &id) const
     described.Add("title", Json(item.title));
     described.Add("mimeType", Json(item.mimeType));
     described.Add("parents", Json(Json::Array{parent}));
-    described.Add("modifiedDate", Json(Now()));
+    const auto modified = m_modified.find(id);
+    described.Add("modifiedDate", Json(modified == m_modified.end() ? Now() : modified->second));
     if (item.mimeType != folderMime)
     {
         described.Add("description", Json(Description(id)));

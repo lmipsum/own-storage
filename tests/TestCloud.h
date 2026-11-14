@@ -41,6 +41,8 @@ class TestCloud : public CloudStorage
     std::string Description(const std::string &id) const;
     /** Changes what the cloud shows about a file, as the user can on the Drive website. */
     void SetDescription(const std::string &id, const std::string &description);
+    /** Sets when the cloud says a file was last stored, in the form Drive gives it. */
+    void SetModified(const std::string &id, const std::string &modified);
     /** Every item, by id. */
     const std::map<std::string, TestCloudItem> &Items() const;
     /**
@@ -78,6 +80,7 @@ class TestCloud : public CloudStorage
 
     std::map<std::string, TestCloudItem> m_items;
     std::map<std::string, std::string> m_descriptions;
+    std::map<std::string, std::string> m_modified;
     std::vector<std::function<void()>> m_queue;
     bool m_failSearches;
     bool m_damageDownloads;
