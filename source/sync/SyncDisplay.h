@@ -33,7 +33,7 @@ class SyncDisplay
     virtual void Reset(ProgressBar bar) = 0;
     /** Fills a bar further by the given percentage points. */
     virtual void Advance(ProgressBar bar, unsigned int points) = 0;
-    /** Whether the user has asked the sync to stop. */
+    /** Whether the user has asked the sync to stop, or the app is closing. */
     virtual bool Cancelled() const = 0;
     /**
      * Asks a yes-or-no question in place of the progress bars, which come back with the next

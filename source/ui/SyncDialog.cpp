@@ -88,7 +88,7 @@ void SyncDialog::Advance(ProgressBar bar, unsigned int points)
 
 bool SyncDialog::Cancelled() const
 {
-    return m_cancelled;
+    return m_cancelled || m_quit != 0;
 }
 
 Answer SyncDialog::Ask(const std::string &question)
