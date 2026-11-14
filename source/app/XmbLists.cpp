@@ -20,7 +20,7 @@ const char kOwnStorageInfo[] =
     "data online.";
 // The system's icons, from those the Game column can show: the rows' own; a downloaded save
 // without an icon of its own, which the folder of the saves in the cloud shares; and a save only
-// in the cloud, which the Own Storage folder shares.
+// in the cloud, which the Own Storage folder and the row that asks for webMAN share.
 const char kSyncIcon[] = "tex_loading_icon";
 const char kUsbIcon[] = "item_tex_usb_connection";
 const char kAccountIcon[] = "tex_Avatar_Default";
@@ -83,12 +83,11 @@ std::string ViewSource(const XmbPlace &place, const char *file, const std::strin
     return "xmb://localhost" + place.directory + file + "#" + view;
 }
 
-/** The pairs that make a row write its action and start the app through webMAN's proxy. */
-std::string ActionPairs(const XmbPlace &place, const std::string &action)
+/** The pairs that make a row run its webMAN script, through webMAN's proxy. */
+std::string ActionPairs(const XmbPlace &place, const std::string &key)
 {
     return Pair("module_name", "idle_plugin") + Pair("bar_action", "none") +
-           Pair("module_action",
-                "/write.ps3" + place.actionFile + "&t=" + action + ";/play.ps3?" + place.appId);
+           Pair("module_action", "/play.ps3" + place.scriptDirectory + key + xmbScriptSuffix);
 }
 
 /** A row's attribute table. */
@@ -97,7 +96,7 @@ std::string Table(const std::string &key, const std::string &pairs)
     return "\t\t\t<Table key=\"" + key + "\">\n" + pairs + "\t\t\t</Table>\n";
 }
 
-/** A row that starts an action. */
+/** A row of the XMB's action class; it starts what its pairs name, nothing without them. */
 std::string ActionItem(const std::string &key)
 {
     return "\t\t\t<Item class=\"type:x-xmb/module-action\" key=\"" + key + "\" attr=\"" + key +
@@ -127,7 +126,8 @@ std::string Document(const std::string &views)
 
 } // namespace
 
-XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, const std::vector<XmbSave> &saves)
+XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
+                      const std::vector<XmbSave> &saves)
 {
     XmbLists lists;
     lists.folder = Document(
@@ -141,10 +141,22 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, const std::vector<Xm
     const auto addAction = [&](const char *key, const char *icon, const char *title,
                                const char *info, const char *action)
     {
+        if (!webman)
+        {
+            return;
+        }
         tables += Table(key, Pair("icon_rsc", icon) + Pair("title", title) + Pair("info", info) +
-                                 ActionPairs(place, action));
+                                 ActionPairs(place, key));
         items += ActionItem(key);
+        lists.scripts.push_back(XmbScript{key, action});
     };
+    if (!webman)
+    {
+        tables += Table("owns_webman",
+                        Pair("icon_rsc", kInCloudIcon) + Pair("title", "Install webMAN MOD") +
+                            Pair("info", "The rows here need it to start Own Storage."));
+        items += ActionItem("owns_webman");
+    }
     if (!signedIn)
     {
         addAction("owns_signin", kAccountIcon, "Sign in", "Signs this user in to Google Drive.",
@@ -171,13 +183,24 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, const std::vector<Xm
     {
         const XmbSave &save = saves[s];
         const std::string key = kSaveKeyPrefix + Digits(s);
+        const std::string actionPairs = webman ? ActionPairs(place, key) : std::string();
         tables += Table(key, IconPair(save.icon, save.downloaded ? kDownloadedIcon : kInCloudIcon) +
-                                 Pair("title", save.title) + Pair("info", save.info) +
-                                 ActionPairs(place, xmbSave + save.name));
+                                 Pair("title", save.title) + Pair("info", save.info) + actionPairs);
         items += ActionItem(key);
+        if (webman)
+        {
+            lists.scripts.push_back(XmbScript{key, xmbSave + save.name});
+        }
     }
     lists.saves = Document(View(kSavesView, tables, items));
     return lists;
+}
+
+std::string XmbScriptText(const XmbPlace &place, const std::string &key)
+{
+    // fcopy: a plain copy leaves a file of the same size as it is, as the last action may be.
+    return "fcopy " + place.scriptDirectory + key + xmbActionSuffix + "=" + place.actionFile +
+           "\n/play.ps3?" + place.appId + "\n";
 }
 
 std::string XmbCategoryEntry(const XmbPlace &place)

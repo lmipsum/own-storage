@@ -31,6 +31,17 @@ u64 Address(const char *text)
     return static_cast<u64>(reinterpret_cast<std::uintptr_t>(text));
 }
 
+/** Creates each folder of a path that ends in a slash, as a console without webMAN may lack them.
+ */
+void MakeDirectories(LocalStorage &storage, const std::string &path)
+{
+    for (std::size_t slash = path.find('/', 1); slash != std::string::npos;
+         slash = path.find('/', slash + 1))
+    {
+        storage.MakeDirectory(path.substr(0, slash));
+    }
+}
+
 /** Whether a file is there. */
 bool Exists(const LocalStorage &storage, const std::string &path)
 {
@@ -128,15 +139,26 @@ bool InstallXmbFolder(LocalStorage &storage, const XmbPlace &place)
 
 bool WriteXmbLists(LocalStorage &storage, const XmbPlace &place, const XmbLists &lists)
 {
-    // Each folder of the path, as a console without webMAN may lack them.
-    for (std::size_t slash = place.directory.find('/', 1); slash != std::string::npos;
-         slash = place.directory.find('/', slash + 1))
+    MakeDirectories(storage, place.directory);
+    MakeDirectories(storage, place.scriptDirectory);
+    // The lists go first: should a script then fail, a row starts nothing rather than the action
+    // of a row of the last lists that had its key.
+    bool written = storage.Write(place.directory + xmbFolderFile, lists.folder) &&
+                   storage.Write(place.directory + xmbMenuFile, lists.menu) &&
+                   storage.Write(place.directory + xmbSavesFile, lists.saves);
+    // The rows of the last lists, such as of a save gone from the cloud, start nothing any more.
+    for (const std::string &old : storage.List(place.scriptDirectory))
     {
-        storage.MakeDirectory(place.directory.substr(0, slash));
+        storage.Remove(place.scriptDirectory + old);
     }
-    const bool written = storage.Write(place.directory + xmbFolderFile, lists.folder) &&
-                         storage.Write(place.directory + xmbMenuFile, lists.menu) &&
-                         storage.Write(place.directory + xmbSavesFile, lists.saves);
+    for (const XmbScript &script : lists.scripts)
+    {
+        written =
+            written &&
+            storage.Write(place.scriptDirectory + script.key + xmbActionSuffix, script.action) &&
+            storage.Write(place.scriptDirectory + script.key + xmbScriptSuffix,
+                          XmbScriptText(place, script.key));
+    }
     if (!written)
     {
         debugPrintf("WriteXmbLists: the lists cannot be written\n");
