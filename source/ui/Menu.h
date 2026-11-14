@@ -18,7 +18,18 @@ enum class PadButton
     /** Ten rows down. */
     PageDown,
     Select,
-    Back
+    Back,
+    /** Asks to remove the row's item, where a menu allows it. */
+    Remove
+};
+
+/** What the user did in a menu that allows removing. */
+struct MenuChoice
+{
+    /** The row; Menu::kNone when the user went back or the app is closing. */
+    int row;
+    /** True when the row was picked to be removed, not selected. */
+    bool remove;
 };
 
 /**
@@ -49,6 +60,17 @@ class Menu
      */
     int Choose(const std::string &heading, const std::vector<std::string> &rows,
                const std::string &hint, std::size_t cursor);
+    /**
+     * Shows a menu and waits until the user picks a row, picks one to remove, or goes back. App
+     * thread only.
+     * @param heading the list's heading
+     * @param rows the rows to pick from
+     * @param hint the buttons the menu takes
+     * @param cursor the row the cursor starts on
+     * @return what the user did
+     */
+    MenuChoice ChooseOrRemove(const std::string &heading, const std::vector<std::string> &rows,
+                              const std::string &hint, std::size_t cursor);
     /** Shows a line about what the app is doing; it stays under the next menu too. */
     void ShowMessage(const std::string &text);
     /** Whether the user pressed Back since the last call; for waits that the user may end. */
@@ -57,6 +79,9 @@ class Menu
     void Press(PadButton button);
 
   private:
+    /** Shows a menu and waits for the user; Remove ends the wait only when removable. */
+    MenuChoice Wait(const std::string &heading, const std::vector<std::string> &rows,
+                    const std::string &hint, std::size_t cursor, bool removable);
     /** Shows the menu as it is now. */
     void Show();
 

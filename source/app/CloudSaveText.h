@@ -20,3 +20,6 @@ const char *ShownStatus(SaveStatus status);
 
 /** What loading a save came to, as the user reads it. */
 std::string ShownResult(const std::string &name, LoadResult result);
+
+/** What deleting a save from the cloud came to, as the user reads it. */
+std::string ShownResult(const std::string &name, RemoveResult result);

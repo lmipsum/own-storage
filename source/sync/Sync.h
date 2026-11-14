@@ -119,8 +119,7 @@ class Sync
     /** Sends the plan's uploads, then brings its downloads down, on fresh progress bars. */
     void Transfer(const Plan &plan);
     /**
-     * Asks the user once per game what to do with the saves in doubt. A save deleted on the
-     * console that the user does not want back goes to the cloud's trash at once.
+     * Asks the user once per game what to do with the saves in doubt.
      * @param questions the saves in doubt
      * @return the uploads and downloads the answers call for
      */

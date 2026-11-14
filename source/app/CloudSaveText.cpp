@@ -68,3 +68,18 @@ std::string ShownResult(const std::string &name, LoadResult result)
         return name + " could not be loaded.";
     }
 }
+
+std::string ShownResult(const std::string &name, RemoveResult result)
+{
+    switch (result)
+    {
+    case RemoveResult::Removed:
+        return name + " is in the Drive trash now.";
+    case RemoveResult::OnConsole:
+        return name + " is on this PS3; delete it there first, or the next sync sends it up again.";
+    case RemoveResult::Kept:
+        return name + " stays in the cloud.";
+    default:
+        return name + " could not be deleted from the cloud.";
+    }
+}

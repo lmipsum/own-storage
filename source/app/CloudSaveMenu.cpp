@@ -3,6 +3,7 @@
 
 #include "app/CloudSaveText.h"
 
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -11,14 +12,20 @@ namespace
 {
 const char kGamesHeading[] = "Saves in the cloud";
 const char kGamesHint[] = "X: open    O: back";
-const char kSavesHint[] = "X: load to this PS3    O: back";
+// The font has no button symbols, so the triangle is named.
+const char kSavesHint[] = "X: load to this PS3    Triangle: delete from the cloud    O: back";
 
-/** Lists a game's saves and loads the one the user picks, until the user goes back. */
-void BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, const CloudGame &game)
+/**
+ * Lists a game's saves and loads or deletes the one the user picks, until the user goes back or
+ * the game has no save left in the cloud.
+ * @return whether a save was deleted
+ */
+bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame game)
 {
+    bool deleted = false;
     std::size_t cursor = 0;
     std::string result;
-    while (true)
+    while (!game.saves.empty())
     {
         menu.ShowMessage("Comparing with this PS3...");
         std::vector<std::string> rows;
@@ -29,16 +36,33 @@ void BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, const Clou
                            ShownSize(save.size) + "    " + ShownStatus(browser.Status(name)));
         }
         menu.ShowMessage(result);
-        const int chosen = menu.Choose(game.label, rows, kSavesHint, cursor);
-        if (chosen == Menu::kNone)
+        const MenuChoice chosen = menu.ChooseOrRemove(game.label, rows, kSavesHint, cursor);
+        if (chosen.row == Menu::kNone)
         {
-            return;
+            return deleted;
         }
-        cursor = static_cast<std::size_t>(chosen);
-        const std::string &name = game.saves[cursor];
-        result = ShownResult(name, browser.Load(name));
+        cursor = static_cast<std::size_t>(chosen.row);
+        const std::string name = game.saves[cursor];
+        if (!chosen.remove)
+        {
+            result = ShownResult(name, browser.Load(name));
+        }
+        else
+        {
+            const RemoveResult removed = browser.Remove(name);
+            result = ShownResult(name, removed);
+            if (removed == RemoveResult::Removed)
+            {
+                deleted = true;
+                game.saves.erase(game.saves.begin() + chosen.row);
+                // The cursor stays where it was, on the save that took the deleted one's place.
+                cursor = std::min(cursor, game.saves.empty() ? 0 : game.saves.size() - 1);
+            }
+        }
         dialog.Close();
     }
+    menu.ShowMessage(result);
+    return deleted;
 }
 } // namespace
 
@@ -49,30 +73,36 @@ bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser)
     {
         return false;
     }
-    const std::vector<CloudGame> games = browser.Games();
-    if (games.empty())
-    {
-        menu.ShowMessage("There are no saves in the cloud yet.");
-        return true;
-    }
-    std::vector<std::string> rows;
-    for (const CloudGame &game : games)
-    {
-        std::ostringstream row;
-        row << game.label << "    " << game.saves.size()
-            << (game.saves.size() == 1 ? " save" : " saves");
-        rows.push_back(row.str());
-    }
+    menu.ShowMessage(std::string());
     std::size_t cursor = 0;
+    bool deleted = false;
     while (true)
     {
-        menu.ShowMessage(std::string());
+        // Listed anew each time, as a save may have been deleted.
+        const std::vector<CloudGame> games = browser.Games();
+        if (games.empty())
+        {
+            // A deletion that emptied the cloud keeps its own message.
+            if (!deleted)
+            {
+                menu.ShowMessage("There are no saves in the cloud.");
+            }
+            return true;
+        }
+        std::vector<std::string> rows;
+        for (const CloudGame &game : games)
+        {
+            std::ostringstream row;
+            row << game.label << "    " << game.saves.size()
+                << (game.saves.size() == 1 ? " save" : " saves");
+            rows.push_back(row.str());
+        }
         const int chosen = menu.Choose(kGamesHeading, rows, kGamesHint, cursor);
         if (chosen == Menu::kNone)
         {
             return true;
         }
         cursor = static_cast<std::size_t>(chosen);
-        BrowseGame(menu, dialog, browser, games[cursor]);
+        deleted = BrowseGame(menu, dialog, browser, games[cursor]);
     }
 }

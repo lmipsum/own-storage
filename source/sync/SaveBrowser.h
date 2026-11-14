@@ -47,9 +47,21 @@ enum class LoadResult
     Failed
 };
 
+/** What deleting a save from the cloud came to. */
+enum class RemoveResult
+{
+    /** Moved to the cloud's trash. */
+    Removed,
+    /** The console has it, so the next sync would only send it up again. */
+    OnConsole,
+    /** The user kept it. */
+    Kept,
+    Failed
+};
+
 /**
- * The user's saves in the cloud, game by game, for loading one at a time. A loaded save gets its
- * base, as one the sync brought down would. For the app thread only.
+ * The user's saves in the cloud, game by game, for loading or deleting one at a time. A loaded save
+ * gets its base, as one the sync brought down would. For the app thread only.
  */
 class SaveBrowser
 {
@@ -58,7 +70,8 @@ class SaveBrowser
      * @param cloud where the backup is kept
      * @param state the base of every save
      * @param storage the console's hard disk
-     * @param display what the user sees of a download, and asks before a save is replaced
+     * @param display what the user sees of a download, and asks before a save is replaced or
+     * deleted
      * @param rootFolderId the cloud id of the Own Storage folder
      * @param savedata the user's savedata directory
      * @param ownSave a save folder of the app itself, which is never backed up
@@ -91,6 +104,11 @@ class SaveBrowser
      * user says the cloud's copy is to replace it.
      */
     LoadResult Load(const std::string &name);
+    /**
+     * Moves a save from Games() to the cloud's trash, once the user says so, and only when the
+     * console does not have it; its base goes with it.
+     */
+    RemoveResult Remove(const std::string &name);
 
   private:
     SyncState &m_state;

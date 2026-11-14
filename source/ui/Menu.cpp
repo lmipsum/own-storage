@@ -45,6 +45,18 @@ Menu::Menu(Screen &screen, const std::atomic<int> &quit)
 int Menu::Choose(const std::string &heading, const std::vector<std::string> &rows,
                  const std::string &hint, std::size_t cursor)
 {
+    return Wait(heading, rows, hint, cursor, false).row;
+}
+
+MenuChoice Menu::ChooseOrRemove(const std::string &heading, const std::vector<std::string> &rows,
+                                const std::string &hint, std::size_t cursor)
+{
+    return Wait(heading, rows, hint, cursor, true);
+}
+
+MenuChoice Menu::Wait(const std::string &heading, const std::vector<std::string> &rows,
+                      const std::string &hint, std::size_t cursor, bool removable)
+{
     m_view.heading = heading;
     m_view.rows = rows;
     m_view.hint = hint;
@@ -52,7 +64,7 @@ int Menu::Choose(const std::string &heading, const std::vector<std::string> &row
     // A press made before the menu was shown was meant for something else.
     m_pressed = kNoPress;
     Show();
-    int choice = kNone;
+    MenuChoice choice{kNone, false};
     while (m_quit == 0)
     {
         const int pressed = m_pressed.exchange(kNoPress);
@@ -64,7 +76,12 @@ int Menu::Choose(const std::string &heading, const std::vector<std::string> &row
         const PadButton button = static_cast<PadButton>(pressed);
         if (button == PadButton::Select && !rows.empty())
         {
-            choice = static_cast<int>(m_view.cursor);
+            choice.row = static_cast<int>(m_view.cursor);
+            break;
+        }
+        if (button == PadButton::Remove && removable && !rows.empty())
+        {
+            choice = MenuChoice{static_cast<int>(m_view.cursor), true};
             break;
         }
         if (button == PadButton::Back)
