@@ -15,7 +15,7 @@ std::string MakeSfo(const std::string &title, const SaveOwner &owner);
 /** A PARAM.SFO with a title, owned by user 1 of a console. */
 std::string MakeSfo(const std::string &title);
 
-/** The disc hash key of games started from the hard disk, which most saves are signed with. */
+/** The disc hash key of games started from the hard disk, which re-signing uses. */
 std::string FallbackDiscHashKey();
 
 /**

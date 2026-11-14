@@ -62,7 +62,7 @@ const unsigned char kKeygenKey[] = {0x6B, 0x1A, 0xCE, 0xA2, 0x46, 0xB7, 0x45, 0x
 const unsigned char kSavegameParamSfoKey[] = {0x0C, 0x08, 0x00, 0x0E, 0x09, 0x05, 0x04,
                                               0x04, 0x0D, 0x01, 0x0F, 0x00, 0x04, 0x06,
                                               0x02, 0x02, 0x09, 0x06, 0x0D, 0x03};
-// The disc hash key of games started from the hard disk; most games' saves use it.
+// The disc hash key of games started from the hard disk, which every disc hash is made with.
 const unsigned char kFallbackDiscHashKey[] = {0xD1, 0xC1, 0xE1, 0x0B, 0x9C, 0x54, 0x7E, 0x68,
                                               0x9B, 0x80, 0x5D, 0xCD, 0x97, 0x10, 0xCE, 0x8D};
 const unsigned char kAuthenticationId[] = {0x10, 0x10, 0x00, 0x00, 0x01, 0x00, 0x00, 0x03};
@@ -291,8 +291,9 @@ PfdResign ResignPfd(std::string &pfd, const std::string &signedSfo, const std::s
         return PfdResign::NoSfoEntry;
     }
     const std::string stored = decrypted.substr(entry + kEntryHashes, kSfoHashes * kHashSize);
-    // The console hash was made with the IDPS of the console the save came from, so it cannot be
-    // checked; the others tell whether the keys are right.
+    // The console hash was made with the IDPS of the console the save came from, and the disc
+    // hash mostly with the game's own key, so neither can be checked; the others tell whether the
+    // keys are right.
     const std::string expected = SfoHashes(signedSfo, idps);
     const auto same = [&](SfoHash hash)
     {
@@ -303,10 +304,6 @@ PfdResign ResignPfd(std::string &pfd, const std::string &signedSfo, const std::s
         !same(kFileHash) || !same(kAuthenticationHash))
     {
         return PfdResign::Damaged;
-    }
-    if (!same(kDiscHash))
-    {
-        return PfdResign::UnknownDiscKey;
     }
     const std::string hashes = SfoHashes(newSfo, idps);
     if (hashes.empty())

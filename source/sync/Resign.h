@@ -22,7 +22,7 @@ enum class ResignResult
     /** The save is the target's already, or has no PARAM.SFO to tell whose it is. */
     Unchanged,
     Resigned,
-    /** The save could not be made the target's: the game's key is not known, or it is damaged. */
+    /** The save could not be made the target's, as it is damaged. */
     Refused
 };
 

@@ -60,17 +60,20 @@ TEST(PfdIsSignedAnewForAnotherConsole)
     }
 }
 
-TEST(PfdOfAGameWithItsOwnKeyOrDamagedIsLeftAlone)
+TEST(PfdOfAGameWithItsOwnKeyIsSignedWithTheFallbackKey)
 {
     const std::string sfoThere = MakeSfo("Game One", kThere);
     const std::string sfoHere = MakeSfo("Game One", kHere);
-    const std::string ownKey(16, '\x77');
-    std::string pfd = MakePfd(sfoThere, kIdpsThere, ownKey, 3);
-    const std::string original = pfd;
-    CHECK(ResignPfd(pfd, sfoThere, sfoHere, kIdpsHere) == PfdResign::UnknownDiscKey);
-    CHECK(pfd == original);
+    std::string pfd = MakePfd(sfoThere, kIdpsThere, std::string(16, '\x77'), 3);
+    CHECK(ResignPfd(pfd, sfoThere, sfoHere, kIdpsHere) == PfdResign::Resigned);
+    CHECK(pfd == MakePfd(sfoHere, kIdpsHere, FallbackDiscHashKey(), 3));
+}
 
-    pfd = MakePfd(sfoThere, kIdpsThere, FallbackDiscHashKey(), 3);
+TEST(DamagedPfdIsLeftAlone)
+{
+    const std::string sfoThere = MakeSfo("Game One", kThere);
+    const std::string sfoHere = MakeSfo("Game One", kHere);
+    std::string pfd = MakePfd(sfoThere, kIdpsThere, FallbackDiscHashKey(), 3);
     pfd[0x7B60] ^= 1;
     const std::string damaged = pfd;
     CHECK(ResignPfd(pfd, sfoThere, sfoHere, kIdpsHere) == PfdResign::Damaged);
@@ -98,7 +101,9 @@ TEST(SaveThatCannotBeMadeThisUsersStaysWhole)
 {
     const std::string sfo = MakeSfo("Game One", kThere);
     std::vector<TarFile> files = {
-        {paramPfdName, MakePfd(sfo, kIdpsThere, std::string(16, '\x77'), 3)}, {paramSfoName, sfo}};
+        {paramPfdName, MakePfd(sfo, kIdpsThere, FallbackDiscHashKey(), 3)}, {paramSfoName, sfo}};
+    // A bucket signature that does not hold.
+    files[0].content[0x7B60] ^= 1;
     const std::vector<TarFile> original = files;
     CHECK(ResignSave(files, SaveTarget{kHere, kIdpsHere}) == ResignResult::Refused);
     CHECK(files[0].content == original[0].content && files[1].content == original[1].content);
