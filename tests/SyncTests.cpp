@@ -66,6 +66,14 @@ const char kOwnSave[] = "OWNS00001-PROFILE";
 const char kSavedata[] = "/dev_hdd0/home/00000001/savedata";
 const char kSave[] = "/dev_hdd0/home/00000001/savedata/BLES00001-SAVE";
 
+/** A time as Drive gives modifiedDate. */
+std::string CloudTime(std::time_t time)
+{
+    char text[32];
+    std::strftime(text, sizeof text, "%Y-%m-%dT%H:%M:%S.000Z", std::gmtime(&time));
+    return text;
+}
+
 /**
  * Fills a console with the logged-in user's saves and the app's own save, another user's save
  * of the same name, and a memory card.
@@ -241,6 +249,19 @@ TEST(ChangedSaveReplacesItsArchive)
     CHECK_EQUAL(creates, setup.cloud.Creates());
     CHECK_EQUAL(1, setup.cloud.Updates());
     CHECK_EQUAL(std::string("data-1 changed"), setup.Archive("BLES00001-SAVE")[0].content);
+}
+
+TEST(UploadedSaveIsDatedByItsNewestFile)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "data-1", kChanged);
+    setup.Run();
+    CHECK_EQUAL(CloudTime(kChanged), setup.cloud.Modified(setup.ArchiveId("BLES00001-SAVE")));
+    // Now the file that sorts last is the newest.
+    setup.console.Put(std::string(kSave) + "/PARAM.SFO", MakeSfo("Game One v2"), kChanged + 60);
+    setup.Run();
+    CHECK_EQUAL(CloudTime(kChanged + 60), setup.cloud.Modified(setup.ArchiveId("BLES00001-SAVE")));
 }
 
 TEST(TouchedButSameSaveSendsNothing)
@@ -911,6 +932,7 @@ TEST(UsbSavesGoUpKeptInTheCloudOnly)
     CHECK_EQUAL(std::size_t(0), result.failed);
     CHECK_EQUAL(std::string("data-1"), setup.Archive("BLES00001-SAVE")[0].content);
     CHECK(setup.cloud.CloudOnly(setup.ArchiveId("NPEB00003-USB")));
+    CHECK_EQUAL(CloudTime(kWritten), setup.cloud.Modified(setup.ArchiveId("NPEB00003-USB")));
     // A second import finds it all there.
     CHECK_EQUAL(std::size_t(2), Import(setup, setup.console).skipped);
 }

@@ -6,9 +6,29 @@
 #include "sync/Tar.h"
 
 #include <algorithm>
+#include <ctime>
 #include <sstream>
 #include <utility>
 #include <vector>
+
+namespace
+{
+/**
+ * A time as Drive writes modifiedDate.
+ * @param time seconds since 1970, UTC
+ * @return the time, such as "2026-11-14T10:56:21.000Z"; empty when it is not known
+ */
+std::string CloudTime(std::time_t time)
+{
+    const std::tm *utc = time > 0 ? std::gmtime(&time) : nullptr;
+    char text[32];
+    if (utc == nullptr || std::strftime(text, sizeof text, "%Y-%m-%dT%H:%M:%S.000Z", utc) == 0)
+    {
+        return std::string();
+    }
+    return text;
+}
+} // namespace
 
 SaveArchives::SaveArchives(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
                            SyncDisplay &display, const std::string &savedata,
@@ -129,9 +149,11 @@ void SaveArchives::QueueUpload(const LocalSave &save, const std::string &folderI
             {
                 return false;
             }
-            // Every console can then name the game without bringing the archive down.
-            file = FileToStore{ArchiveTitle(save.name), LocalTitle(save.name), folderId, fileId,
-                               cloudOnly};
+            // Every console can then name the game without bringing the archive down, and the
+            // cloud dates the save as the console does, not by its upload.
+            file = FileToStore{
+                ArchiveTitle(save.name), LocalTitle(save.name), folderId, fileId, cloudOnly,
+                CloudTime(save.modified)};
             std::ostringstream text;
             text << m_cloud.Running() + 1 << " saves in progress, last: " << save.name;
             m_display.SetText(ProgressBar::Current, text.str());

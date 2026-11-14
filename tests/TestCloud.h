@@ -43,8 +43,10 @@ class TestCloud : public CloudStorage
     bool CloudOnly(const std::string &id) const;
     /** Changes what the cloud shows about a file, as the user can on the Drive website. */
     void SetDescription(const std::string &id, const std::string &description);
-    /** Sets when the cloud says a file was last stored, in the form Drive gives it. */
+    /** Sets when the cloud says a file last changed, in the form Drive gives it. */
     void SetModified(const std::string &id, const std::string &modified);
+    /** When the cloud says a file last changed; empty when it took the time of the upload. */
+    std::string Modified(const std::string &id) const;
     /** Every item, by id. */
     const std::map<std::string, TestCloudItem> &Items() const;
     /**
@@ -79,6 +81,8 @@ class TestCloud : public CloudStorage
     Json Describe(const std::string &id) const;
     /** Adds an item; its answer is lost when LoseAnswerOfCreate() says so. */
     Json Create(const TestCloudItem &item, const std::string &description, bool cloudOnly);
+    /** Dates a stored file as an upload of it would. */
+    void TakeDate(const std::string &id, const FileToStore &file);
 
     std::map<std::string, TestCloudItem> m_items;
     std::map<std::string, std::string> m_descriptions;

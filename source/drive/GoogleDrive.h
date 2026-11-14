@@ -79,14 +79,28 @@ class GoogleDrive : public CloudStorage
     /**
      * Builds the request that creates or updates a file with its metadata and content in one
      * go, for the queue.
-     * @param meta the file's metadata as JSON
+     * @param file where and how to store it; without fileId to create a new one
      * @param mimeType the content's type
      * @param content the whole file
-     * @param fileId the Drive file to update; empty to create a new one
      * @return the request, without the bearer token
      */
-    QueuedRequest BuildMultipartRequest(const std::string &meta, const std::string &mimeType,
-                                        const std::string &content, const std::string &fileId);
+    QueuedRequest BuildMultipartRequest(const FileToStore &file, const std::string &mimeType,
+                                        const std::string &content);
+    /**
+     * Builds the request that gives a created file its modifiedDate.
+     * @param file how the file was stored
+     * @param mimeType the file's type
+     * @param fileId the created file
+     * @return the request, without the bearer token
+     */
+    QueuedRequest BuildDateRequest(const FileToStore &file, const std::string &mimeType,
+                                   const std::string &fileId);
+    /**
+     * Queues the request that gives a created file its modifiedDate.
+     * @param file how the file was stored
+     * @param fileId the created file
+     */
+    void QueueDate(const FileToStore &file, const std::string &fileId);
     /**
      * Logs a failed request, and remembers its status and whether Drive refused it for lack of
      * room.
@@ -101,8 +115,9 @@ class GoogleDrive : public CloudStorage
      * @param status the HTTP status, or below zero when no answer came
      * @param reply the body Drive answered with
      * @param done takes the item; without "id" when the request failed
+     * @return the item done took
      */
-    void FinishQueued(const char *what, long status, const std::string &reply, const Done &done);
+    Json FinishQueued(const char *what, long status, const std::string &reply, const Done &done);
 
     /**
      * The first item a search finds.
@@ -113,12 +128,11 @@ class GoogleDrive : public CloudStorage
     bool FindFirst(const std::string &query, Json &item);
 
     /** Sends a file that fits in one request together with its metadata. */
-    Json UploadInOneRequest(const std::string &path, const std::string &meta,
-                            const std::string &mimeType, const std::string &content,
-                            const std::string &fileId);
+    Json UploadInOneRequest(const std::string &path, const FileToStore &file,
+                            const std::string &mimeType, const std::string &content);
     /** Sends a file in a resumable session: the metadata first, then the content. */
-    Json UploadResumable(const std::string &path, const std::string &meta,
-                         const std::string &mimeType, long long size, const std::string &fileId);
+    Json UploadResumable(const std::string &path, const FileToStore &file,
+                         const std::string &mimeType, long long size);
 
     HttpClient &m_http;
     GoogleDeviceAuth &m_auth;
