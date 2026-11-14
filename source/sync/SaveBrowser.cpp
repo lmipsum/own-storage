@@ -97,3 +97,28 @@ LoadResult SaveBrowser::Load(const std::string &name)
         return LoadResult::Failed;
     }
 }
+
+RemoveResult SaveBrowser::Remove(const std::string &name)
+{
+    if (!m_scanner.ScanSave(name).files.empty())
+    {
+        return RemoveResult::OnConsole;
+    }
+    const CloudSave &save = Save(name);
+    // The console has no PARAM.SFO of it to read the title from.
+    const std::string game = GameLabel(TitleId(name), save.title);
+    if (m_display.Ask(game + ":\n" + name +
+                      " is not on this PS3. Delete it from the cloud? It goes to the Drive "
+                      "trash.\n\nYes: delete it.\nNo: keep it.") != Answer::Yes)
+    {
+        return RemoveResult::Kept;
+    }
+    if (!m_cloud.TrashFile(save.fileId))
+    {
+        return RemoveResult::Failed;
+    }
+    debugPrintf("SaveBrowser::Remove: %s\n", name.c_str());
+    m_state.Forget(name);
+    m_saves.erase(name);
+    return RemoveResult::Removed;
+}

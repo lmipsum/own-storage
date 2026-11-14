@@ -224,10 +224,8 @@ Sync::Plan Sync::Settle(const std::vector<Question> &questions)
             {
                 plan.uploads.push_back(Upload{question->local, question->cloud.fileId});
             }
-            else if (m_cloud.TrashFile(question->cloud.fileId))
-            {
-                m_state.Forget(question->name);
-            }
+            // A save deleted on the console that the user does not want back stays in the cloud
+            // with its base, so the next sync asks again.
         }
     }
     return plan;
@@ -284,7 +282,7 @@ std::string Sync::QuestionText(Doubt doubt, const std::string &titleId,
                  << " to the cloud since.\n\n";
         }
         text << "Yes: bring " << them << " back to this PS3.\n"
-             << "No: delete " << them << " from the cloud too.";
+             << "No: leave " << them << " in the cloud; the next sync asks again.";
     }
     return text.str();
 }

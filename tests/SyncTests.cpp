@@ -366,7 +366,7 @@ TEST(SaveDeletedOnTheConsoleComesBackOnYes)
     CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
 }
 
-TEST(SaveDeletedOnTheConsoleGoesFromTheCloudOnNo)
+TEST(SaveDeletedOnTheConsoleStaysInTheCloudOnNoAndIsAskedAgain)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -374,9 +374,11 @@ TEST(SaveDeletedOnTheConsoleGoesFromTheCloudOnNo)
     setup.DeleteSave("BLES00001-SAVE");
     setup.display.answers = {Answer::No};
     setup.Run();
-    CHECK_EQUAL(std::string("BLUS00002-AUTO.tar\n"), setup.cloud.Tree(setup.rootId));
+    CHECK_EQUAL(std::string(kFirstSyncTree), setup.cloud.Tree(setup.rootId));
+    CHECK(!setup.console.Exists(kSave));
     setup.Run();
-    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+    CHECK_EQUAL(std::size_t(2), setup.display.questions.size());
+    CHECK(!setup.console.Exists(kSave));
 }
 
 TEST(SaveDeletedHereButPlayedOnElsewhereSaysSo)
@@ -785,5 +787,29 @@ TEST(MenuSaysWhetherALoadedSaveWasMadeThisUsers)
     Browsing browsing(other, other.console);
     CHECK(browsing.browser.Load(kForeignSave) == LoadResult::LoadedNotResigned);
     CHECK(ShownResult(kForeignSave, LoadResult::LoadedNotResigned).find("as it was") !=
+          std::string::npos);
+}
+
+TEST(MenuDeletesFromTheCloudOnlyASaveTheConsoleHasNot)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    Browsing browsing(setup, setup.console);
+    CHECK(browsing.browser.Remove("BLES00001-SAVE") == RemoveResult::OnConsole);
+    CHECK(setup.display.questions.empty());
+    setup.DeleteSave("BLES00001-SAVE");
+    setup.display.answers = {Answer::No, Answer::Yes};
+    CHECK(browsing.browser.Remove("BLES00001-SAVE") == RemoveResult::Kept);
+    CHECK_EQUAL(std::string(kFirstSyncTree), setup.cloud.Tree(setup.rootId));
+    CHECK(browsing.browser.Remove("BLES00001-SAVE") == RemoveResult::Removed);
+    CHECK(browsing.state.Find("BLES00001-SAVE") == nullptr);
+    CHECK_EQUAL(std::string("BLUS00002-AUTO.tar\n"), setup.cloud.Tree(setup.rootId));
+    CHECK_EQUAL(std::size_t(1), browsing.browser.Games().size());
+    CHECK_EQUAL(std::size_t(0), setup.display.Question(0).find("Game One (BLES00001):\n"));
+    // Its base went with it, so the next sync has nothing to ask about it.
+    setup.Run();
+    CHECK_EQUAL(std::size_t(2), setup.display.questions.size());
+    CHECK(ShownResult("BLES00001-SAVE", RemoveResult::OnConsole).find("delete it there first") !=
           std::string::npos);
 }

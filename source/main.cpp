@@ -325,7 +325,7 @@ void runSync(Menu &menu, ConsoleStorage &storage, const std::string &profile,
     }
 }
 
-/** Lets the user load saves from the backup one by one. */
+/** Lets the user load or delete saves of the backup one by one. */
 void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &profile,
                       const std::string &savedata, const SaveTarget *target)
 {
@@ -338,7 +338,7 @@ void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &pr
     }
     if (folderId.empty())
     {
-        menu.ShowMessage("There are no saves in the cloud yet.");
+        menu.ShowMessage("There are no saves in the cloud.");
         return;
     }
     SyncState state(stateFile(profile), stateBackup(profile));
@@ -442,13 +442,15 @@ const unsigned int padLeft = 1 << 2;
 const unsigned int padRight = 1 << 3;
 const unsigned int padCross = 1 << 4;
 const unsigned int padCircle = 1 << 5;
+const unsigned int padTriangle = 1 << 6;
 
 /** The menu buttons a pad holds down. */
 unsigned int heldButtons(const padData &data)
 {
     return (data.BTN_UP ? padUp : 0) | (data.BTN_DOWN ? padDown : 0) |
            (data.BTN_LEFT ? padLeft : 0) | (data.BTN_RIGHT ? padRight : 0) |
-           (data.BTN_CROSS ? padCross : 0) | (data.BTN_CIRCLE ? padCircle : 0);
+           (data.BTN_CROSS ? padCross : 0) | (data.BTN_CIRCLE ? padCircle : 0) |
+           (data.BTN_TRIANGLE ? padTriangle : 0);
 }
 
 /**
@@ -462,9 +464,10 @@ void readPads(Menu &menu, unsigned int held[MAX_PADS])
     {
         unsigned int bit;
         PadButton button;
-    } presses[] = {{padUp, PadButton::Up},        {padDown, PadButton::Down},
-                   {padLeft, PadButton::PageUp},  {padRight, PadButton::PageDown},
-                   {padCross, PadButton::Select}, {padCircle, PadButton::Back}};
+    } presses[] = {{padUp, PadButton::Up},          {padDown, PadButton::Down},
+                   {padLeft, PadButton::PageUp},    {padRight, PadButton::PageDown},
+                   {padCross, PadButton::Select},   {padCircle, PadButton::Back},
+                   {padTriangle, PadButton::Remove}};
     padInfo info;
     ioPadGetInfo(&info);
     for (int pad = 0; pad < MAX_PADS; ++pad)
