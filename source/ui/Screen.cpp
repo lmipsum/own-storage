@@ -5,11 +5,14 @@
 
 namespace
 {
-const SDL_Color kTextColor = {57, 57, 57, 0};
+// A plain dark screen with light text, as the system's own dialogs have.
+const Uint8 kBackground[] = {24, 24, 24};
+const SDL_Color kTextColor = {230, 230, 230, 0};
 const SDL_Color kCursorColor = {255, 255, 255, 0};
 // The cursor row's bar, in the colour of the app's icon.
 const Uint8 kCursorBar[] = {84, 46, 140};
-// How opaque the light panel under a list is, out of 255.
+// The panel under a list, a little lighter than the screen, and how opaque it is out of 255.
+const Uint8 kPanel[] = {64, 64, 64};
 const Uint8 kPanelOpacity = 210;
 // Where things go, in percent of the screen's height or width.
 const int kListLeftPercent = 8;
@@ -20,10 +23,9 @@ const int kHintTopPercent = 92;
 const int kRowSpacing = 6;
 } // namespace
 
-Screen::Screen(SDL_Surface *surface, SDL_Surface *background, TTF_Font *font)
-    : m_surface(surface), m_background(background), m_panel(nullptr), m_font(font),
-      m_lock(SDL_CreateMutex()), m_view{std::string(), std::string(), {}, 0, std::string()},
-      m_changed(true), m_firstRow(0)
+Screen::Screen(SDL_Surface *surface, TTF_Font *font)
+    : m_surface(surface), m_panel(nullptr), m_font(font), m_lock(SDL_CreateMutex()),
+      m_view{std::string(), std::string(), {}, 0, std::string()}, m_changed(true), m_firstRow(0)
 {
     // One line of the panel, blitted down the screen: a whole screen of it would take megabytes.
     // Without an alpha channel of its own, the surface's alpha blends all of it the same.
@@ -31,7 +33,8 @@ Screen::Screen(SDL_Surface *surface, SDL_Surface *background, TTF_Font *font)
                                    0x000000ff, 0);
     if (m_panel != nullptr)
     {
-        SDL_FillRect(m_panel, nullptr, SDL_MapRGB(m_panel->format, 255, 255, 255));
+        SDL_FillRect(m_panel, nullptr,
+                     SDL_MapRGB(m_panel->format, kPanel[0], kPanel[1], kPanel[2]));
         SDL_SetAlpha(m_panel, SDL_SRCALPHA, kPanelOpacity);
     }
 }
@@ -71,10 +74,11 @@ void Screen::Draw()
     const int rowHeight = TTF_FontLineSkip(m_font) + kRowSpacing;
     const int hintTop = kHintTopPercent * height / 100;
     const int messageTop = hintTop - rowHeight;
-    SDL_BlitSurface(m_background, nullptr, m_surface, nullptr);
+    SDL_FillRect(m_surface, nullptr,
+                 SDL_MapRGB(m_surface->format, kBackground[0], kBackground[1], kBackground[2]));
     if (view.heading.empty())
     {
-        // A short menu stands on the message, so it stays clear of the logo however many rows it
+        // A short menu stands on the message, so it keeps to the lower part however many rows it
         // has.
         const int menuTop =
             messageTop - static_cast<int>(view.rows.size()) * rowHeight - kRowSpacing;

@@ -62,7 +62,7 @@ class Menu
 
     /**
      * Shows a menu and waits until the user picks a row or goes back. App thread only.
-     * @param heading the list's heading; empty for a short menu under the logo
+     * @param heading the list's heading; empty for a short menu low on the screen
      * @param rows the rows to pick from
      * @param hint the buttons the menu takes
      * @param cursor the row the cursor starts on
@@ -85,7 +85,7 @@ class Menu
                             const std::vector<PadButton> &actions);
     /** Shows a line about what the app is doing; it stays under the next menu too. */
     void ShowMessage(const std::string &text);
-    /** Shows a line at the top of the screen while a menu is under the logo; it stays. */
+    /** Shows a line at the top of the screen while a short menu is shown; it stays. */
     void ShowCaption(const std::string &text);
     /** How the hints name the buttons that confirm and go back. */
     const ButtonNames &Buttons() const;

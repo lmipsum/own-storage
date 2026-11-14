@@ -45,7 +45,6 @@
 #include <sstream>
 
 #include <SDL/SDL.h>
-#include <SDL/SDL_image.h>
 #include <SDL/SDL_ttf.h>
 #include <SDL/SDL_thread.h>
 
@@ -89,7 +88,6 @@ GoogleDeviceAuth googleAuth(http);
 GoogleDrive drive(http, googleAuth, parallelUploads, MakeTransferBar());
 
 SDL_Surface *screen = NULL;
-SDL_Surface *image = NULL;
 TTF_Font *Sans;
 
 // The app thread and the main thread both use this flag.
@@ -147,19 +145,6 @@ void sysevent_callback(u64 status, u64 param, void *userdata)
         xmbopen = 0;
         break;
     }
-}
-
-SDL_Surface *Load_Image(std::string filePath)
-{
-    SDL_Surface *loadedImage = NULL;
-    SDL_Surface *optimizedImage = NULL;
-    loadedImage = IMG_Load(filePath.c_str());
-    if (loadedImage != NULL)
-    {
-        optimizedImage = SDL_DisplayFormatAlpha(loadedImage);
-        SDL_FreeSurface(loadedImage);
-    }
-    return optimizedImage;
 }
 
 /** The likely cause of the last failed Drive request, as the user reads it. */
@@ -594,7 +579,6 @@ void readPads(Menu &menu, unsigned int held[MAX_PADS], bool circleConfirms)
 
 int main(int argc, char **argv)
 {
-    std::string imagePath;
     char FontPath[] = APP_DIR "font.ttf";
 
     netInitialize();
@@ -602,7 +586,6 @@ int main(int argc, char **argv)
     networkStart.Start();
 
     SDL_Init(SDL_INIT_EVERYTHING);
-    IMG_Init(IMG_INIT_PNG);
     TTF_Init();
 
     videoState state;
@@ -615,29 +598,8 @@ int main(int argc, char **argv)
     appWidth = res.width;
     appHeight = res.height;
 
-    switch (appHeight)
-    {
-    case 1080:
-        imagePath = APP_DIR "bg.png";
-        break;
-    case 720:
-        imagePath = APP_DIR "bg-720.png";
-        break;
-    case 480:
-        imagePath = APP_DIR "bg-480.png";
-        break;
-    case 576:
-        imagePath = APP_DIR "bg-576.png";
-        break;
-    default:
-        imagePath = APP_DIR "bg.png";
-        break;
-    }
-
     screen =
         SDL_SetVideoMode(appWidth, appHeight, 32, SDL_SWSURFACE | SDL_DOUBLEBUF | SDL_FULLSCREEN);
-
-    image = Load_Image(imagePath);
 
     Sans = TTF_OpenFont(FontPath, 20.0);
 
@@ -645,7 +607,7 @@ int main(int argc, char **argv)
     ioPadInit(7);
     {
         // Gone before SDL shuts down, which the screen's surfaces need.
-        Screen appScreen(screen, image, Sans);
+        Screen appScreen(screen, Sans);
         // The font has no button symbols, so the hints name them.
         const bool circleConfirms = CircleConfirms();
         Menu menu(appScreen, exitapp,
@@ -684,11 +646,9 @@ int main(int argc, char **argv)
         }
         syncDialog.Close();
     }
-    SDL_FreeSurface(image);
     SDL_FreeSurface(screen);
     TTF_CloseFont(Sans);
 
-    IMG_Quit();
     TTF_Quit();
     SDL_Quit();
 
