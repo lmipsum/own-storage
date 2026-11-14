@@ -563,7 +563,7 @@ void readPads(Menu &menu, unsigned int held[MAX_PADS], bool circleConfirms)
                    {circleConfirms ? padCircle : padCross, PadButton::Select},
                    {circleConfirms ? padCross : padCircle, PadButton::Back},
                    {padTriangle, PadButton::Remove},
-                   {padSquare, PadButton::Import}};
+                   {padSquare, PadButton::Extra}};
     padInfo info;
     ioPadGetInfo(&info);
     for (int pad = 0; pad < MAX_PADS; ++pad)

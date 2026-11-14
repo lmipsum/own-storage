@@ -21,6 +21,8 @@ const std::size_t kEntryDataOffset = 12;
 const std::uint32_t kUtf8Format = 0x0204;
 const std::uint32_t kRawUtf8Format = 0x0004;
 const char kTitleKey[] = "TITLE";
+const char kSubtitleKey[] = "SUB_TITLE";
+const char kDetailKey[] = "DETAIL";
 // The save's owner: in PARAMS, the user's number twice, the console's PSID and the PSN account
 // id; the account id once more under ACCOUNT_ID.
 const char kParamsKey[] = "PARAMS";
@@ -103,6 +105,24 @@ bool FindValue(const std::string &sfo, const char *key, std::size_t keySize, Sfo
     return false;
 }
 
+/**
+ * A text value of a PARAM.SFO.
+ * @param sfo the whole file
+ * @param key the key
+ * @param keySize the key's bytes with its closing NUL
+ * @return the text up to its first NUL; empty when the file has no such text
+ */
+std::string ReadText(const std::string &sfo, const char *key, std::size_t keySize)
+{
+    SfoValue text;
+    if (!FindValue(sfo, key, keySize, text) || text.format != kUtf8Format)
+    {
+        return std::string();
+    }
+    const std::string value = sfo.substr(text.offset, text.length);
+    return value.substr(0, value.find('\0'));
+}
+
 /** Finds PARAMS and ACCOUNT_ID, both long enough to hold the owner. */
 bool FindOwner(const std::string &sfo, SfoValue &params, SfoValue &accountId)
 {
@@ -120,13 +140,13 @@ bool operator==(const SaveOwner &a, const SaveOwner &b)
 
 std::string ReadSfoTitle(const std::string &sfo)
 {
-    SfoValue title;
-    if (!FindValue(sfo, kTitleKey, sizeof kTitleKey, title) || title.format != kUtf8Format)
-    {
-        return std::string();
-    }
-    const std::string value = sfo.substr(title.offset, title.length);
-    return value.substr(0, value.find('\0'));
+    return ReadText(sfo, kTitleKey, sizeof kTitleKey);
+}
+
+SaveTexts ReadSfoTexts(const std::string &sfo)
+{
+    return SaveTexts{ReadSfoTitle(sfo), ReadText(sfo, kSubtitleKey, sizeof kSubtitleKey),
+                     ReadText(sfo, kDetailKey, sizeof kDetailKey)};
 }
 
 bool ReadSfoOwner(const std::string &sfo, SaveOwner &owner)

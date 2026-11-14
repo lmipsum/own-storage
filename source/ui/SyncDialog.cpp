@@ -14,6 +14,7 @@ const msgType kProgressType =
 const msgType kQuestionType = static_cast<msgType>(MSG_DIALOG_NORMAL | MSG_DIALOG_BTN_TYPE_YESNO |
                                                    MSG_DIALOG_DISABLE_CANCEL_ON);
 const msgType kErrorType = static_cast<msgType>(MSG_DIALOG_ERROR | MSG_DIALOG_BTN_TYPE_OK);
+const msgType kInfoType = static_cast<msgType>(MSG_DIALOG_NORMAL | MSG_DIALOG_BTN_TYPE_OK);
 // No button has closed the question or error yet.
 const int kNoButton = MSG_DIALOG_BTN_INVALID;
 const unsigned int kPollMicroseconds = 100000;
@@ -59,11 +60,21 @@ void SyncDialog::Close()
 
 void SyncDialog::ShowError(const std::string &message)
 {
+    ShowNotice(kErrorType, message);
+}
+
+void SyncDialog::ShowInfo(const std::string &message)
+{
+    ShowNotice(kInfoType, message);
+}
+
+void SyncDialog::ShowNotice(int type, const std::string &message)
+{
     Close();
     m_button = kNoButton;
-    if (OpenWhenFree(kErrorType, message))
+    if (OpenWhenFree(type, message))
     {
-        // OK and the back button both close an error.
+        // OK and the back button both close it.
         WaitForButton();
     }
 }

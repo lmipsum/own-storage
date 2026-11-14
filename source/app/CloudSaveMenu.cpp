@@ -13,8 +13,8 @@ namespace
 const char kGamesHeading[] = "Saves in the cloud";
 
 /**
- * Lists a game's saves and loads or deletes the one the user picks, until the user goes back or
- * the game has no save left in the cloud.
+ * Lists a game's saves and loads, deletes or shows the details of the one the user picks, until
+ * the user goes back or the game has no save left in the cloud.
  * @return whether a save was deleted
  */
 bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame game,
@@ -34,19 +34,25 @@ bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame 
                            " " + ShownSize(save.size) + " | " + ShownStatus(browser.Status(name)));
         }
         menu.ShowMessage(result);
-        // The font has no button symbols, so the triangle is named.
+        // The font has no button symbols, so the square and the triangle are named.
         const std::string hint = menu.Buttons().confirm +
-                                 ": load to this PS3    Triangle: delete from the cloud    " +
+                                 ": load to this PS3    Square: details    Triangle: delete from "
+                                 "the cloud    " +
                                  menu.Buttons().back + ": back";
-        const MenuChoice chosen =
-            menu.ChooseAction(game.label, rows, hint, cursor, {PadButton::Remove});
+        const MenuChoice chosen = menu.ChooseAction(game.label, rows, hint, cursor,
+                                                    {PadButton::Remove, PadButton::Extra});
         if (chosen.button == PadButton::Back)
         {
             return deleted;
         }
         cursor = static_cast<std::size_t>(chosen.row);
         const std::string name = game.saves[cursor];
-        if (chosen.button == PadButton::Select)
+        if (chosen.button == PadButton::Extra)
+        {
+            dialog.ShowInfo(
+                ShownDetails(game.label, name, browser.Save(name), browser.Status(name), dates));
+        }
+        else if (chosen.button == PadButton::Select)
         {
             result = ShownResult(name, browser.Load(name));
         }
@@ -101,12 +107,12 @@ bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, cons
                                  menu.Buttons().back + ": back";
         // The list is shown even when empty, so that saves can be imported into it.
         const MenuChoice chosen =
-            menu.ChooseAction(kGamesHeading, rows, hint, cursor, {PadButton::Import});
+            menu.ChooseAction(kGamesHeading, rows, hint, cursor, {PadButton::Extra});
         if (chosen.button == PadButton::Back)
         {
             return true;
         }
-        if (chosen.button == PadButton::Import)
+        if (chosen.button == PadButton::Extra)
         {
             const std::string result = importSaves();
             dialog.Close();

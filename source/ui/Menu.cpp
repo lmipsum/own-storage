@@ -73,14 +73,15 @@ MenuChoice Menu::ChooseAction(const std::string &heading, const std::vector<std:
         const PadButton button = static_cast<PadButton>(pressed);
         const int row = rows.empty() ? kNone : static_cast<int>(m_view.cursor);
         const bool allowed = std::find(actions.begin(), actions.end(), button) != actions.end();
-        // Select and Remove act on a row; Import needs none.
+        // Select and Remove act on a row; the extra action may need none, as an import into an
+        // empty list.
         if ((button == PadButton::Select || (button == PadButton::Remove && allowed)) &&
             row != kNone)
         {
             choice = MenuChoice{row, button};
             break;
         }
-        if (button == PadButton::Import && allowed)
+        if (button == PadButton::Extra && allowed)
         {
             choice = MenuChoice{row, button};
             break;

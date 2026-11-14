@@ -21,8 +21,8 @@ enum class PadButton
     Back,
     /** Asks to remove the row's item, where a menu allows it. */
     Remove,
-    /** Asks to bring items in from elsewhere, where a menu allows it. */
-    Import
+    /** Asks for the menu's own further action, such as an import or a row's details. */
+    Extra
 };
 
 /** How the screen names the buttons that confirm and go back, which a console setting swaps. */

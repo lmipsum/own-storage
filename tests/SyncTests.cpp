@@ -5,6 +5,8 @@
 #include "TestConsole.h"
 
 #include "app/CloudSaveText.h"
+#include "sync/CloudSaves.h"
+#include "sync/GameName.h"
 #include "sync/ParamPfd.h"
 #include "sync/ParamSfo.h"
 #include "sync/SaveBrowser.h"
@@ -479,13 +481,99 @@ TEST(ArchiveCarriesTheGameTitleForEveryConsole)
     Setup setup;
     PutSaves(setup.console);
     setup.Run();
-    CHECK_EQUAL(std::string("Game One"),
+    CHECK_EQUAL(std::string("Game One\n\n"),
                 setup.cloud.Description(setup.ArchiveId("BLES00001-SAVE")));
     // The title comes from the cloud once the console has no PARAM.SFO left to read.
     setup.DeleteSave("BLES00001-SAVE");
     setup.Run();
     CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
     CHECK_EQUAL(std::size_t(0), setup.display.Question(0).find("Game One (BLES00001):\n"));
+}
+
+TEST(SaveTextsAreReadFromParamSfo)
+{
+    const SaveTexts texts =
+        ReadSfoTexts(MakeSfo(SaveTexts{"Game One", "Chapter 3", "Level 12\nPlayed: 10:00"},
+                             TestOwner(1, 'a', "0123456789abcdef")));
+    CHECK_EQUAL(std::string("Game One"), texts.title);
+    CHECK_EQUAL(std::string("Chapter 3"), texts.subtitle);
+    CHECK_EQUAL(std::string("Level 12\nPlayed: 10:00"), texts.detail);
+    CHECK_EQUAL(std::string(), ReadSfoTexts(MakeSfo("Game One")).detail);
+}
+
+TEST(DescriptionKeepsTheTextsLineByLine)
+{
+    const SaveTexts texts{"Game\nOne", "Chapter\n3", "Level 12\nPlayed: 10:00"};
+    const std::string description = DescribeSave(texts);
+    CHECK_EQUAL(std::string("Game One\nChapter 3\nLevel 12\nPlayed: 10:00"), description);
+    const SaveTexts read = ReadDescription(description);
+    CHECK_EQUAL(std::string("Game One"), read.title);
+    CHECK_EQUAL(std::string("Chapter 3"), read.subtitle);
+    CHECK_EQUAL(texts.detail, read.detail);
+    // Empty texts keep their lines, which tells the description from an older one.
+    CHECK_EQUAL(std::string("Game One\n\n"), DescribeSave(SaveTexts{"Game One", "", ""}));
+    CHECK_EQUAL(std::string("Sub"),
+                ReadDescription(DescribeSave(SaveTexts{"", "Sub", ""})).subtitle);
+    CHECK_EQUAL(std::string("Ends\n"),
+                ReadDescription(DescribeSave(SaveTexts{"T", "", "Ends\n"})).detail);
+    CHECK_EQUAL(std::string("Game One"),
+                ReadDescription(DescribeSave(SaveTexts{"Game\rOne", "", ""})).title);
+    // An older description is the title alone, which may run over two lines.
+    CHECK_EQUAL(std::string("Game One"), ReadDescription("Game One").title);
+    const SaveTexts older = ReadDescription("Game\nOne");
+    CHECK_EQUAL(std::string("Game One"), older.title);
+    CHECK_EQUAL(std::string(), older.subtitle);
+}
+
+TEST(ArchiveCarriesTheSaveTextsForEveryConsole)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.console.Put(std::string(kSave) + "/PARAM.SFO",
+                      MakeSfo(SaveTexts{"Game One", "Chapter 3", "Level 12"},
+                              TestOwner(1, 'a', "0123456789abcdef")),
+                      kWritten);
+    setup.Run();
+    CHECK_EQUAL(std::string("Game One\nChapter 3\nLevel 12"),
+                setup.cloud.Description(setup.ArchiveId("BLES00001-SAVE")));
+}
+
+TEST(DetailsShowTheTextsOrSayWhenTheyCome)
+{
+    const DateStyle style{DateOrder::DayMonthYear, false, 0};
+    CloudSave save{"id",
+                   "md5",
+                   SaveTexts{"Game One", "Chapter 3", "Level 12"},
+                   3878 * 1024,
+                   "2026-11-13T21:00:28.000Z",
+                   false};
+    CHECK_EQUAL(
+        std::string("Game One (BLES00001)\nChapter 3\nLevel 12\n\nBLES00001-SAVE\n"
+                    "13/11/2026 21:00   3878 KB   not on this PS3"),
+        ShownDetails("Game One (BLES00001)", "BLES00001-SAVE", save, SaveStatus::Missing, style));
+    // An empty part leaves no empty line.
+    save.texts = SaveTexts{"Game One", "", "Level 12\n"};
+    CHECK_EQUAL(
+        std::string("Game One (BLES00001)\nLevel 12\n\nBLES00001-SAVE\n"
+                    "13/11/2026 21:00   3878 KB   on this PS3"),
+        ShownDetails("Game One (BLES00001)", "BLES00001-SAVE", save, SaveStatus::Same, style));
+    save.texts = SaveTexts{"Game One", "", ""};
+    CHECK(ShownDetails("Game One (BLES00001)", "BLES00001-SAVE", save, SaveStatus::Same, style)
+              .find("\nThe details come with the save's next upload.\n") != std::string::npos);
+    // The system dialog takes fewer than 512 bytes: the detail gives way, the rest stays.
+    save.texts = SaveTexts{"Game One", "Chapter 3", std::string(1024, 'x')};
+    const std::string details =
+        ShownDetails("Game One (BLES00001)", "BLES00001-SAVE", save, SaveStatus::Same, style);
+    CHECK(details.size() < 512);
+    CHECK(details.find("3878 KB   on this PS3") != std::string::npos);
+}
+
+TEST(TextIsCutWhereACharacterStarts)
+{
+    CHECK_EQUAL(std::string("abc"), CutText("abc", 5));
+    // "é" is two bytes; a cut in its middle leaves it out whole.
+    CHECK_EQUAL(std::string("a"), CutText("a\xc3\xa9", 2));
+    CHECK_EQUAL(std::string("a\xc3\xa9"), CutText("a\xc3\xa9", 3));
 }
 
 TEST(GameTitleIsReadFromParamSfo)
