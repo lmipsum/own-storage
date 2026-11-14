@@ -13,13 +13,13 @@ struct CloudSave
 {
     std::string fileId;
     std::string md5;
-    /** Its PARAM.SFO's texts, as the console that sent it read them; may be empty. */
+    /** Its PARAM.SFO's texts, as the console that uploaded it read them; may be empty. */
     SaveTexts texts;
     /** The archive's size in bytes. */
     unsigned long long size;
     /** When it was last stored, as Drive gives it: UTC in RFC 3339. */
     std::string modified;
-    /** Whether it is marked as kept in the cloud only, which no sync brings down by itself. */
+    /** Whether it is marked as kept in the cloud only, which no sync downloads by itself. */
     bool cloudOnly;
 };
 
@@ -32,7 +32,7 @@ std::string ArchiveTitle(const std::string &save);
 
 /**
  * A save's texts as its archive's description in the cloud keeps them, so that every console can
- * show them without bringing the archive down: the title, the subtitle and the detail, each from
+ * show them without downloading the archive: the title, the subtitle and the detail, each from
  * a line of its own. Line breaks in the title and the subtitle become spaces, so the description
  * always has its three lines, which tells it from an older one.
  * @param texts the texts

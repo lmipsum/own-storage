@@ -7,12 +7,14 @@
 #include "app/CloudSaveText.h"
 #include "app/XmbLists.h"
 #include "app/XmbPick.h"
+#include "sync/Clock.h"
 #include "sync/CloudSaves.h"
 #include "sync/GameName.h"
 #include "sync/ParamPfd.h"
 #include "sync/ParamSfo.h"
 #include "sync/SaveBrowser.h"
 #include "sync/SaveImport.h"
+#include "sync/SaveProgress.h"
 #include "sync/SaveScanner.h"
 #include "sync/Sync.h"
 #include "sync/SyncDisplay.h"
@@ -21,6 +23,7 @@
 
 #include <mbedtls/md.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <ctime>
 #include <string>
@@ -28,11 +31,14 @@
 
 namespace
 {
-/** A display nobody looks at, which never asks to stop and answers from a script. */
+/** A display that keeps what the bars said, never asks to stop and answers from a script. */
 class ScriptedDisplay : public SyncDisplay
 {
   public:
-    void SetText(ProgressBar, const std::string &) override {}
+    void SetText(ProgressBar bar, const std::string &text) override
+    {
+        (bar == ProgressBar::Overall ? overallTexts : currentTexts).push_back(text);
+    }
     void Reset(ProgressBar) override {}
     void Advance(ProgressBar, unsigned int) override {}
     bool Cancelled() const override
@@ -61,7 +67,28 @@ class ScriptedDisplay : public SyncDisplay
 
     /** Every question asked. */
     std::vector<std::string> questions;
+    /** Every text of each bar, in turn. */
+    std::vector<std::string> overallTexts;
+    std::vector<std::string> currentTexts;
 };
+
+/** A clock the test moves by hand. */
+class HandClock : public Clock
+{
+  public:
+    std::time_t Seconds() const override
+    {
+        return now;
+    }
+
+    std::time_t now = 0;
+};
+
+/** Whether a bar said the text at some time. */
+bool Shown(const std::vector<std::string> &texts, const std::string &text)
+{
+    return std::find(texts.begin(), texts.end(), text) != texts.end();
+}
 
 // Saves written before the first sync.
 const std::time_t kWritten = std::time(nullptr) - 3600;
@@ -105,8 +132,9 @@ struct Setup
     TestConsole console;
     TestCloud cloud;
     ScriptedDisplay display;
+    HandClock clock;
     std::string rootId;
-    /** Whom saves brought down are made to belong to; null to leave them as they are. */
+    /** Whom saves downloaded are made to belong to; null to leave them as they are. */
     const SaveTarget *target = nullptr;
 
     Setup()
@@ -119,7 +147,8 @@ struct Setup
     {
         SyncState state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup");
         state.Load();
-        return Sync(cloud, state, on, display, rootId, savedata, kOwnSave, on.Scratch(), target)
+        return Sync(cloud, state, on, display, clock, rootId, savedata, kOwnSave, on.Scratch(),
+                    target)
             .Run();
     }
 
@@ -181,7 +210,7 @@ struct Setup
         return files;
     }
 };
-/** The cloud's saves as one console of the user sees them, to bring down or delete one by one. */
+/** The cloud's saves as one console of the user sees them, to download or delete one by one. */
 struct Browsing
 {
     Browsing(Setup &setup, TestConsole &on)
@@ -198,7 +227,7 @@ struct Browsing
 };
 } // namespace
 
-TEST(ArchiveKeepsTheBytesOfTheArchivesSentBefore)
+TEST(ArchiveKeepsTheBytesOfTheArchivesUploadedBefore)
 {
     Setup setup;
     setup.console.Put(std::string(kSavedata) + "/BLES00009-GOLD/B.BIN", "bb", kWritten);
@@ -219,7 +248,7 @@ TEST(ArchiveKeepsTheBytesOfTheArchivesSentBefore)
     CHECK_EQUAL(std::string("7ac9469dbf90f4831dc4e29f4bb1cc57"), md5);
 }
 
-TEST(LargeSaveGoesUpAndComesDownAPieceAtATime)
+TEST(LargeSaveIsUploadedAndDownloadedAPieceAtATime)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -231,7 +260,7 @@ TEST(LargeSaveGoesUpAndComesDownAPieceAtATime)
     }
     setup.console.Put(std::string(kSave) + "/BIG.DAT", big, kWritten);
     setup.Run();
-    // The archive is the one a save always gave, so its MD5 matches the archives sent before.
+    // The archive is the one a save always gave, so its MD5 matches the archives uploaded before.
     std::string data;
     std::string sfo;
     setup.console.Read(std::string(kSave) + "/DATA.BIN", data);
@@ -241,9 +270,9 @@ TEST(LargeSaveGoesUpAndComesDownAPieceAtATime)
     TestConsole other;
     other.MakeDirectories(kSavedata);
     setup.Run(other, kSavedata);
-    std::string brought;
-    CHECK(other.Read(std::string(kSave) + "/BIG.DAT", brought));
-    CHECK(brought == big);
+    std::string downloaded;
+    CHECK(other.Read(std::string(kSave) + "/BIG.DAT", downloaded));
+    CHECK(downloaded == big);
 }
 
 TEST(ArchiveIsTheSameWhateverTheOrderAndReadsBack)
@@ -282,7 +311,47 @@ TEST(FirstSyncUploadsOneArchivePerSaveOfTheUserAlone)
     CHECK_EQUAL(std::string("data-1"), files[0].content);
 }
 
-TEST(UnchangedRerunSendsNothing)
+TEST(SyncShowsTheGameOfEachSaveItMoves)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    CHECK(setup.Run(setup.console, kSavedata));
+    // A save without its PARAM.SFO's title is named by its game's ID.
+    CHECK(Shown(setup.display.currentTexts, "Uploading Game One"));
+    CHECK(Shown(setup.display.currentTexts, "Uploading BLUS00002"));
+    CHECK(Shown(setup.display.overallTexts, "Saves: 2 of 2"));
+    TestConsole other;
+    CHECK(setup.Run(other, kSavedata));
+    CHECK(Shown(setup.display.currentTexts, "Downloading Game One"));
+}
+
+TEST(TimeLeftIsToldBySizeOnceTheSavesDoneTellEnough)
+{
+    const unsigned long long megabyte = 1024 * 1024;
+    ScriptedDisplay display;
+    HandClock clock;
+    // Each save weighs its size and a megabyte more: 4 saves of 11 MB weigh 15 MB together.
+    SaveProgress progress(display, clock, 4, 11 * megabyte);
+    clock.now = 5;
+    progress.Advance(megabyte);
+    CHECK_EQUAL(std::string("Saves: 1 of 4"), display.overallTexts.back());
+    // 4 MB took 24 s, so the 11 MB left take 66 s.
+    clock.now = 24;
+    progress.Advance(megabyte);
+    CHECK_EQUAL(std::string("Saves: 2 of 4, about 1 min left"), display.overallTexts.back());
+    // 6 MB took 60 s, so the last save's 9 MB take 90 s; nothing is left after it.
+    clock.now = 60;
+    progress.Advance(megabyte);
+    CHECK_EQUAL(std::string("Saves: 3 of 4, about 2 min left"), display.overallTexts.back());
+    clock.now = 150;
+    progress.Advance(8 * megabyte);
+    CHECK_EQUAL(std::string("Saves: 4 of 4"), display.overallTexts.back());
+    CHECK_EQUAL(std::string("less than a minute left"), SaveProgress::TimeLeft(59));
+    CHECK_EQUAL(std::string("about 1 min left"), SaveProgress::TimeLeft(89));
+    CHECK_EQUAL(std::string("about 2 min left"), SaveProgress::TimeLeft(90));
+}
+
+TEST(UnchangedRerunUploadsNothing)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -319,7 +388,7 @@ TEST(UploadedSaveIsDatedByItsNewestFile)
     CHECK_EQUAL(CloudTime(kChanged + 60), setup.cloud.Modified(setup.ArchiveId("BLES00001-SAVE")));
 }
 
-TEST(TouchedButSameSaveSendsNothing)
+TEST(TouchedButSameSaveUploadsNothing)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -359,7 +428,7 @@ TEST(NewConsoleGetsTheBackupUnderAnotherUserNumber)
                 other.Content("/dev_hdd0/home/00000002/savedata/BLUS00002-AUTO/DATA.BIN"));
 }
 
-TEST(SaveChangedOnAnotherConsoleComesDown)
+TEST(SaveChangedOnAnotherConsoleIsDownloaded)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -373,7 +442,7 @@ TEST(SaveChangedOnAnotherConsoleComesDown)
     setup.Run();
     CHECK_EQUAL(std::string("played on"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
     CHECK(!setup.console.Exists(std::string(kSave) + "/PARAM.SFO"));
-    // What came down is the base now: the next run has nothing to do.
+    // What was downloaded is the base now: the next run has nothing to do.
     const int updates = setup.cloud.Updates();
     setup.Run();
     CHECK_EQUAL(updates, setup.cloud.Updates());
@@ -393,7 +462,7 @@ TEST(SaveChangedOnBothSidesIsLeftAsItIsWithoutAnAnswer)
     CHECK_EQUAL(std::string("played there"), setup.Archive("BLES00001-SAVE")[0].content);
 }
 
-TEST(SaveChangedOnBothSidesComesDownOnYes)
+TEST(SaveChangedOnBothSidesIsDownloadedOnYes)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -422,7 +491,7 @@ TEST(SaveChangedOnBothSidesIsLeftAsItIsWhenTheSecondQuestionGoesUnanswered)
                 setup.console.Content(std::string(kSave) + "/DATA.BIN"));
 }
 
-TEST(SaveChangedOnBothSidesGoesUpOnlyWhenAskedToo)
+TEST(SaveChangedOnBothSidesIsUploadedOnlyWhenAskedToo)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -436,7 +505,7 @@ TEST(SaveChangedOnBothSidesGoesUpOnlyWhenAskedToo)
                 setup.console.Content(std::string(kSave) + "/DATA.BIN"));
     CHECK(setup.display.Question(1).find("Replace the cloud's copy with this PS3's?") !=
           std::string::npos);
-    // Not the cloud's, but this PS3's: it goes up.
+    // Not the cloud's, but this PS3's: it is uploaded.
     setup.display.answers = {Answer::No, Answer::Yes};
     setup.Run();
     CHECK_EQUAL(std::string("played here"), setup.Archive("BLES00001-SAVE")[0].content);
@@ -444,7 +513,7 @@ TEST(SaveChangedOnBothSidesGoesUpOnlyWhenAskedToo)
     CHECK_EQUAL(std::size_t(4), setup.display.questions.size());
 }
 
-TEST(SaveDeletedOnTheConsoleIsNotBroughtBackWithoutAnAnswer)
+TEST(SaveDeletedOnTheConsoleIsNotDownloadedAgainWithoutAnAnswer)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -495,7 +564,8 @@ TEST(SaveDeletedHereButPlayedOnElsewhereSaysSo)
     setup.DeleteSave("BLES00001-SAVE");
     setup.Run();
     CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
-    CHECK(setup.display.Question(0).find("another PS3 has sent a newer copy") != std::string::npos);
+    CHECK(setup.display.Question(0).find("another PS3 has uploaded a newer copy") !=
+          std::string::npos);
 }
 
 TEST(LongTitleFromTheCloudIsCut)
@@ -640,7 +710,7 @@ TEST(FailedListingStopsTheSync)
     CHECK_EQUAL(1, setup.cloud.Creates());
 }
 
-TEST(SaveGoneFromTheCloudGoesUpAgain)
+TEST(SaveGoneFromTheCloudIsUploadedAgain)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -675,7 +745,7 @@ TEST(SaveGoneOnBothSidesIsForgotten)
     setup.console.Remove(std::string(kSave) + "/PARAM.SFO");
     setup.console.RemoveDirectory(kSave);
     setup.Run();
-    // Without a base, an archive that turns up again is new to this console and comes down.
+    // Without a base, an archive that turns up again is new to this console and is downloaded.
     setup.cloud.Store(TestCloudItem{"BLES00001-SAVE.tar", setup.rootId, octetMime, MakeTar(files)});
     setup.Run();
     CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
@@ -732,7 +802,7 @@ TEST(ArchiveDamagedOnTheWayLeavesTheSaveAlone)
     CHECK(!setup.console.Exists(std::string(kSavedata) + "/BLES00003-NEW"));
 }
 
-TEST(OnlySaveArchivesComeDownAndOfTwoTheFirst)
+TEST(OnlySaveArchivesAreDownloadedAndOfTwoTheFirst)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -822,7 +892,7 @@ TEST(BrowserLoadsAMissingSaveWithoutAsking)
     CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::Loaded);
     CHECK(setup.display.questions.empty());
     CHECK_EQUAL(std::string("data-1"), other.Content(std::string(kSave) + "/DATA.BIN"));
-    // What came down is the base, as after a sync.
+    // What was downloaded is the base, as after a sync.
     const SaveBase *base = browsing.state.Find("BLES00001-SAVE");
     CHECK(base != nullptr && base->fileId == setup.ArchiveId("BLES00001-SAVE") &&
           !base->downloading);
@@ -874,7 +944,7 @@ TEST(XmbListsTheSavesWithTheirIcons)
         CHECK(saves[1].downloaded);
         CHECK_EQUAL(std::string(kSave) + "/ICON0.PNG", saves[1].icon);
     }
-    // A save the console has otherwise counts as not brought down, so it shows no icon.
+    // A save the console has otherwise counts as not downloaded, so it shows no icon.
     setup.console.Put(std::string(kSave) + "/DATA.BIN", "played on", kChanged);
     Browsing changed(setup, setup.console);
     saves = XmbSaves(changed.browser, setup.console, kSavedata, kXmbDates);
@@ -1109,7 +1179,7 @@ void StoreForeignSave(Setup &setup, bool damaged)
 }
 } // namespace
 
-TEST(SaveOfAnotherConsoleComesDownAsThisUsersOwn)
+TEST(SaveOfAnotherConsoleIsDownloadedAsThisUsersOwn)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);
@@ -1121,14 +1191,14 @@ TEST(SaveOfAnotherConsoleComesDownAsThisUsersOwn)
     CHECK(ReadSfoOwner(setup.console.Content(folder + "/PARAM.SFO"), owner) &&
           owner == kHere.owner);
     CHECK_EQUAL(std::string("five"), setup.console.Content(folder + "/DATA.BIN"));
-    // Made this user's as it came down, the save is not taken for a change of the user's.
+    // Made this user's as it was downloaded, the save is not taken for a change of the user's.
     const int creates = setup.cloud.Creates();
     setup.Run();
     CHECK_EQUAL(creates, setup.cloud.Creates());
     CHECK_EQUAL(0, setup.cloud.Updates());
 }
 
-TEST(SaveThatCannotBeMadeThisUsersComesDownAsItIsAndIsNamed)
+TEST(SaveThatCannotBeMadeThisUsersIsDownloadedAsItIsAndIsNamed)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);
@@ -1136,8 +1206,8 @@ TEST(SaveThatCannotBeMadeThisUsersComesDownAsItIsAndIsNamed)
     SyncState state(setup.console.Scratch() + "/state.json",
                     setup.console.Scratch() + "/state.backup");
     state.Load();
-    Sync sync(setup.cloud, state, setup.console, setup.display, setup.rootId, kSavedata, kOwnSave,
-              setup.console.Scratch(), &kHere);
+    Sync sync(setup.cloud, state, setup.console, setup.display, setup.clock, setup.rootId,
+              kSavedata, kOwnSave, setup.console.Scratch(), &kHere);
     CHECK(sync.Run());
     CHECK(sync.NotResigned() == std::vector<std::string>{kForeignSave});
     SaveOwner owner;
@@ -1232,7 +1302,8 @@ ImportResult Import(Setup &setup, TestConsole &on)
 {
     SyncState state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup");
     state.Load();
-    SaveImport import(setup.cloud, state, on, setup.display, setup.rootId, kOwnSave, on.Scratch());
+    SaveImport import(setup.cloud, state, on, setup.display, setup.clock, setup.rootId, kOwnSave,
+                      on.Scratch());
     ImportResult result{0, 0, 0, 0};
     CHECK(import.Run({kUsbSaves, kSecondUsbSaves}, result));
     return result;
@@ -1248,7 +1319,7 @@ void PutUsbSave(TestConsole &console, const char *folder, const std::string &nam
 }
 } // namespace
 
-TEST(UsbSavesGoUpKeptInTheCloudOnly)
+TEST(UsbSavesAreUploadedKeptInTheCloudOnly)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -1270,7 +1341,7 @@ TEST(UsbSavesGoUpKeptInTheCloudOnly)
     CHECK_EQUAL(std::size_t(2), Import(setup, setup.console).skipped);
 }
 
-TEST(SaveKeptInTheCloudOnlyComesDownOnlyWhenPicked)
+TEST(SaveKeptInTheCloudOnlyIsDownloadedOnlyWhenPicked)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);
@@ -1287,19 +1358,19 @@ TEST(SaveKeptInTheCloudOnlyComesDownOnlyWhenPicked)
     }
     CHECK_EQUAL(std::string("usb"),
                 other.Content(std::string(kSavedata) + "/NPEB00003-USB/DATA.BIN"));
-    // Played on and sent up, it is an ordinary save again.
+    // Played on and uploaded, it is an ordinary save again.
     other.Put(std::string(kSavedata) + "/NPEB00003-USB/DATA.BIN", "played on", kChanged);
     setup.Run(other, kSavedata);
     CHECK(!setup.cloud.CloudOnly(setup.ArchiveId("NPEB00003-USB")));
 }
 
-TEST(SaveOnTwoUsbDrivesGoesUpOnceAndAnUnreadableOneIsCounted)
+TEST(SaveOnTwoUsbDrivesIsUploadedOnceAndAnUnreadableOneIsCounted)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);
     PutUsbSave(setup.console, kUsbSaves, "NPEB00004-BOTH", "first");
     PutUsbSave(setup.console, kSecondUsbSaves, "NPEB00004-BOTH", "second");
-    // A file name too long for an archive, so the save cannot be sent.
+    // A file name too long for an archive, so the save cannot be uploaded.
     PutUsbSave(setup.console, kSecondUsbSaves, "NPEB00005-BAD", "bad");
     setup.console.Put(std::string(kSecondUsbSaves) + "/NPEB00005-BAD/" + std::string(120, 'x'),
                       "bad", kWritten);

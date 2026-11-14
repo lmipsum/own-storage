@@ -59,6 +59,7 @@
 #include "app/Profile.h"
 #include "app/XmbInstall.h"
 #include "app/XmbPick.h"
+#include "sync/Clock.h"
 #include "sync/SaveBrowser.h"
 #include "sync/SaveImport.h"
 #include "sync/SaveScanner.h"
@@ -92,10 +93,11 @@ TTF_Font *Sans;
 std::atomic<int> exitapp(0);
 
 SyncDialog syncDialog(exitapp);
+const SystemClock systemClock;
 NetworkStart networkStart(exitapp);
 
-const char targetUnknownMessage[] =
-    "This PS3's or the user's ids cannot be read, so saves of other users come down as they are.";
+const char targetUnknownMessage[] = "This PS3's or the user's ids cannot be read, so saves of "
+                                    "other users are downloaded as they are.";
 
 // Where the XMB's lists go, beside webMAN MOD's own, and how their rows start the app.
 const XmbPlace xmbPlace{"/dev_hdd0/xmlhost/game_plugin/", APP_DIR "xmb/", APP_DIR "xmb_action.txt",
@@ -275,8 +277,8 @@ std::string runSync(Screen &screen, ConsoleStorage &storage, const std::string &
         // Without a state of its own every save starts without a base; the sync works it out.
         SyncState state(stateFile(profile), stateBackup(profile));
         state.Load();
-        Sync sync(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave, profile,
-                  target);
+        Sync sync(drive, state, storage, syncDialog, systemClock, folderId, savedata,
+                  profileMarkerSave, profile, target);
         done = sync.Run();
         notResigned = sync.NotResigned().size();
     }
@@ -300,14 +302,15 @@ std::string runSync(Screen &screen, ConsoleStorage &storage, const std::string &
     }
     if (notResigned == 1)
     {
-        return "The sync is done; a save of another user came down as it was, and the game may "
-               "refuse it.";
+        return "The sync is done; a save of another user was downloaded as it was, and the "
+               "game may refuse it.";
     }
     if (notResigned > 1)
     {
         std::ostringstream text;
         text << "The sync is done; " << notResigned
-             << " saves of other users came down as they were, and the games may refuse them.";
+             << " saves of other users were downloaded as they were, and the games may refuse "
+                "them.";
         return text.str();
     }
     return "The sync is done.";
@@ -317,7 +320,7 @@ std::string runSync(Screen &screen, ConsoleStorage &storage, const std::string &
 const char lastUsbDrive = '7';
 
 /**
- * Sends the saves on USB drives up into the backup, marked as kept in the cloud only.
+ * Uploads the saves on USB drives into the backup, marked as kept in the cloud only.
  * @param storage the console's disks
  * @param state the user's bases
  * @param profile the user's directory of the app, which holds the archives while they move
@@ -341,7 +344,8 @@ std::string importUsbSaves(ConsoleStorage &storage, SyncState &state, const std:
         return "No USB drive with saves in PS3/SAVEDATA was found.";
     }
     syncDialog.Open();
-    SaveImport import(drive, state, storage, syncDialog, folderId, profileMarkerSave, profile);
+    SaveImport import(drive, state, storage, syncDialog, systemClock, folderId, profileMarkerSave,
+                      profile);
     ImportResult result;
     if (!import.Run(folders, result))
     {
@@ -356,11 +360,11 @@ std::string importUsbSaves(ConsoleStorage &storage, SyncState &state, const std:
          << result.skipped << " already in the cloud left as they are";
     if (result.duplicates > 0)
     {
-        text << ", " << result.duplicates << " on two drives sent once";
+        text << ", " << result.duplicates << " on two drives uploaded once";
     }
     if (result.failed > 0)
     {
-        text << ", " << result.failed << " not sent";
+        text << ", " << result.failed << " not uploaded";
     }
     text << (drive.IsFull()           ? ": the Google storage is full."
              : syncDialog.Cancelled() ? ": the import was stopped."
@@ -489,7 +493,7 @@ void runApp(Screen &screen)
     }
     const std::string profile = MakeProfileDirectory(consoleStorage, *user);
     const std::string savedata = SavedataDirectory(*user);
-    // Saves of another user or console are made this user's as they come down.
+    // Saves of another user or console are made this user's as they are downloaded.
     const std::optional<SaveTarget> target = ReadSaveTarget(*user);
     const SaveTarget *saveTarget = target ? &*target : nullptr;
     Config config;

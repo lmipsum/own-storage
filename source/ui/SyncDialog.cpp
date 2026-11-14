@@ -6,7 +6,7 @@
 
 namespace
 {
-// The bars show a sync as well as a single save brought down or an import.
+// The bars show a sync as well as a single save downloaded or an import.
 const char kProgressTitle[] = "Own Storage";
 const msgType kProgressType =
     static_cast<msgType>(MSG_DIALOG_MUTE_ON | MSG_DIALOG_DOUBLE_PROGRESSBAR);

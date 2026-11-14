@@ -72,7 +72,6 @@ class TestCloud : public CloudStorage
     bool TrashFile(const std::string &fileId) override;
     void QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done) override;
     void RunQueue(const Stop &stop) override;
-    unsigned int Running() const override;
     bool IsFull() const override;
     Failure LastFailure() const override;
 

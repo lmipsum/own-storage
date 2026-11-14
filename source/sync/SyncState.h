@@ -19,7 +19,7 @@ struct SaveBase
     std::string fingerprint;
     /**
      * True while the archive's files are being written into the save folder: a run that ends
-     * before they all are leaves it set, and the next run brings the save down again.
+     * before they all are leaves it set, and the next run downloads the save again.
      */
     bool downloading;
 };

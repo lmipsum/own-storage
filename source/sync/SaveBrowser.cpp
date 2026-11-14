@@ -123,11 +123,11 @@ LoadResult SaveBrowser::Load(const std::string &name)
         }
     }
     debugPrintf("SaveBrowser::Load: %s\n", name.c_str());
-    switch (m_archives.BringDown(name, Save(name)))
+    switch (m_archives.Download(name, Save(name)))
     {
-    case BroughtDown::Done:
+    case Downloaded::Done:
         return LoadResult::Loaded;
-    case BroughtDown::DoneNotResigned:
+    case Downloaded::DoneNotResigned:
         return LoadResult::LoadedNotResigned;
     default:
         return LoadResult::Failed;

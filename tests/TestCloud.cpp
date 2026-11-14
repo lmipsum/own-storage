@@ -264,11 +264,6 @@ void TestCloud::RunQueue(const Stop &stop)
     }
 }
 
-unsigned int TestCloud::Running() const
-{
-    return 0;
-}
-
 bool TestCloud::IsFull() const
 {
     return false;

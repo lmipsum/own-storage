@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-/** Whom a save is to belong to once it comes down: this console and its logged-in user. */
+/** Whom a save is to belong to once it is downloaded: this console and its logged-in user. */
 struct SaveTarget
 {
     SaveOwner owner;

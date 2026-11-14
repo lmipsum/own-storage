@@ -15,9 +15,9 @@
 #include <utility>
 
 SaveImport::SaveImport(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
-                       SyncDisplay &display, const std::string &rootFolderId,
+                       SyncDisplay &display, const Clock &clock, const std::string &rootFolderId,
                        const std::string &ownSave, const std::string &workDirectory)
-    : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display),
+    : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display), m_clock(clock),
       m_rootFolderId(rootFolderId), m_ownSave(ownSave), m_workDirectory(workDirectory)
 {
 }
@@ -31,8 +31,8 @@ bool SaveImport::Run(const std::vector<std::string> &folders, ImportResult &resu
     {
         return false;
     }
-    // Every drive is scanned before anything is sent, so the saves and their drives' archives
-    // outlive the one run of the queue that sends them all.
+    // Every drive is scanned before anything is uploaded, so the saves and their drives' archives
+    // outlive the one run of the queue that uploads them all.
     std::deque<SaveArchives> drives;
     std::vector<std::vector<LocalSave>> saves;
     std::set<std::string> seen;
@@ -67,7 +67,12 @@ bool SaveImport::Run(const std::vector<std::string> &folders, ImportResult &resu
             }
         }
     }
-    SaveProgress progress(m_display, uploads.size());
+    unsigned long long bytes = 0;
+    for (const auto &upload : uploads)
+    {
+        bytes += upload.second->bytes;
+    }
+    SaveProgress progress(m_display, m_clock, uploads.size(), bytes);
     std::vector<std::string> names;
     for (const auto &upload : uploads)
     {
@@ -82,13 +87,13 @@ bool SaveImport::Run(const std::vector<std::string> &folders, ImportResult &resu
                                       debugPrintf("SaveImport::Run: %s stored\n",
                                                   save->name.c_str());
                                       ++result.imported;
-                                      progress.Advance();
+                                      progress.Advance(save->bytes);
                                   });
         names.push_back(save->name);
     }
     if (!drives.empty())
     {
-        drives.front().SendQueue(names);
+        drives.front().UploadQueue(names);
     }
     result.failed = uploads.size() - result.imported;
     return true;

@@ -2,13 +2,13 @@
 #include "sync/SaveArchives.h"
 
 #include "app/DebugLog.h"
+#include "sync/GameName.h"
 #include "sync/ParamPfd.h"
 #include "sync/ParamSfo.h"
 #include "sync/Tar.h"
 
 #include <algorithm>
 #include <ctime>
-#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -152,9 +152,10 @@ std::string SaveArchives::ArchiveMd5(const LocalSave &save)
     return md5;
 }
 
-BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cloudSave)
+Downloaded SaveArchives::Download(const std::string &name, const CloudSave &cloudSave)
 {
-    m_display.SetText(ProgressBar::Current, name);
+    m_display.SetText(ProgressBar::Current,
+                      "Downloading " + GameName(TitleId(name), cloudSave.texts.title));
     const std::string path = ArchivePath(name);
     std::vector<ArchivedFile> files;
     // Only these are held in memory: a resign changes them, and they are small.
@@ -164,15 +165,15 @@ BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cl
     if (!whole)
     {
         m_storage.Remove(path);
-        debugPrintf("SaveArchives::BringDown: %s could not be brought down whole\n", name.c_str());
-        return BroughtDown::Failed;
+        debugPrintf("SaveArchives::Download: %s could not be downloaded whole\n", name.c_str());
+        return Downloaded::Failed;
     }
 
     const bool resignRefused =
         m_target != nullptr && ResignSave(signing, *m_target) == ResignResult::Refused;
     if (resignRefused)
     {
-        debugPrintf("SaveArchives::BringDown: %s cannot be made this user's\n", name.c_str());
+        debugPrintf("SaveArchives::Download: %s cannot be made this user's\n", name.c_str());
     }
     m_state.Record(name, SaveBase{cloudSave.fileId, cloudSave.md5, std::string(), true});
     const std::string folder = m_savedata + "/" + name;
@@ -182,7 +183,7 @@ BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cl
     m_storage.Remove(path);
     if (!written)
     {
-        return BroughtDown::Failed;
+        return Downloaded::Failed;
     }
     for (const std::string &old : before.files)
     {
@@ -195,8 +196,8 @@ BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cl
     }
     m_state.Record(name, SaveBase{cloudSave.fileId, cloudSave.md5,
                                   m_scanner.ScanSave(name).fingerprint, false});
-    debugPrintf("SaveArchives::BringDown: %s saved\n", name.c_str());
-    return resignRefused ? BroughtDown::DoneNotResigned : BroughtDown::Done;
+    debugPrintf("SaveArchives::Download: %s saved\n", name.c_str());
+    return resignRefused ? Downloaded::DoneNotResigned : Downloaded::Done;
 }
 
 bool SaveArchives::WriteSaveFiles(const std::string &folder, const std::string &path,
@@ -242,17 +243,14 @@ void SaveArchives::QueueUpload(const LocalSave &save, const std::string &folderI
             {
                 return false;
             }
-            // Every console can then show what the save is without bringing the archive down,
+            const SaveTexts texts = LocalTexts(save.name);
+            // Every console can then show what the save is without downloading the archive,
             // and the cloud dates the save as the console does, not by its upload.
-            file = FileToStore{ArchiveTitle(save.name),
-                               DescribeSave(LocalTexts(save.name)),
-                               folderId,
-                               fileId,
-                               cloudOnly,
-                               CloudTime(save.modified)};
-            std::ostringstream text;
-            text << m_cloud.Running() + 1 << " saves in progress, last: " << save.name;
-            m_display.SetText(ProgressBar::Current, text.str());
+            file = FileToStore{
+                ArchiveTitle(save.name), DescribeSave(texts), folderId, fileId, cloudOnly,
+                CloudTime(save.modified)};
+            m_display.SetText(ProgressBar::Current,
+                              "Uploading " + GameName(TitleId(save.name), texts.title));
             return true;
         },
         [this, path, stored](const Json &item)
@@ -262,7 +260,7 @@ void SaveArchives::QueueUpload(const LocalSave &save, const std::string &folderI
         });
 }
 
-void SaveArchives::SendQueue(const std::vector<std::string> &names)
+void SaveArchives::UploadQueue(const std::vector<std::string> &names)
 {
     m_cloud.RunQueue([this] { return Stopped(); });
     for (const std::string &name : names)
