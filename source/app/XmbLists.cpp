@@ -28,6 +28,8 @@ const char kDownloadedIcon[] = "item_tex_ps3util";
 const char kInCloudIcon[] = "tex_album_icon";
 // The icon file of a save folder.
 const char kSaveIcon[] = "ICON0.PNG";
+// The longest name the console gives a save folder.
+const std::size_t kSaveNameMaxBytes = 31;
 
 /** A count in digits; the console's C++ library offers no std::to_string. */
 std::string Digits(std::size_t count)
@@ -35,6 +37,28 @@ std::string Digits(std::size_t count)
     std::ostringstream text;
     text << count;
     return text.str();
+}
+
+/**
+ * Whether a name is one the console gives a save folder: capitals, digits, '-' and '_'. Only such
+ * a name goes in a row's script, where any other could end its line and add a command.
+ */
+bool IsSaveFolderName(const std::string &name)
+{
+    if (name.empty() || name.size() > kSaveNameMaxBytes)
+    {
+        return false;
+    }
+    for (const char c : name)
+    {
+        const bool allowed =
+            (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+        if (!allowed)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 /** A text as an XML attribute or element holds it. */
@@ -183,11 +207,13 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
     {
         const XmbSave &save = saves[s];
         const std::string key = kSaveKeyPrefix + Digits(s);
-        const std::string actionPairs = webman ? ActionPairs(place, key) : std::string();
+        // A save of a name no console gives is only listed.
+        const bool acts = webman && IsSaveFolderName(save.name);
+        const std::string actionPairs = acts ? ActionPairs(place, key) : std::string();
         tables += Table(key, IconPair(save.icon, save.downloaded ? kDownloadedIcon : kInCloudIcon) +
                                  Pair("title", save.title) + Pair("info", save.info) + actionPairs);
         items += ActionItem(key);
-        if (webman)
+        if (acts)
         {
             lists.scripts.push_back(XmbScript{key, xmbSave + save.name});
         }
@@ -196,11 +222,12 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
     return lists;
 }
 
-std::string XmbScriptText(const XmbPlace &place, const std::string &key)
+std::string XmbScriptText(const XmbPlace &place, const XmbScript &script)
 {
-    // fcopy: a plain copy leaves a file of the same size as it is, as the last action may be.
-    return "fcopy " + place.scriptDirectory + key + xmbActionSuffix + "=" + place.actionFile +
-           "\n/play.ps3?" + place.appId + "\n";
+    // A copy would keep the time the lists were written, and "log" adds to the file it names.
+    // A title ID alone would start the app as the debug XMB's app_home icon, which fails.
+    return "del " + place.actionFile + "\nlogfile " + place.actionFile + "\nlog " + script.action +
+           "\n/play.ps3?col=game&seg=" + place.appId + "\n";
 }
 
 std::string XmbCategoryEntry(const XmbPlace &place)
