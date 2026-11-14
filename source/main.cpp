@@ -56,6 +56,7 @@
 #include "app/ConsoleStorage.h"
 #include "app/CloudSaveMenu.h"
 #include "app/ConsoleIdentity.h"
+#include "app/ConsoleSettings.h"
 #include "app/Profile.h"
 #include "sync/SaveBrowser.h"
 #include "sync/SaveScanner.h"
@@ -345,7 +346,7 @@ void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &pr
     state.Load();
     SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
                         profile, target);
-    if (!BrowseCloudSaves(menu, syncDialog, browser))
+    if (!BrowseCloudSaves(menu, syncDialog, browser, ReadDateStyle()))
     {
         menu.ShowMessage(driveFailureMessage());
     }

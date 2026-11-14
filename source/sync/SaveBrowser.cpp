@@ -4,6 +4,23 @@
 #include "app/DebugLog.h"
 #include "sync/GameName.h"
 
+#include <algorithm>
+#include <cctype>
+
+namespace
+{
+/** Whether a comes before b from A to Z, whatever the letters' case. */
+bool LessIgnoringCase(const std::string &a, const std::string &b)
+{
+    return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(),
+                                        [](char x, char y)
+                                        {
+                                            return std::tolower(static_cast<unsigned char>(x)) <
+                                                   std::tolower(static_cast<unsigned char>(y));
+                                        });
+}
+} // namespace
+
 SaveBrowser::SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
                          SyncDisplay &display, const std::string &rootFolderId,
                          const std::string &savedata, const std::string &ownSave,
@@ -30,16 +47,30 @@ std::vector<CloudGame> SaveBrowser::Games() const
         if (games.empty() || games.back().titleId != titleId)
         {
             title.clear();
-            games.push_back(CloudGame{titleId, titleId, std::vector<std::string>()});
+            games.push_back(CloudGame{titleId, titleId, titleId, std::vector<std::string>()});
         }
         if (title.empty())
         {
             title =
                 save.second.title.empty() ? m_archives.LocalTitle(save.first) : save.second.title;
+            games.back().name = GameName(titleId, title);
             games.back().label = GameLabel(titleId, title);
         }
         games.back().saves.push_back(save.first);
     }
+    // RFC 3339 times in one form sort as text does.
+    for (CloudGame &game : games)
+    {
+        std::stable_sort(game.saves.begin(), game.saves.end(),
+                         [this](const std::string &a, const std::string &b)
+                         { return Save(a).modified > Save(b).modified; });
+    }
+    std::stable_sort(games.begin(), games.end(),
+                     [](const CloudGame &a, const CloudGame &b)
+                     {
+                         return LessIgnoringCase(a.name, b.name) ||
+                                (!LessIgnoringCase(b.name, a.name) && a.titleId < b.titleId);
+                     });
     return games;
 }
 

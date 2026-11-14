@@ -627,10 +627,12 @@ TEST(MenuListsTheGamesWithTheirSaves)
     CHECK_EQUAL(std::size_t(2), games.size());
     if (games.size() == 2)
     {
-        CHECK_EQUAL(std::string("Game One (BLES00001)"), games[0].label);
-        CHECK_EQUAL(std::size_t(2), games[0].saves.size());
-        CHECK_EQUAL(std::string("BLUS00002"), games[1].label);
-        CHECK_EQUAL(std::string("BLUS00002-AUTO"), games[1].saves.front());
+        // By name from A to Z: a game without a title goes by its ID.
+        CHECK_EQUAL(std::string("BLUS00002"), games[0].label);
+        CHECK_EQUAL(std::string("BLUS00002-AUTO"), games[0].saves.front());
+        CHECK_EQUAL(std::string("Game One (BLES00001)"), games[1].label);
+        CHECK_EQUAL(std::string("Game One"), games[1].name);
+        CHECK_EQUAL(std::size_t(2), games[1].saves.size());
     }
     CHECK_EQUAL(setup.cloud.Items().at(setup.ArchiveId("BLES00001-SAVE")).content.size(),
                 static_cast<std::size_t>(browsing.browser.Save("BLES00001-SAVE").size));
@@ -703,10 +705,25 @@ TEST(ArchiveMadeAnewIsNotTakenForAChangeOfTheSave)
 
 TEST(SizesAndTimesReadAsAPersonReadsThem)
 {
-    CHECK_EQUAL(std::string("0.5 KB"), ShownSize(512));
-    CHECK_EQUAL(std::string("4.4 MB"), ShownSize(4613734));
-    CHECK_EQUAL(std::string("2026-11-13 21:13 UTC"), ShownTime("2026-11-13T21:13:21.672Z"));
-    CHECK_EQUAL(std::string("soon"), ShownTime("soon"));
+    CHECK_EQUAL(std::string("3787 KB"), ShownSize(3878400));
+    CHECK_EQUAL(std::string("9999 KB"), ShownSize(9999 * 1024 + 1023));
+    CHECK_EQUAL(std::string("36 MB"), ShownSize(38 * 1000 * 1000));
+    // The console's own: day first, 12-hour clock, an hour east of UTC.
+    const DateStyle console{DateOrder::DayMonthYear, true, 60};
+    CHECK_EQUAL(std::string("14/11/2026 11:56 AM"), ShownTime("2026-11-14T10:56:21.672Z", console));
+    CHECK_EQUAL(std::string("29/12/2023 6:19 PM"), ShownTime("2023-12-29T17:19:00.000Z", console));
+    // Midnight and noon, and a date that local time moves to the next day, month and year.
+    CHECK_EQUAL(std::string("1/1/2024 12:30 AM"), ShownTime("2023-12-31T23:30:00.000Z", console));
+    CHECK_EQUAL(std::string("14/11/2026 12:05 PM"), ShownTime("2026-11-14T11:05:00.000Z", console));
+    CHECK_EQUAL(
+        std::string("2024/2/29 12:05"),
+        ShownTime("2024-02-29T13:05:00.000Z", DateStyle{DateOrder::YearMonthDay, false, -60}));
+    CHECK_EQUAL(
+        std::string("12/31/2023 23:30"),
+        ShownTime("2023-12-31T23:30:00.000Z", DateStyle{DateOrder::MonthDayYear, false, 0}));
+    // A time not in Drive's form, or out of range, is shown as it is.
+    CHECK_EQUAL(std::string("soon"), ShownTime("soon", console));
+    CHECK_EQUAL(std::string("2026-13-45T99:99"), ShownTime("2026-13-45T99:99", console));
 }
 
 namespace
@@ -823,4 +840,29 @@ TEST(MenuDeletesFromTheCloudOnlyASaveTheConsoleHasNot)
     CHECK_EQUAL(std::size_t(2), setup.display.questions.size());
     CHECK(ShownResult("BLES00001-SAVE", RemoveResult::OnConsole).find("delete it there first") !=
           std::string::npos);
+}
+
+TEST(MenuListsGamesByTrimmedNameAndSavesNewestFirst)
+{
+    Setup setup;
+    setup.cloud.Store(TestCloudItem{"BLES00009-A.tar", setup.rootId, octetMime, MakeTar({})});
+    setup.cloud.Store(TestCloudItem{"BLES00009-B.tar", setup.rootId, octetMime, MakeTar({})});
+    setup.cloud.Store(TestCloudItem{"BLUS00008-SAVE.tar", setup.rootId, octetMime, MakeTar({})});
+    // A byte order would put "  Zebra" before "apple"; a case-blind one by name puts it after.
+    setup.cloud.SetDescription(setup.ArchiveId("BLES00009-A"), "  Zebra");
+    setup.cloud.SetDescription(setup.ArchiveId("BLES00009-B"), "  Zebra");
+    setup.cloud.SetDescription(setup.ArchiveId("BLUS00008-SAVE"), "apple");
+    // The save that sorts last by name was stored last.
+    setup.cloud.SetModified(setup.ArchiveId("BLES00009-A"), "2026-01-01T10:00:00.000Z");
+    setup.cloud.SetModified(setup.ArchiveId("BLES00009-B"), "2026-02-01T10:00:00.000Z");
+    setup.console.MakeDirectories(kSavedata);
+    Browsing browsing(setup, setup.console);
+    const std::vector<CloudGame> games = browsing.browser.Games();
+    CHECK_EQUAL(std::size_t(2), games.size());
+    if (games.size() == 2)
+    {
+        CHECK_EQUAL(std::string("apple (BLUS00008)"), games[0].label);
+        CHECK_EQUAL(std::string("Zebra"), games[1].name);
+        CHECK(games[1].saves == (std::vector<std::string>{"BLES00009-B", "BLES00009-A"}));
+    }
 }

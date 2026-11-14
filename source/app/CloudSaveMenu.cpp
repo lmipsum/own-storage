@@ -20,7 +20,8 @@ const char kSavesHint[] = "X: load to this PS3    Triangle: delete from the clou
  * the game has no save left in the cloud.
  * @return whether a save was deleted
  */
-bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame game)
+bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame game,
+                const DateStyle &dates)
 {
     bool deleted = false;
     std::size_t cursor = 0;
@@ -32,8 +33,8 @@ bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame 
         for (const std::string &name : game.saves)
         {
             const CloudSave &save = browser.Save(name);
-            rows.push_back(name + "    " + ShownTime(save.modified) + "    " +
-                           ShownSize(save.size) + "    " + ShownStatus(browser.Status(name)));
+            rows.push_back(game.name + " | " + name + " | " + ShownTime(save.modified, dates) +
+                           " " + ShownSize(save.size) + " | " + ShownStatus(browser.Status(name)));
         }
         menu.ShowMessage(result);
         const MenuChoice chosen = menu.ChooseOrRemove(game.label, rows, kSavesHint, cursor);
@@ -66,7 +67,7 @@ bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame 
 }
 } // namespace
 
-bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser)
+bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, const DateStyle &dates)
 {
     menu.ShowMessage("Listing the saves in the cloud...");
     if (!browser.Refresh())
@@ -103,6 +104,6 @@ bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser)
             return true;
         }
         cursor = static_cast<std::size_t>(chosen);
-        deleted = BrowseGame(menu, dialog, browser, games[cursor]);
+        deleted = BrowseGame(menu, dialog, browser, games[cursor], dates);
     }
 }
