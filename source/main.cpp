@@ -27,8 +27,10 @@
 #include <malloc.h>
 
 #include <lv2/syscalls.h>
+#include <lv2/thread.h>
 #include <sys/systime.h>
 #include <sys/file.h>
+#include <sys/thread.h>
 #include <io/pad.h>
 
 #include <sysutil/sysutil.h>
@@ -355,11 +357,10 @@ void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &pr
 /**
  * The app on its own thread: finds the logged-in user, then runs the main menu until the user
  * quits. The menu waits for the main thread's pad presses.
- * @param arg the Menu
+ * @param menu shows the app and takes the main thread's pad presses
  */
-int runApp(void *arg)
+void runApp(Menu &menu)
 {
-    Menu &menu = *static_cast<Menu *>(arg);
     ClientCredentials client = LoadUserCredentials(userClientFile, "google");
     if (!client.IsComplete())
     {
@@ -369,7 +370,7 @@ int runApp(void *arg)
     {
         waitForQuit(menu, "Cannot reach the Own Storage configuration. Check the network.");
         exitapp = 1;
-        return 0;
+        return;
     }
     googleAuth.SetClient(client);
 
@@ -379,7 +380,7 @@ int runApp(void *arg)
     {
         waitForQuit(menu, unknownUserMessage);
         exitapp = 1;
-        return 0;
+        return;
     }
     const std::string profile = MakeProfileDirectory(consoleStorage, *user);
     const std::string savedata = SavedataDirectory(*user);
@@ -433,7 +434,21 @@ int runApp(void *arg)
             exitapp = 1;
         }
     }
-    return 0;
+}
+
+// SDL gives its threads a 16 KB stack, too small for the app's work.
+const u64 appThreadStackSize = 256 * 1024;
+// The priority SDL gave the thread, so the app shares the console as it did.
+const s32 appThreadPriority = 1500;
+
+/**
+ * Runs the app on a thread of its own; see runApp.
+ * @param menu the Menu
+ */
+void runAppThread(void *menu)
+{
+    runApp(*static_cast<Menu *>(menu));
+    sysThreadExit(0);
 }
 
 // The pad buttons the menus take, as bits of what a pad holds down.
@@ -551,7 +566,15 @@ int main(int argc, char **argv)
         // Gone before SDL shuts down, which the screen's surfaces need.
         Screen appScreen(screen, image, Sans);
         Menu menu(appScreen, exitapp);
-        SDL_Thread *thread = SDL_CreateThread(runApp, &menu);
+        sys_ppu_thread_t appThread;
+        const s32 created =
+            sysThreadCreate(&appThread, runAppThread, &menu, appThreadPriority, appThreadStackSize,
+                            THREAD_JOINABLE, const_cast<char *>("app"));
+        if (created != 0)
+        {
+            debugPrintf("The app thread cannot start: %08x\n", static_cast<unsigned int>(created));
+            exitapp = 1;
+        }
         unsigned int held[MAX_PADS] = {};
 
         while (exitapp == 0)
@@ -568,9 +591,14 @@ int main(int argc, char **argv)
 
         debugPrintf("The application exited...%d\n", exitapp.load());
 
+        // The app's thread uses the menu and the screen, which go when this block ends, and may
+        // still open the sync dialog.
+        if (created == 0)
+        {
+            u64 status;
+            sysThreadJoin(appThread, &status);
+        }
         syncDialog.Close();
-
-        SDL_KillThread(thread);
     }
     SDL_FreeSurface(image);
     SDL_FreeSurface(screen);
