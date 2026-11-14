@@ -11,7 +11,7 @@
 namespace
 {
 const char kGamesHeading[] = "Saves in the cloud";
-const char kGamesHint[] = "X: open    O: back";
+const char kGamesHint[] = "X: open    Square: import from USB    O: back";
 // The font has no button symbols, so the triangle is named.
 const char kSavesHint[] = "X: load to this PS3    Triangle: delete from the cloud    O: back";
 
@@ -37,14 +37,15 @@ bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame 
                            " " + ShownSize(save.size) + " | " + ShownStatus(browser.Status(name)));
         }
         menu.ShowMessage(result);
-        const MenuChoice chosen = menu.ChooseOrRemove(game.label, rows, kSavesHint, cursor);
-        if (chosen.row == Menu::kNone)
+        const MenuChoice chosen =
+            menu.ChooseAction(game.label, rows, kSavesHint, cursor, {PadButton::Remove});
+        if (chosen.button == PadButton::Back)
         {
             return deleted;
         }
         cursor = static_cast<std::size_t>(chosen.row);
         const std::string name = game.saves[cursor];
-        if (!chosen.remove)
+        if (chosen.button == PadButton::Select)
         {
             result = ShownResult(name, browser.Load(name));
         }
@@ -67,7 +68,8 @@ bool BrowseGame(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, CloudGame 
 }
 } // namespace
 
-bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, const DateStyle &dates)
+bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, const DateStyle &dates,
+                      const std::function<std::string()> &importSaves)
 {
     menu.ShowMessage("Listing the saves in the cloud...");
     if (!browser.Refresh())
@@ -76,19 +78,15 @@ bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, cons
     }
     menu.ShowMessage(std::string());
     std::size_t cursor = 0;
-    bool deleted = false;
+    // A deletion or an import says what came of it, which an empty list does not hide.
+    bool reported = false;
     while (true)
     {
-        // Listed anew each time, as a save may have been deleted.
+        // Listed anew each time, as a save may have been deleted or imported.
         const std::vector<CloudGame> games = browser.Games();
-        if (games.empty())
+        if (games.empty() && !reported)
         {
-            // A deletion that emptied the cloud keeps its own message.
-            if (!deleted)
-            {
-                menu.ShowMessage("There are no saves in the cloud.");
-            }
-            return true;
+            menu.ShowMessage("There are no saves in the cloud.");
         }
         std::vector<std::string> rows;
         for (const CloudGame &game : games)
@@ -98,12 +96,26 @@ bool BrowseCloudSaves(Menu &menu, SyncDialog &dialog, SaveBrowser &browser, cons
                 << (game.saves.size() == 1 ? " save" : " saves");
             rows.push_back(row.str());
         }
-        const int chosen = menu.Choose(kGamesHeading, rows, kGamesHint, cursor);
-        if (chosen == Menu::kNone)
+        // The list is shown even when empty, so that saves can be imported into it.
+        const MenuChoice chosen =
+            menu.ChooseAction(kGamesHeading, rows, kGamesHint, cursor, {PadButton::Import});
+        if (chosen.button == PadButton::Back)
         {
             return true;
         }
-        cursor = static_cast<std::size_t>(chosen);
-        deleted = BrowseGame(menu, dialog, browser, games[cursor], dates);
+        if (chosen.button == PadButton::Import)
+        {
+            const std::string result = importSaves();
+            dialog.Close();
+            if (!browser.Refresh())
+            {
+                return false;
+            }
+            menu.ShowMessage(result);
+            reported = true;
+            continue;
+        }
+        cursor = static_cast<std::size_t>(chosen.row);
+        reported = BrowseGame(menu, dialog, browser, games[cursor], dates);
     }
 }

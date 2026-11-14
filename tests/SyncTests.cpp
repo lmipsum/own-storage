@@ -8,6 +8,7 @@
 #include "sync/ParamPfd.h"
 #include "sync/ParamSfo.h"
 #include "sync/SaveBrowser.h"
+#include "sync/SaveImport.h"
 #include "sync/SaveScanner.h"
 #include "sync/Sync.h"
 #include "sync/SyncDisplay.h"
@@ -865,4 +866,103 @@ TEST(MenuListsGamesByTrimmedNameAndSavesNewestFirst)
         CHECK_EQUAL(std::string("Zebra"), games[1].name);
         CHECK(games[1].saves == (std::vector<std::string>{"BLES00009-B", "BLES00009-A"}));
     }
+}
+
+namespace
+{
+const char kUsbSaves[] = "/dev_usb000/PS3/SAVEDATA";
+const char kSecondUsbSaves[] = "/dev_usb001/PS3/SAVEDATA";
+
+/** Imports the saves a console's USB drive holds, as the menu does. */
+ImportResult Import(Setup &setup, TestConsole &on)
+{
+    SyncState state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup");
+    state.Load();
+    SaveImport import(setup.cloud, state, on, setup.display, setup.rootId, kOwnSave, on.Scratch());
+    ImportResult result{0, 0, 0, 0};
+    CHECK(import.Run({kUsbSaves, kSecondUsbSaves}, result));
+    return result;
+}
+
+/** Puts a save, a PARAM.SFO and a data file, in a drive's save folder. */
+void PutUsbSave(TestConsole &console, const char *folder, const std::string &name,
+                const std::string &data)
+{
+    const std::string save = std::string(folder) + "/" + name;
+    console.Put(save + "/PARAM.SFO", MakeSfo("Game"), kWritten);
+    console.Put(save + "/DATA.BIN", data, kWritten);
+}
+} // namespace
+
+TEST(UsbSavesGoUpKeptInTheCloudOnly)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    // A copy of a save the cloud has already, and one it has not.
+    PutUsbSave(setup.console, kUsbSaves, "BLES00001-SAVE", "old copy");
+    PutUsbSave(setup.console, kUsbSaves, "NPEB00003-USB", "usb");
+    // What a computer leaves on a drive is not a save.
+    setup.console.Put(std::string(kUsbSaves) + "/.DS_Store", "finder", kWritten);
+    setup.console.MakeDirectories(std::string(kUsbSaves) + "/EMPTY");
+    const ImportResult result = Import(setup, setup.console);
+    CHECK_EQUAL(std::size_t(1), result.imported);
+    CHECK_EQUAL(std::size_t(1), result.skipped);
+    CHECK_EQUAL(std::size_t(0), result.failed);
+    CHECK_EQUAL(std::string("data-1"), setup.Archive("BLES00001-SAVE")[0].content);
+    CHECK(setup.cloud.CloudOnly(setup.ArchiveId("NPEB00003-USB")));
+    // A second import finds it all there.
+    CHECK_EQUAL(std::size_t(2), Import(setup, setup.console).skipped);
+}
+
+TEST(SaveKeptInTheCloudOnlyComesDownOnlyFromTheMenu)
+{
+    Setup setup;
+    setup.console.MakeDirectories(kSavedata);
+    PutUsbSave(setup.console, kUsbSaves, "NPEB00003-USB", "usb");
+    Import(setup, setup.console);
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    setup.Run(other, kSavedata);
+    CHECK(!other.Exists(std::string(kSavedata) + "/NPEB00003-USB"));
+    CHECK(setup.display.questions.empty());
+    {
+        Browsing browsing(setup, other);
+        CHECK(browsing.browser.Load("NPEB00003-USB") == LoadResult::Loaded);
+    }
+    CHECK_EQUAL(std::string("usb"),
+                other.Content(std::string(kSavedata) + "/NPEB00003-USB/DATA.BIN"));
+    // Played on and sent up, it is an ordinary save again.
+    other.Put(std::string(kSavedata) + "/NPEB00003-USB/DATA.BIN", "played on", kChanged);
+    setup.Run(other, kSavedata);
+    CHECK(!setup.cloud.CloudOnly(setup.ArchiveId("NPEB00003-USB")));
+}
+
+TEST(SaveOnTwoUsbDrivesGoesUpOnceAndAnUnreadableOneIsCounted)
+{
+    Setup setup;
+    setup.console.MakeDirectories(kSavedata);
+    PutUsbSave(setup.console, kUsbSaves, "NPEB00004-BOTH", "first");
+    PutUsbSave(setup.console, kSecondUsbSaves, "NPEB00004-BOTH", "second");
+    // A file name too long for an archive, so the save cannot be sent.
+    PutUsbSave(setup.console, kSecondUsbSaves, "NPEB00005-BAD", "bad");
+    setup.console.Put(std::string(kSecondUsbSaves) + "/NPEB00005-BAD/" + std::string(120, 'x'),
+                      "bad", kWritten);
+    const ImportResult result = Import(setup, setup.console);
+    CHECK_EQUAL(std::size_t(1), result.imported);
+    CHECK_EQUAL(std::size_t(1), result.duplicates);
+    CHECK_EQUAL(std::size_t(1), result.failed);
+    CHECK_EQUAL(std::string("first"), setup.Archive("NPEB00004-BOTH")[0].content);
+}
+
+TEST(SaveKeptInTheCloudOnlyThatTheConsoleHasTooIsTakenAsTheSame)
+{
+    Setup setup;
+    PutUsbSave(setup.console, kUsbSaves, "NPEB00003-USB", "usb");
+    Import(setup, setup.console);
+    // The console has the same save, without a base: the archive tells they are one.
+    PutUsbSave(setup.console, kSavedata, "NPEB00003-USB", "usb");
+    setup.Run();
+    CHECK(setup.display.questions.empty());
+    CHECK_EQUAL(0, setup.cloud.Updates());
 }

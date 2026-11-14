@@ -3,6 +3,8 @@
 
 #include <sys/systime.h>
 
+#include <algorithm>
+
 namespace
 {
 const int kNoPress = -1;
@@ -45,17 +47,12 @@ Menu::Menu(Screen &screen, const std::atomic<int> &quit)
 int Menu::Choose(const std::string &heading, const std::vector<std::string> &rows,
                  const std::string &hint, std::size_t cursor)
 {
-    return Wait(heading, rows, hint, cursor, false).row;
+    return ChooseAction(heading, rows, hint, cursor, {}).row;
 }
 
-MenuChoice Menu::ChooseOrRemove(const std::string &heading, const std::vector<std::string> &rows,
-                                const std::string &hint, std::size_t cursor)
-{
-    return Wait(heading, rows, hint, cursor, true);
-}
-
-MenuChoice Menu::Wait(const std::string &heading, const std::vector<std::string> &rows,
-                      const std::string &hint, std::size_t cursor, bool removable)
+MenuChoice Menu::ChooseAction(const std::string &heading, const std::vector<std::string> &rows,
+                              const std::string &hint, std::size_t cursor,
+                              const std::vector<PadButton> &actions)
 {
     m_view.heading = heading;
     m_view.rows = rows;
@@ -64,7 +61,7 @@ MenuChoice Menu::Wait(const std::string &heading, const std::vector<std::string>
     // A press made before the menu was shown was meant for something else.
     m_pressed = kNoPress;
     Show();
-    MenuChoice choice{kNone, false};
+    MenuChoice choice{kNone, PadButton::Back};
     while (m_quit == 0)
     {
         const int pressed = m_pressed.exchange(kNoPress);
@@ -74,14 +71,18 @@ MenuChoice Menu::Wait(const std::string &heading, const std::vector<std::string>
             continue;
         }
         const PadButton button = static_cast<PadButton>(pressed);
-        if (button == PadButton::Select && !rows.empty())
+        const int row = rows.empty() ? kNone : static_cast<int>(m_view.cursor);
+        const bool allowed = std::find(actions.begin(), actions.end(), button) != actions.end();
+        // Select and Remove act on a row; Import needs none.
+        if ((button == PadButton::Select || (button == PadButton::Remove && allowed)) &&
+            row != kNone)
         {
-            choice.row = static_cast<int>(m_view.cursor);
+            choice = MenuChoice{row, button};
             break;
         }
-        if (button == PadButton::Remove && removable && !rows.empty())
+        if (button == PadButton::Import && allowed)
         {
-            choice = MenuChoice{static_cast<int>(m_view.cursor), true};
+            choice = MenuChoice{row, button};
             break;
         }
         if (button == PadButton::Back)

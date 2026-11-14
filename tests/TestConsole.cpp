@@ -17,8 +17,8 @@
 
 namespace
 {
-// The console paths the sync uses all start here.
-const char kConsoleRoot[] = "/dev_hdd0";
+// The console's disks, the hard disk and USB drives, all start here.
+const char kConsoleRoot[] = "/dev_";
 
 /** Creates every missing directory on the way to path. */
 void MakePcDirectories(const std::string &path)

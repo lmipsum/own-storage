@@ -22,7 +22,8 @@ const char kStoredFileFields[] = "fileSize,id,md5Checksum,modifiedDate,parents/i
 const char kCreatedFolderFields[] = "id,modifiedDate,parents/id";
 // What a listing gives of each file, and how many files one request may give.
 const char kListedFields[] =
-    "kind,items(description,fileSize,id,md5Checksum,modifiedDate,title),nextPageToken";
+    "kind,items(description,fileSize,id,md5Checksum,modifiedDate,properties(key,value),title),"
+    "nextPageToken";
 const char kTrashedFileFields[] = "id";
 // What a listing reply says it is; any other reply is not a listing, however it ends.
 const char kFileListKind[] = "drive#fileList";
@@ -82,6 +83,15 @@ std::string BuildMetadata(const FileToStore &file, const std::string &mimeType)
     }
     meta.Add("parents", Json(parents));
     meta.Add("mimeType", Json(mimeType));
+    if (mimeType != folderMime)
+    {
+        // Sent either way, so an upload without the mark takes it off a file that had it.
+        Json mark;
+        mark.Add("key", Json(cloudOnlyProperty));
+        mark.Add("value", Json(file.cloudOnly ? cloudOnlyMarked : cloudOnlyUnmarked));
+        mark.Add("visibility", Json("PUBLIC"));
+        meta.Add("properties", Json(Json::Array{mark}));
+    }
     return meta.Str();
 }
 
@@ -200,8 +210,8 @@ QueuedRequest GoogleDrive::BuildFolderRequest(const std::string &title, const st
     request.url = std::string(kFilesUrl) + "?fields=" + m_http.Escape(kCreatedFolderFields);
     request.headers.push_back("Content-Type: " + jsonMime);
     request.headers.push_back("Expect:");
-    request.body =
-        BuildMetadata(FileToStore{title, std::string(), parentId, std::string()}, folderMime);
+    request.body = BuildMetadata(FileToStore{title, std::string(), parentId, std::string(), false},
+                                 folderMime);
     // A create sent twice makes two folders, so a lost answer is left to the next run, which
     // looks up the Own Storage folder at every start.
     request.retry = Retry::OnlyRefused;
@@ -400,7 +410,7 @@ void GoogleDrive::QueueFile(const std::string &path, const PrepareFile &prepare,
     m_queue.Add(
         [this, path, prepare, done](QueuedRequest &request)
         {
-            FileToStore file;
+            FileToStore file{};
             if (!prepare(file))
             {
                 return false;

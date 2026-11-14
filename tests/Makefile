@@ -13,7 +13,7 @@ MBEDTLS	?= /usr
 CXX	:= $(CROSS)g++
 SHARED	:= sync/SyncState.cpp sync/SaveScanner.cpp sync/Sync.cpp sync/Tar.cpp sync/ParamSfo.cpp \
 	   sync/CloudSaves.cpp sync/GameName.cpp sync/SaveArchives.cpp sync/SaveBrowser.cpp \
-	   sync/ParamPfd.cpp sync/Resign.cpp json/Json.cpp \
+	   sync/ParamPfd.cpp sync/Resign.cpp sync/SaveProgress.cpp sync/SaveImport.cpp json/Json.cpp \
 	   app/Files.cpp app/DebugLog.cpp app/CloudSaveText.cpp app/XRegistry.cpp
 SOURCES	:= $(wildcard *.cpp) $(addprefix ../source/,$(SHARED))
 # include/ goes first: its headers stand in for the console's.
