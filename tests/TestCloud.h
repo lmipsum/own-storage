@@ -39,6 +39,8 @@ class TestCloud : public CloudStorage
     int Updates() const;
     /** What the cloud shows about a file; empty when nothing was given. */
     std::string Description(const std::string &id) const;
+    /** Whether a file carries the mark of a save kept in the cloud only. */
+    bool CloudOnly(const std::string &id) const;
     /** Changes what the cloud shows about a file, as the user can on the Drive website. */
     void SetDescription(const std::string &id, const std::string &description);
     /** Sets when the cloud says a file was last stored, in the form Drive gives it. */
@@ -76,11 +78,12 @@ class TestCloud : public CloudStorage
     /** What the cloud answers about an item. */
     Json Describe(const std::string &id) const;
     /** Adds an item; its answer is lost when LoseAnswerOfCreate() says so. */
-    Json Create(const TestCloudItem &item, const std::string &description);
+    Json Create(const TestCloudItem &item, const std::string &description, bool cloudOnly);
 
     std::map<std::string, TestCloudItem> m_items;
     std::map<std::string, std::string> m_descriptions;
     std::map<std::string, std::string> m_modified;
+    std::map<std::string, bool> m_cloudOnly;
     std::vector<std::function<void()>> m_queue;
     bool m_failSearches;
     bool m_damageDownloads;

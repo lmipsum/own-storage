@@ -6,6 +6,7 @@
 #include "sync/Tar.h"
 
 #include <algorithm>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -113,4 +114,46 @@ std::string SaveArchives::LocalTitle(const std::string &name) const
     std::string sfo;
     return m_storage.Read(m_savedata + "/" + name + "/" + paramSfoName, sfo) ? ReadSfoTitle(sfo)
                                                                              : std::string();
+}
+
+void SaveArchives::QueueUpload(const LocalSave &save, const std::string &folderId,
+                               const std::string &fileId, bool cloudOnly,
+                               const std::function<void(const Json &)> &stored)
+{
+    const std::string path = ArchivePath(save.name);
+    m_cloud.QueueFile(
+        path,
+        [this, &save, folderId, fileId, cloudOnly, path](FileToStore &file)
+        {
+            if (WriteArchive(save, path).empty())
+            {
+                return false;
+            }
+            // Every console can then name the game without bringing the archive down.
+            file = FileToStore{ArchiveTitle(save.name), LocalTitle(save.name), folderId, fileId,
+                               cloudOnly};
+            std::ostringstream text;
+            text << m_cloud.Running() + 1 << " saves in progress, last: " << save.name;
+            m_display.SetText(ProgressBar::Current, text.str());
+            return true;
+        },
+        [this, path, stored](const Json &item)
+        {
+            m_storage.Remove(path);
+            stored(item);
+        });
+}
+
+void SaveArchives::SendQueue(const std::vector<std::string> &names)
+{
+    m_cloud.RunQueue([this] { return Stopped(); });
+    for (const std::string &name : names)
+    {
+        m_storage.Remove(ArchivePath(name));
+    }
+}
+
+bool SaveArchives::Stopped() const
+{
+    return m_display.Cancelled() || m_cloud.IsFull();
 }

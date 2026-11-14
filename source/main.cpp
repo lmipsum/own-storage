@@ -61,6 +61,7 @@
 #include "app/ConsoleSettings.h"
 #include "app/Profile.h"
 #include "sync/SaveBrowser.h"
+#include "sync/SaveImport.h"
 #include "sync/SaveScanner.h"
 #include "sync/Sync.h"
 #include "sync/SyncState.h"
@@ -328,27 +329,79 @@ void runSync(Menu &menu, ConsoleStorage &storage, const std::string &profile,
     }
 }
 
-/** Lets the user load or delete saves of the backup one by one. */
+// The USB drives the console can have: /dev_usb000 to /dev_usb007.
+const char lastUsbDrive = '7';
+
+/**
+ * Sends the saves on USB drives up into the backup, marked as kept in the cloud only.
+ * @param storage the console's disks
+ * @param state the user's bases
+ * @param profile the user's directory of the app, which holds the archives while they move
+ * @param folderId the cloud id of the Own Storage folder
+ * @return what came of it, as the user reads it
+ */
+std::string importUsbSaves(ConsoleStorage &storage, SyncState &state, const std::string &profile,
+                           const std::string &folderId)
+{
+    std::vector<std::string> folders;
+    for (char number = '0'; number <= lastUsbDrive; ++number)
+    {
+        const std::string folder = std::string("/dev_usb00") + number + usbSavedataDirectory;
+        if (!storage.List(folder).empty())
+        {
+            folders.push_back(folder);
+        }
+    }
+    if (folders.empty())
+    {
+        return "No USB drive with saves in PS3/SAVEDATA was found.";
+    }
+    syncDialog.Open();
+    SaveImport import(drive, state, storage, syncDialog, folderId, profileMarkerSave, profile);
+    ImportResult result;
+    if (!import.Run(folders, result))
+    {
+        return driveFailureMessage();
+    }
+    if (drive.IsFull())
+    {
+        syncDialog.ShowError(driveFullMessage);
+    }
+    std::ostringstream text;
+    text << result.imported << (result.imported == 1 ? " save" : " saves") << " imported, "
+         << result.skipped << " already in the cloud left as they are";
+    if (result.duplicates > 0)
+    {
+        text << ", " << result.duplicates << " on two drives sent once";
+    }
+    if (result.failed > 0)
+    {
+        text << ", " << result.failed << " not sent";
+    }
+    text << (drive.IsFull()           ? ": the Google storage is full."
+             : syncDialog.Cancelled() ? ": the import was stopped."
+                                      : ".");
+    return text.str();
+}
+
+/** Lets the user load or delete saves of the backup one by one, or import saves into it. */
 void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &profile,
                       const std::string &savedata, const SaveTarget *target)
 {
     menu.ShowMessage("Looking for the backup...");
     std::string folderId;
-    if (!findBackupFolder(false, folderId))
+    // Created when missing, so that saves can be imported into an empty backup.
+    if (!findBackupFolder(true, folderId))
     {
         menu.ShowMessage(driveFailureMessage());
-        return;
-    }
-    if (folderId.empty())
-    {
-        menu.ShowMessage("There are no saves in the cloud.");
         return;
     }
     SyncState state(stateFile(profile), stateBackup(profile));
     state.Load();
     SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
                         profile, target);
-    if (!BrowseCloudSaves(menu, syncDialog, browser, ReadDateStyle()))
+    const auto importSaves = [&]() { return importUsbSaves(storage, state, profile, folderId); };
+    if (!BrowseCloudSaves(menu, syncDialog, browser, ReadDateStyle(), importSaves))
     {
         menu.ShowMessage(driveFailureMessage());
     }
@@ -459,6 +512,7 @@ const unsigned int padRight = 1 << 3;
 const unsigned int padCross = 1 << 4;
 const unsigned int padCircle = 1 << 5;
 const unsigned int padTriangle = 1 << 6;
+const unsigned int padSquare = 1 << 7;
 
 /** The menu buttons a pad holds down. */
 unsigned int heldButtons(const padData &data)
@@ -466,7 +520,7 @@ unsigned int heldButtons(const padData &data)
     return (data.BTN_UP ? padUp : 0) | (data.BTN_DOWN ? padDown : 0) |
            (data.BTN_LEFT ? padLeft : 0) | (data.BTN_RIGHT ? padRight : 0) |
            (data.BTN_CROSS ? padCross : 0) | (data.BTN_CIRCLE ? padCircle : 0) |
-           (data.BTN_TRIANGLE ? padTriangle : 0);
+           (data.BTN_TRIANGLE ? padTriangle : 0) | (data.BTN_SQUARE ? padSquare : 0);
 }
 
 /**
@@ -480,10 +534,10 @@ void readPads(Menu &menu, unsigned int held[MAX_PADS])
     {
         unsigned int bit;
         PadButton button;
-    } presses[] = {{padUp, PadButton::Up},          {padDown, PadButton::Down},
-                   {padLeft, PadButton::PageUp},    {padRight, PadButton::PageDown},
-                   {padCross, PadButton::Select},   {padCircle, PadButton::Back},
-                   {padTriangle, PadButton::Remove}};
+    } presses[] = {{padUp, PadButton::Up},           {padDown, PadButton::Down},
+                   {padLeft, PadButton::PageUp},     {padRight, PadButton::PageDown},
+                   {padCross, PadButton::Select},    {padCircle, PadButton::Back},
+                   {padTriangle, PadButton::Remove}, {padSquare, PadButton::Import}};
     padInfo info;
     ioPadGetInfo(&info);
     for (int pad = 0; pad < MAX_PADS; ++pad)

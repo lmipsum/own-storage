@@ -12,6 +12,14 @@ const std::string folderMime = "application/vnd.google-apps.folder";
 const std::string octetMime = "application/octet-stream";
 /** The type of the metadata that creates a folder. */
 const std::string jsonMime = "application/json";
+/**
+ * The property of a stored file that marks it as kept in the cloud only: no sync brings it down
+ * by itself. Public, so a sign-in with a Google client of the user's own sees it too.
+ */
+const std::string cloudOnlyProperty = "ownStorageCloudOnly";
+/** What cloudOnlyProperty holds on a file with the mark, and on one without. */
+const std::string cloudOnlyMarked = "yes";
+const std::string cloudOnlyUnmarked = "no";
 
 /** The likely cause of the last failed request. */
 enum class Failure
@@ -34,6 +42,8 @@ struct FileToStore
     std::string parentId;
     /** The stored file to update; empty to create a new one. */
     std::string fileId;
+    /** Whether it is marked as kept in the cloud only; an upload without the mark clears it. */
+    bool cloudOnly;
 };
 
 /**
@@ -65,7 +75,7 @@ class CloudStorage
      * Every file in a folder, unless it is trashed; folders in it are left out.
      * @param folderId the folder
      * @param files receives what the cloud says about each file, with its "id", "title",
-     * "description", "md5Checksum", "fileSize" and "modifiedDate"
+     * "description", "md5Checksum", "fileSize", "modifiedDate" and "properties"
      * @return false when the listing failed
      */
     virtual bool ListFiles(const std::string &folderId, Json::Array &files) = 0;

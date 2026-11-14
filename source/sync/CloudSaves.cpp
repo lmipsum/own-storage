@@ -28,6 +28,19 @@ std::string SaveName(const std::string &title)
     const std::string name = title.substr(0, title.size() - kArchiveSuffixLength);
     return IsArchivableName(name) ? name : std::string();
 }
+/** Whether a listed file carries the cloud-only mark. */
+bool IsMarkedCloudOnly(const Json &file)
+{
+    for (const Json &property : file["properties"].AsArray())
+    {
+        if (property["key"].Str() == cloudOnlyProperty &&
+            property["value"].Str() == cloudOnlyMarked)
+        {
+            return true;
+        }
+    }
+    return false;
+}
 } // namespace
 
 std::string ArchiveTitle(const std::string &save)
@@ -54,7 +67,7 @@ bool ListCloudSaves(CloudStorage &cloud, const std::string &folderId, const std:
         const CloudSave save{file["id"].Str(), file["md5Checksum"].Str(), file["description"].Str(),
                              // The console's C++ library offers strtoull only outside std.
                              strtoull(file["fileSize"].Str().c_str(), nullptr, 10),
-                             file["modifiedDate"].Str()};
+                             file["modifiedDate"].Str(), IsMarkedCloudOnly(file)};
         const auto known = saves.find(name);
         if (known == saves.end())
         {

@@ -5,6 +5,7 @@
 #include "sync/CloudStorage.h"
 #include "sync/LocalStorage.h"
 #include "sync/SaveArchives.h"
+#include "sync/SaveProgress.h"
 #include "sync/SaveScanner.h"
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
@@ -91,21 +92,6 @@ class Sync
         std::vector<Question> questions;
     };
 
-    /** How far the upper progress bar is. */
-    class Progress
-    {
-      public:
-        Progress(SyncDisplay &display, std::size_t total);
-        /** Counts one more save done and moves the bar. */
-        void Advance();
-
-      private:
-        SyncDisplay &m_display;
-        std::size_t m_total;
-        std::size_t m_done;
-        unsigned int m_shownPercent;
-    };
-
     /**
      * Decides what to do with a save, from what it is like on either side and its base. A save
      * that is the same on both sides gets its base at once.
@@ -139,7 +125,7 @@ class Sync
      * @param fileId the archive to replace in the cloud; empty to create one
      * @param progress the bar to move when it is up
      */
-    void QueueUpload(const LocalSave &save, const std::string &fileId, Progress &progress);
+    void QueueUpload(const LocalSave &save, const std::string &fileId, SaveProgress &progress);
     /** True when the user stopped the sync or the cloud has no room left. */
     bool Stopped() const;
 

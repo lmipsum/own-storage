@@ -18,6 +18,8 @@ struct CloudSave
     unsigned long long size;
     /** When it was last stored, as Drive gives it: UTC in RFC 3339. */
     std::string modified;
+    /** Whether it is marked as kept in the cloud only, which no sync brings down by itself. */
+    bool cloudOnly;
 };
 
 /**

@@ -20,16 +20,18 @@ enum class PadButton
     Select,
     Back,
     /** Asks to remove the row's item, where a menu allows it. */
-    Remove
+    Remove,
+    /** Asks to bring items in from elsewhere, where a menu allows it. */
+    Import
 };
 
-/** What the user did in a menu that allows removing. */
+/** What the user did in a menu that takes more than picking a row. */
 struct MenuChoice
 {
-    /** The row; Menu::kNone when the user went back or the app is closing. */
+    /** The row the cursor was on; Menu::kNone when the menu has no rows, or the user went back. */
     int row;
-    /** True when the row was picked to be removed, not selected. */
-    bool remove;
+    /** Select, or another of the menu's actions; Back when the user went back or the app closes. */
+    PadButton button;
 };
 
 /**
@@ -61,16 +63,18 @@ class Menu
     int Choose(const std::string &heading, const std::vector<std::string> &rows,
                const std::string &hint, std::size_t cursor);
     /**
-     * Shows a menu and waits until the user picks a row, picks one to remove, or goes back. App
-     * thread only.
+     * Shows a menu and waits until the user picks a row, takes one of the menu's other actions, or
+     * goes back. Remove needs a row; Import does not. App thread only.
      * @param heading the list's heading
-     * @param rows the rows to pick from
+     * @param rows the rows to pick from; may be empty
      * @param hint the buttons the menu takes
      * @param cursor the row the cursor starts on
+     * @param actions the buttons besides Select and Back that end the wait: Remove, Import
      * @return what the user did
      */
-    MenuChoice ChooseOrRemove(const std::string &heading, const std::vector<std::string> &rows,
-                              const std::string &hint, std::size_t cursor);
+    MenuChoice ChooseAction(const std::string &heading, const std::vector<std::string> &rows,
+                            const std::string &hint, std::size_t cursor,
+                            const std::vector<PadButton> &actions);
     /** Shows a line about what the app is doing; it stays under the next menu too. */
     void ShowMessage(const std::string &text);
     /** Whether the user pressed Back since the last call; for waits that the user may end. */
@@ -79,9 +83,6 @@ class Menu
     void Press(PadButton button);
 
   private:
-    /** Shows a menu and waits for the user; Remove ends the wait only when removable. */
-    MenuChoice Wait(const std::string &heading, const std::vector<std::string> &rows,
-                    const std::string &hint, std::size_t cursor, bool removable);
     /** Shows the menu as it is now. */
     void Show();
 

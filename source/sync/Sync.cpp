@@ -8,23 +8,6 @@
 #include <sstream>
 #include <utility>
 
-Sync::Progress::Progress(SyncDisplay &display, std::size_t total)
-    : m_display(display), m_total(total), m_done(0), m_shownPercent(0)
-{
-    m_display.Reset(ProgressBar::Overall);
-}
-
-void Sync::Progress::Advance()
-{
-    ++m_done;
-    std::ostringstream text;
-    text << "Saves: " << m_done << " of " << m_total;
-    m_display.SetText(ProgressBar::Overall, text.str());
-    const unsigned int percent = static_cast<unsigned int>(m_done * 100 / m_total);
-    m_display.Advance(ProgressBar::Overall, percent - m_shownPercent);
-    m_shownPercent = percent;
-}
-
 Sync::Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
            const std::string &rootFolderId, const std::string &savedata, const std::string &ownSave,
            const std::string &workDirectory, const SaveTarget *target)
@@ -119,15 +102,16 @@ void Sync::Decide(const std::string &name, const LocalSave *local, const CloudSa
     }
     else if (local == nullptr)
     {
-        if (base == nullptr)
-        {
-            plan.downloads.push_back(Download{name, *cloud});
-        }
-        else
+        if (base != nullptr)
         {
             const Doubt doubt = cloud->md5 == base->md5 ? Doubt::DeletedOnConsole
                                                         : Doubt::DeletedOnConsoleChangedInCloud;
             plan.questions.push_back(Question{doubt, name, *cloud, nullptr});
+        }
+        // A save kept in the cloud only comes down when the user loads it from the menu.
+        else if (!cloud->cloudOnly)
+        {
+            plan.downloads.push_back(Download{name, *cloud});
         }
     }
     else
@@ -162,20 +146,17 @@ void Sync::Decide(const std::string &name, const LocalSave *local, const CloudSa
 
 void Sync::Transfer(const Plan &plan)
 {
-    Progress progress(m_display, plan.uploads.size() + plan.downloads.size());
+    SaveProgress progress(m_display, plan.uploads.size() + plan.downloads.size());
     debugPrintf("Sync::Transfer: %u saves to send, %u to bring down\n",
                 static_cast<unsigned int>(plan.uploads.size()),
                 static_cast<unsigned int>(plan.downloads.size()));
+    std::vector<std::string> names;
     for (const Upload &upload : plan.uploads)
     {
         QueueUpload(*upload.save, upload.fileId, progress);
+        names.push_back(upload.save->name);
     }
-    m_cloud.RunQueue([this] { return Stopped(); });
-    // A stopped queue leaves the archives it had written behind.
-    for (const Upload &upload : plan.uploads)
-    {
-        m_storage.Remove(m_archives.ArchivePath(upload.save->name));
-    }
+    m_archives.SendQueue(names);
     // A full cloud stops only uploads; bringing saves down needs no room there.
     for (const Download &download : plan.downloads)
     {
@@ -287,42 +268,24 @@ std::string Sync::QuestionText(Doubt doubt, const std::string &titleId,
     return text.str();
 }
 
-void Sync::QueueUpload(const LocalSave &save, const std::string &fileId, Progress &progress)
+void Sync::QueueUpload(const LocalSave &save, const std::string &fileId, SaveProgress &progress)
 {
-    const std::string path = m_archives.ArchivePath(save.name);
-    m_cloud.QueueFile(
-        path,
-        [this, &save, fileId, path](FileToStore &file)
-        {
-            if (m_archives.WriteArchive(save, path).empty())
-            {
-                return false;
-            }
-            file.title = ArchiveTitle(save.name);
-            // Every console can then name the game without bringing the archive down.
-            file.description = m_archives.LocalTitle(save.name);
-            file.parentId = m_rootFolderId;
-            file.fileId = fileId;
-            std::ostringstream text;
-            text << m_cloud.Running() + 1 << " saves in progress, last: " << save.name;
-            m_display.SetText(ProgressBar::Current, text.str());
-            return true;
-        },
-        [this, &save, path, &progress](const Json &stored)
-        {
-            m_storage.Remove(path);
-            if (!stored.Has("id"))
-            {
-                return;
-            }
-            debugPrintf("Sync::QueueUpload: %s stored\n", save.name.c_str());
-            m_state.Record(save.name, SaveBase{stored["id"].Str(), stored["md5Checksum"].Str(),
-                                               save.fingerprint, false});
-            progress.Advance();
-        });
+    m_archives.QueueUpload(save, m_rootFolderId, fileId, false,
+                           [this, &save, &progress](const Json &stored)
+                           {
+                               if (!stored.Has("id"))
+                               {
+                                   return;
+                               }
+                               debugPrintf("Sync::QueueUpload: %s stored\n", save.name.c_str());
+                               m_state.Record(save.name, SaveBase{stored["id"].Str(),
+                                                                  stored["md5Checksum"].Str(),
+                                                                  save.fingerprint, false});
+                               progress.Advance();
+                           });
 }
 
 bool Sync::Stopped() const
 {
-    return m_display.Cancelled() || m_cloud.IsFull();
+    return m_archives.Stopped();
 }

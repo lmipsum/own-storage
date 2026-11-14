@@ -63,6 +63,12 @@ void TestCloud::SetDescription(const std::string &id, const std::string &descrip
     m_descriptions[id] = description;
 }
 
+bool TestCloud::CloudOnly(const std::string &id) const
+{
+    const auto mark = m_cloudOnly.find(id);
+    return mark != m_cloudOnly.end() && mark->second;
+}
+
 void TestCloud::SetModified(const std::string &id, const std::string &modified)
 {
     m_modified[id] = modified;
@@ -160,7 +166,7 @@ bool TestCloud::ListFiles(const std::string &folderId, Json::Array &files)
 
 Json TestCloud::CreateFolder(const std::string &title, const std::string &parentId)
 {
-    return Create(TestCloudItem{title, parentId, folderMime, ""}, std::string());
+    return Create(TestCloudItem{title, parentId, folderMime, ""}, std::string(), false);
 }
 
 Json TestCloud::UploadFile(const std::string &path, const FileToStore &file,
@@ -176,7 +182,7 @@ Json TestCloud::UploadFile(const std::string &path, const FileToStore &file,
     if (file.fileId.empty())
     {
         return Create(TestCloudItem{file.title, file.parentId, mimeType, content.str()},
-                      file.description);
+                      file.description, file.cloudOnly);
     }
     if (m_items.count(file.fileId) == 0)
     {
@@ -184,6 +190,7 @@ Json TestCloud::UploadFile(const std::string &path, const FileToStore &file,
     }
     m_items[file.fileId].content = content.str();
     m_descriptions[file.fileId] = file.description;
+    m_cloudOnly[file.fileId] = file.cloudOnly;
     ++m_updates;
     return Describe(file.fileId);
 }
@@ -191,6 +198,7 @@ Json TestCloud::UploadFile(const std::string &path, const FileToStore &file,
 bool TestCloud::TrashFile(const std::string &fileId)
 {
     m_descriptions.erase(fileId);
+    m_cloudOnly.erase(fileId);
     return m_items.erase(fileId) == 1;
 }
 
@@ -210,7 +218,7 @@ void TestCloud::QueueFile(const std::string &path, const PrepareFile &prepare, c
     m_queue.push_back(
         [this, path, prepare, done]
         {
-            FileToStore file;
+            FileToStore file{};
             if (prepare(file))
             {
                 done(UploadFile(path, file, octetMime));
@@ -262,16 +270,25 @@ Json TestCloud::Describe(const std::string &id) const
     if (item.mimeType != folderMime)
     {
         described.Add("description", Json(Description(id)));
+        // Drive gives no properties for a file that never got one, as one stored directly.
+        if (m_cloudOnly.count(id) != 0)
+        {
+            Json mark;
+            mark.Add("key", Json(cloudOnlyProperty));
+            mark.Add("value", Json(CloudOnly(id) ? cloudOnlyMarked : cloudOnlyUnmarked));
+            described.Add("properties", Json(Json::Array{mark}));
+        }
         described.Add("md5Checksum", Json(ContentDigest(item.content)));
         described.Add("fileSize", Json(std::to_string(item.content.size())));
     }
     return described;
 }
 
-Json TestCloud::Create(const TestCloudItem &item, const std::string &description)
+Json TestCloud::Create(const TestCloudItem &item, const std::string &description, bool cloudOnly)
 {
     const std::string id = Store(item);
     m_descriptions[id] = description;
+    m_cloudOnly[id] = cloudOnly;
     ++m_creates;
     if (m_createsUntilLostAnswer == 0)
     {

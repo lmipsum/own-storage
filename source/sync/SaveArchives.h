@@ -9,7 +9,9 @@
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
 
+#include <functional>
 #include <string>
+#include <vector>
 
 /** What bringing a save down came to. */
 enum class BroughtDown
@@ -69,6 +71,27 @@ class SaveArchives
     BroughtDown BringDown(const std::string &name, const CloudSave &cloudSave);
     /** The game title in a save's PARAM.SFO on the console; empty when it cannot be read. */
     std::string LocalTitle(const std::string &name) const;
+    /**
+     * Queues a save's archive to go up; the archive is written when its turn comes and removed
+     * once it is up.
+     * @param save the save; it must outlive the queue's run
+     * @param folderId the cloud folder of the archives
+     * @param fileId the archive to replace in the cloud; empty to create one
+     * @param cloudOnly whether to mark it as kept in the cloud only
+     * @param stored takes what the cloud says about the stored archive; without "id" when it
+     * failed
+     */
+    void QueueUpload(const LocalSave &save, const std::string &folderId, const std::string &fileId,
+                     bool cloudOnly, const std::function<void(const Json &)> &stored);
+    /**
+     * Sends the cloud's whole queue, until all is up, the user stops or the cloud is full; the
+     * archives a stopped queue leaves behind are removed.
+     * @param names the saves whose archives were queued, by this or by another SaveArchives with
+     * the same work directory
+     */
+    void SendQueue(const std::vector<std::string> &names);
+    /** True when the user stopped or the cloud has no room left. */
+    bool Stopped() const;
 
   private:
     CloudStorage &m_cloud;

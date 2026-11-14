@@ -7,8 +7,8 @@
 #include <string>
 
 /**
- * A console hard disk in a fresh temporary directory: every /dev_hdd0 path the sync uses lands
- * under it, other paths stay as they are.
+ * A console's disks in a fresh temporary directory: every /dev_ path, of the hard disk or a USB
+ * drive, lands under it; other paths stay as they are.
  */
 class TestConsole : public LocalStorage
 {
