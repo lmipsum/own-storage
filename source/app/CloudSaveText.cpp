@@ -158,43 +158,10 @@ std::string ShownTime(const std::string &modified, const DateStyle &style)
     return text.str();
 }
 
-const char *ShownStatus(SaveStatus status)
+std::string FitInDialog(const std::string &head, const std::string &middle, const std::string &tail)
 {
-    switch (status)
-    {
-    case SaveStatus::Missing:
-        return "not on this PS3";
-    case SaveStatus::Same:
-        return "on this PS3";
-    default:
-        return "different on this PS3";
-    }
-}
-
-std::string ShownDetails(const std::string &game, const std::string &name, const CloudSave &save,
-                         SaveStatus status, const DateStyle &style)
-{
-    std::string texts;
-    for (const std::string &text : {save.texts.subtitle, save.texts.detail})
-    {
-        const std::string line = text.substr(0, text.find_last_not_of('\n') + 1);
-        if (!line.empty())
-        {
-            texts += (texts.empty() ? "" : "\n") + line;
-        }
-    }
-    if (texts.empty())
-    {
-        texts = "The details come with the save's next upload.";
-    }
-    const std::string head = game + '\n';
-    const std::string tail = "\n\n" + name + '\n' + ShownTime(save.modified, style) + "   " +
-                             ShownSize(save.size) + "   " + ShownStatus(status);
-    // The texts give way first, so what the menu row shows stays readable.
-    const std::size_t room = head.size() + tail.size() < kDialogTextBytes
-                                 ? kDialogTextBytes - head.size() - tail.size()
-                                 : 0;
-    return head + CutText(texts, room) + tail;
+    const std::size_t used = head.size() + tail.size();
+    return head + CutText(middle, used < kDialogTextBytes ? kDialogTextBytes - used : 0) + tail;
 }
 
 std::string ShownResult(const std::string &name, LoadResult result)
@@ -202,9 +169,9 @@ std::string ShownResult(const std::string &name, LoadResult result)
     switch (result)
     {
     case LoadResult::Loaded:
-        return name + " is loaded.";
+        return name + " is downloaded.";
     case LoadResult::LoadedNotResigned:
-        return name + " is loaded as it was: it could not be made this user's.";
+        return name + " is downloaded as it was: it could not be made this user's.";
     case LoadResult::AlreadyThere:
         return name + " is on this PS3 already.";
     case LoadResult::Kept:

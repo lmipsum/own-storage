@@ -108,7 +108,7 @@ void Sync::Decide(const std::string &name, const LocalSave *local, const CloudSa
                                                         : Doubt::DeletedOnConsoleChangedInCloud;
             plan.questions.push_back(Question{doubt, name, *cloud, nullptr});
         }
-        // A save kept in the cloud only comes down when the user loads it from the menu.
+        // A save kept in the cloud only comes down when the user picks it in the XMB.
         else if (!cloud->cloudOnly)
         {
             plan.downloads.push_back(Download{name, *cloud});
@@ -187,32 +187,50 @@ Sync::Plan Sync::Settle(const std::vector<Question> &questions)
     Plan plan;
     for (const auto &game : games)
     {
-        const Answer answer =
-            m_display.Ask(QuestionText(game.first.first, game.first.second, game.second));
+        const Doubt doubt = game.first.first;
+        const std::string label = QuestionGame(game.first.second, game.second);
+        const Answer answer = m_display.Ask(QuestionText(doubt, label, game.second.size()));
         if (answer == Answer::None)
         {
             break;
         }
+        // A save changed on both sides goes up only when the user says so too, as that replaces
+        // the cloud's copy.
+        bool upload = false;
+        if (answer == Answer::No && doubt == Doubt::ChangedOnBothSides)
+        {
+            const bool one = game.second.size() == 1;
+            const Answer second =
+                m_display.Ask(label + ":\n" +
+                              (one ? "Replace the cloud's copy with this PS3's?"
+                                   : "Replace the cloud's copies with this PS3's?"));
+            if (second == Answer::None)
+            {
+                break;
+            }
+            upload = second == Answer::Yes;
+        }
         for (const Question *question : game.second)
         {
             debugPrintf("Sync::Settle: %s answered %s\n", question->name.c_str(),
-                        answer == Answer::Yes ? "yes" : "no");
+                        answer == Answer::Yes ? "yes"
+                        : upload              ? "no, then yes"
+                                              : "no");
             if (answer == Answer::Yes)
             {
                 plan.downloads.push_back(Download{question->name, question->cloud});
             }
-            else if (question->doubt == Doubt::ChangedOnBothSides)
+            else if (upload)
             {
                 plan.uploads.push_back(Upload{question->local, question->cloud.fileId});
             }
-            // A save deleted on the console that the user does not want back stays in the cloud
-            // with its base, so the next sync asks again.
+            // A save the user wants neither way keeps its base, so the next sync asks again.
         }
     }
     return plan;
 }
 
-std::string Sync::QuestionText(Doubt doubt, const std::string &titleId,
+std::string Sync::QuestionGame(const std::string &titleId,
                                const std::vector<const Question *> &questions) const
 {
     std::string title;
@@ -231,39 +249,42 @@ std::string Sync::QuestionText(Doubt doubt, const std::string &titleId,
             break;
         }
     }
-    const bool one = questions.size() == 1;
-    const char *copies = one ? "copy replaces" : "copies replace";
+    return GameLabel(titleId, title);
+}
+
+std::string Sync::QuestionText(Doubt doubt, const std::string &game, std::size_t saves)
+{
+    const bool one = saves == 1;
     const char *them = one ? "it" : "them";
     std::ostringstream text;
-    text << GameLabel(titleId, title) << ":\n";
+    text << game << ":\n";
     if (one)
     {
         text << "a save";
     }
     else
     {
-        text << questions.size() << " saves";
+        text << saves << " saves";
     }
     if (doubt == Doubt::ChangedOnBothSides)
     {
-        text << (one ? " has" : " have") << " changed both on this PS3 and in the cloud.\n\n"
-             << "Yes: the cloud's " << copies << " this PS3's.\n"
-             << "No: this PS3's " << copies << " the cloud's.";
+        text << (one ? " has" : " have") << " changed both on this PS3 and in the cloud. "
+             << (one ? "Replace this PS3's copy with the cloud's?"
+                     : "Replace this PS3's copies with the cloud's?");
     }
     else
     {
         text << (one ? " was" : " were") << " deleted on this PS3";
         if (doubt == Doubt::DeletedOnConsole)
         {
-            text << " but " << (one ? "is" : "are") << " still in the cloud.\n\n";
+            text << " but " << (one ? "is" : "are") << " still in the cloud. ";
         }
         else
         {
             text << ", but another PS3 has sent " << (one ? "a newer copy of it" : "newer copies")
-                 << " to the cloud since.\n\n";
+                 << " to the cloud since. ";
         }
-        text << "Yes: bring " << them << " back to this PS3.\n"
-             << "No: leave " << them << " in the cloud; the next sync asks again.";
+        text << "Bring " << them << " back to this PS3?";
     }
     return text.str();
 }

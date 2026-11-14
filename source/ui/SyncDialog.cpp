@@ -6,7 +6,7 @@
 
 namespace
 {
-// The bars show a sync as well as a single save brought down from the menu.
+// The bars show a sync as well as a single save brought down or an import.
 const char kProgressTitle[] = "Own Storage";
 const msgType kProgressType =
     static_cast<msgType>(MSG_DIALOG_MUTE_ON | MSG_DIALOG_DOUBLE_PROGRESSBAR);
@@ -15,7 +15,9 @@ const msgType kQuestionType = static_cast<msgType>(MSG_DIALOG_NORMAL | MSG_DIALO
                                                    MSG_DIALOG_DISABLE_CANCEL_ON);
 const msgType kErrorType = static_cast<msgType>(MSG_DIALOG_ERROR | MSG_DIALOG_BTN_TYPE_OK);
 const msgType kInfoType = static_cast<msgType>(MSG_DIALOG_NORMAL | MSG_DIALOG_BTN_TYPE_OK);
-// No button has closed the question or error yet.
+// Without buttons: only the back button closes it, while the app waits for something else.
+const msgType kWaitingType = MSG_DIALOG_NORMAL;
+// No button has closed the question or message yet.
 const int kNoButton = MSG_DIALOG_BTN_INVALID;
 const unsigned int kPollMicroseconds = 100000;
 
@@ -34,10 +36,16 @@ void OnProgressButton(msgButton button, void *cancelled)
     }
 }
 
-/** Keeps the button that closed a question or an error. */
+/**
+ * Keeps the button that closed a question or a message. A dialog the app closes reports no
+ * button, and may report it only once the next one is open, which must not end that one's wait.
+ */
 void OnAnswerButton(msgButton button, void *pressed)
 {
-    static_cast<std::atomic<int> *>(pressed)->store(button);
+    if (button != MSG_DIALOG_BTN_NONE)
+    {
+        static_cast<std::atomic<int> *>(pressed)->store(button);
+    }
 }
 } // namespace
 
@@ -66,6 +74,18 @@ void SyncDialog::ShowError(const std::string &message)
 void SyncDialog::ShowInfo(const std::string &message)
 {
     ShowNotice(kInfoType, message);
+}
+
+bool SyncDialog::ShowWaiting(const std::string &message)
+{
+    Close();
+    m_button = kNoButton;
+    return OpenWhenFree(kWaitingType, message);
+}
+
+bool SyncDialog::WaitingClosed() const
+{
+    return m_button != kNoButton;
 }
 
 void SyncDialog::ShowNotice(int type, const std::string &message)

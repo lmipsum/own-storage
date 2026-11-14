@@ -5,6 +5,8 @@
 #include "TestConsole.h"
 
 #include "app/CloudSaveText.h"
+#include "app/XmbLists.h"
+#include "app/XmbPick.h"
 #include "sync/CloudSaves.h"
 #include "sync/GameName.h"
 #include "sync/ParamPfd.h"
@@ -179,7 +181,7 @@ struct Setup
         return files;
     }
 };
-/** The cloud's saves as the menu of one console of the user sees them. */
+/** The cloud's saves as one console of the user sees them, to bring down or delete one by one. */
 struct Browsing
 {
     Browsing(Setup &setup, TestConsole &on)
@@ -405,17 +407,41 @@ TEST(SaveChangedOnBothSidesComesDownOnYes)
     CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
 }
 
-TEST(SaveChangedOnBothSidesGoesUpOnNo)
+TEST(SaveChangedOnBothSidesIsLeftAsItIsWhenTheSecondQuestionGoesUnanswered)
 {
     Setup setup;
     PutSaves(setup.console);
     setup.Run();
     setup.ChangeOnBothSides();
+    // No to the first; the app closes before the second is answered.
     setup.display.answers = {Answer::No};
+    setup.Run();
+    CHECK_EQUAL(std::size_t(2), setup.display.questions.size());
+    CHECK_EQUAL(std::string("played there"), setup.Archive("BLES00001-SAVE")[0].content);
+    CHECK_EQUAL(std::string("played here"),
+                setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+}
+
+TEST(SaveChangedOnBothSidesGoesUpOnlyWhenAskedToo)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.ChangeOnBothSides();
+    // Neither way: both copies stay, and the next sync asks again.
+    setup.display.answers = {Answer::No, Answer::No};
+    setup.Run();
+    CHECK_EQUAL(std::string("played there"), setup.Archive("BLES00001-SAVE")[0].content);
+    CHECK_EQUAL(std::string("played here"),
+                setup.console.Content(std::string(kSave) + "/DATA.BIN"));
+    CHECK(setup.display.Question(1).find("Replace the cloud's copy with this PS3's?") !=
+          std::string::npos);
+    // Not the cloud's, but this PS3's: it goes up.
+    setup.display.answers = {Answer::No, Answer::Yes};
     setup.Run();
     CHECK_EQUAL(std::string("played here"), setup.Archive("BLES00001-SAVE")[0].content);
     setup.Run();
-    CHECK_EQUAL(std::size_t(1), setup.display.questions.size());
+    CHECK_EQUAL(std::size_t(4), setup.display.questions.size());
 }
 
 TEST(SaveDeletedOnTheConsoleIsNotBroughtBackWithoutAnAnswer)
@@ -589,36 +615,6 @@ TEST(ArchiveCarriesTheSaveTextsForEveryConsole)
                 setup.cloud.Description(setup.ArchiveId("BLES00001-SAVE")));
 }
 
-TEST(DetailsShowTheTextsOrSayWhenTheyCome)
-{
-    const DateStyle style{DateOrder::DayMonthYear, false, 0};
-    CloudSave save{"id",
-                   "md5",
-                   SaveTexts{"Game One", "Chapter 3", "Level 12"},
-                   3878 * 1024,
-                   "2026-11-13T21:00:28.000Z",
-                   false};
-    CHECK_EQUAL(
-        std::string("Game One (BLES00001)\nChapter 3\nLevel 12\n\nBLES00001-SAVE\n"
-                    "13/11/2026 21:00   3878 KB   not on this PS3"),
-        ShownDetails("Game One (BLES00001)", "BLES00001-SAVE", save, SaveStatus::Missing, style));
-    // An empty part leaves no empty line.
-    save.texts = SaveTexts{"Game One", "", "Level 12\n"};
-    CHECK_EQUAL(
-        std::string("Game One (BLES00001)\nLevel 12\n\nBLES00001-SAVE\n"
-                    "13/11/2026 21:00   3878 KB   on this PS3"),
-        ShownDetails("Game One (BLES00001)", "BLES00001-SAVE", save, SaveStatus::Same, style));
-    save.texts = SaveTexts{"Game One", "", ""};
-    CHECK(ShownDetails("Game One (BLES00001)", "BLES00001-SAVE", save, SaveStatus::Same, style)
-              .find("\nThe details come with the save's next upload.\n") != std::string::npos);
-    // The system dialog takes fewer than 512 bytes: the detail gives way, the rest stays.
-    save.texts = SaveTexts{"Game One", "Chapter 3", std::string(1024, 'x')};
-    const std::string details =
-        ShownDetails("Game One (BLES00001)", "BLES00001-SAVE", save, SaveStatus::Same, style);
-    CHECK(details.size() < 512);
-    CHECK(details.find("3878 KB   on this PS3") != std::string::npos);
-}
-
 TEST(TextIsCutWhereACharacterStarts)
 {
     CHECK_EQUAL(std::string("abc"), CutText("abc", 5));
@@ -777,7 +773,7 @@ TEST(DownloadCutShortIsDoneAgain)
     CHECK_EQUAL(0, setup.cloud.Updates());
 }
 
-TEST(MenuListsTheGamesWithTheirSaves)
+TEST(BrowserListsTheGamesWithTheirSaves)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -799,7 +795,7 @@ TEST(MenuListsTheGamesWithTheirSaves)
                 static_cast<std::size_t>(browsing.browser.Save("BLES00001-SAVE").size));
 }
 
-TEST(MenuTellsHowEachSaveIsOnTheConsole)
+TEST(BrowserTellsHowEachSaveIsOnTheConsole)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -815,7 +811,7 @@ TEST(MenuTellsHowEachSaveIsOnTheConsole)
     CHECK(Browsing(setup, setup.console).browser.Status("BLES00001-SAVE") == SaveStatus::Different);
 }
 
-TEST(MenuLoadsAMissingSaveWithoutAsking)
+TEST(BrowserLoadsAMissingSaveWithoutAsking)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -833,7 +829,7 @@ TEST(MenuLoadsAMissingSaveWithoutAsking)
     CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::AlreadyThere);
 }
 
-TEST(MenuAsksBeforeItReplacesADifferentSave)
+TEST(BrowserAsksBeforeItReplacesADifferentSave)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -848,6 +844,159 @@ TEST(MenuAsksBeforeItReplacesADifferentSave)
     CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
     CHECK_EQUAL(std::size_t(2), setup.display.questions.size());
     CHECK_EQUAL(std::size_t(0), setup.display.Question(0).find("Game One (BLES00001):\n"));
+}
+
+namespace
+{
+const XmbPlace kXmbPlace{"/dev_hdd0/xmlhost/game_plugin/",
+                         "/dev_hdd0/game/OWNS00001/USRDIR/act.txt", "OWNS00001"};
+const DateStyle kXmbDates{DateOrder::DayMonthYear, false, 0};
+} // namespace
+
+TEST(XmbListsTheSavesWithTheirIcons)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.console.Put(std::string(kSave) + "/ICON0.PNG", "icon", kWritten);
+    setup.Run();
+    Browsing here(setup, setup.console);
+    // Game by game, by name: the game without a known title is named by its ID, which comes first.
+    std::vector<XmbSave> saves = XmbSaves(here.browser, setup.console, kSavedata, kXmbDates);
+    CHECK_EQUAL(std::size_t(2), saves.size());
+    if (saves.size() == 2)
+    {
+        // On the console without an icon of its own.
+        CHECK_EQUAL(std::string("BLUS00002"), saves[0].title);
+        CHECK(saves[0].downloaded && saves[0].icon.empty());
+        // On the console with its icon.
+        CHECK_EQUAL(std::string("Game One"), saves[1].title);
+        CHECK_EQUAL(0u, saves[1].info.find("BLES00001-SAVE\nBLES00001 | "));
+        CHECK(saves[1].downloaded);
+        CHECK_EQUAL(std::string(kSave) + "/ICON0.PNG", saves[1].icon);
+    }
+    // A save the console has otherwise counts as not brought down, so it shows no icon.
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "played on", kChanged);
+    Browsing changed(setup, setup.console);
+    saves = XmbSaves(changed.browser, setup.console, kSavedata, kXmbDates);
+    CHECK(saves.size() == 2 && !saves[1].downloaded && saves[1].icon.empty());
+}
+
+TEST(XmbListsRowsThatStartTheAppThroughWebman)
+{
+    const XmbLists signedOut = MakeXmbLists(kXmbPlace, false, {});
+    CHECK(signedOut.menu.find("Sign in") != std::string::npos);
+    CHECK(signedOut.menu.find("Full sync") == std::string::npos);
+    CHECK(signedOut.menu.find("Saves in the cloud") == std::string::npos);
+    const XmbSave inCloud{"BLES00001-SAVE", "Game One (BLES00001)", "Chapter \"3\" & more", "",
+                          false};
+    const XmbSave downloaded{"BLES00001-AUTO", "Game One (BLES00001)", "Auto", "", true};
+    const XmbLists lists = MakeXmbLists(kXmbPlace, true, {inCloud, downloaded});
+    CHECK(lists.folder.find("src=\"xmb://localhost/dev_hdd0/xmlhost/game_plugin/owns_menu.xml#") !=
+          std::string::npos);
+    CHECK(lists.menu.find("Full sync") != std::string::npos);
+    CHECK(lists.menu.find("Sign out") != std::string::npos);
+    CHECK(lists.menu.find("Sign in<") == std::string::npos);
+    // The rows show the system's icons.
+    CHECK(lists.menu.find("<String>tex_loading_icon</String>") != std::string::npos);
+    CHECK(lists.menu.find("<String>item_tex_usb_connection</String>") != std::string::npos);
+    CHECK(lists.menu.find("<String>tex_Avatar_Default</String>") != std::string::npos);
+    // Sign out comes last.
+    CHECK(lists.menu.find("Saves in the cloud") < lists.menu.find("Sign out"));
+    // The saves are in a folder of their own, in a file of their own, not split by game.
+    CHECK(lists.menu.find("owns_saves.xml#") != std::string::npos);
+    CHECK(lists.menu.find("Game One") == std::string::npos);
+    CHECK(lists.saves.find("Game One (BLES00001)") != std::string::npos);
+    CHECK(lists.saves.find("<String>tex_album_icon</String>") != std::string::npos);
+    CHECK(lists.saves.find("<String>item_tex_ps3util</String>") != std::string::npos);
+    // The texts are escaped, and the row writes its action, then starts the app.
+    CHECK(lists.saves.find("Chapter &quot;3&quot; &amp; more") != std::string::npos);
+    CHECK(lists.saves.find("<String>/write.ps3/dev_hdd0/game/OWNS00001/USRDIR/act.txt&amp;t=save:"
+                           "BLES00001-SAVE;/play.ps3?OWNS00001</String>") != std::string::npos);
+}
+
+TEST(XmbFolderGoesAfterTheSavedDataUtilityOnce)
+{
+    const std::string entry = XmbCategoryEntry(kXmbPlace);
+    std::string category =
+        "<XMBML>\r\n\t<View id=\"root\">\r\n\t\t<Items>\r\n"
+        "\t\t\t<Query class=\"type:x-xmb/folder-pixmap\"\r\n"
+        "\t\t\t\tkey=\"seg_sdps3\"\r\n\t\t\t\tsrc=\"#seg_sdps3\"\r\n\t\t\t\t/>\r\n"
+        "\t\t\t<Query key=\"seg_welcome\"/>\r\n";
+    CHECK(AddXmbCategoryEntry(category, entry));
+    const std::size_t utility = category.find("key=\"seg_sdps3\"");
+    const std::size_t ours = category.find("key=\"owns_root\"");
+    CHECK(utility < ours && ours < category.find("key=\"seg_welcome\""));
+    // The file's own line ends.
+    CHECK(
+        category.find("/>\r\n\t\t\t<Query class=\"type:x-xmb/folder-pixmap\" key=\"owns_root\"") !=
+        std::string::npos);
+    CHECK(!AddXmbCategoryEntry(category, entry));
+    // Every view that lists the utility gets the folder, as the XMB shows one or another.
+    std::string twoViews = "<View id=\"root\"><Items><Query key=\"seg_sdps3\"/>\n"
+                           "<View id=\"root_for_BDU\"><Items><Query key=\"seg_sdps3\"/>\n";
+    CHECK(AddXmbCategoryEntry(twoViews, entry));
+    CHECK(twoViews.find("owns_root") != twoViews.rfind("owns_root"));
+    // Without the utility it goes first; without the Game column's view, nowhere.
+    std::string bare = "<View id=\"root\">\n\t\t<Items>\n\t\t\t<Query key=\"seg_gamedata\"/>\n";
+    CHECK(AddXmbCategoryEntry(bare, entry));
+    CHECK(bare.find("owns_root") < bare.find("seg_gamedata"));
+    std::string none = "<XMBML></XMBML>";
+    CHECK(!AddXmbCategoryEntry(none, entry));
+}
+
+TEST(XmbDownloadQuestionShowsWhatTheRowHasNoRoomFor)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.console.Put(std::string(kSave) + "/PARAM.SFO",
+                      MakeSfo(SaveTexts{"Game One", "Chapter 3", "Level 12\n"},
+                              TestOwner(1, 'a', "0123456789abcdef")),
+                      kWritten);
+    setup.Run();
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    Browsing there(setup, other);
+    setup.display.answers = {Answer::No, Answer::No};
+    PickXmbSave(there.browser, setup.display, "BLES00001-SAVE");
+    CHECK_EQUAL(std::string("Game One (BLES00001):\nLevel 12\n\nBLES00001-SAVE is not on this PS3. "
+                            "Download it?"),
+                setup.display.Question(0));
+}
+
+TEST(XmbPickOffersWhatTheSaveAllows)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    {
+        // Not on the console: first a download, and when that is not wanted, a deletion.
+        Browsing there(setup, other);
+        setup.display.answers = {Answer::No, Answer::No};
+        CHECK(PickXmbSave(there.browser, setup.display, "BLES00001-SAVE")
+                  .find("stays in the cloud") != std::string::npos);
+        CHECK(setup.display.Question(0).find("is not on this PS3. Download it?") !=
+              std::string::npos);
+        setup.display.answers = {Answer::Yes};
+        CHECK_EQUAL(std::string("BLES00001-SAVE is downloaded."),
+                    PickXmbSave(there.browser, setup.display, "BLES00001-SAVE"));
+        // On the console as the cloud has it: nothing to ask.
+        const std::size_t asked = setup.display.questions.size();
+        CHECK_EQUAL(std::string("BLES00001-SAVE is on this PS3 already."),
+                    PickXmbSave(there.browser, setup.display, "BLES00001-SAVE"));
+        CHECK_EQUAL(asked, setup.display.questions.size());
+        CHECK(PickXmbSave(there.browser, setup.display, "BLES00009-GONE").find("no longer") !=
+              std::string::npos);
+    }
+    // Different on the console: the replace question, as from the menu.
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "played here", kChanged);
+    Browsing here(setup, setup.console);
+    setup.display.answers = {Answer::Yes};
+    CHECK_EQUAL(std::string("BLES00001-SAVE is downloaded."),
+                PickXmbSave(here.browser, setup.display, "BLES00001-SAVE"));
+    CHECK(setup.display.questions.back().find("differs from the cloud's copy") !=
+          std::string::npos);
 }
 
 TEST(ArchiveMadeAnewIsNotTakenForAChangeOfTheSave)
@@ -953,7 +1102,7 @@ TEST(SaveThatCannotBeMadeThisUsersComesDownAsItIsAndIsNamed)
           owner.userId == 1);
 }
 
-TEST(MenuSaysWhetherALoadedSaveWasMadeThisUsers)
+TEST(BrowserSaysWhetherALoadedSaveWasMadeThisUsers)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);
@@ -979,7 +1128,7 @@ TEST(MenuSaysWhetherALoadedSaveWasMadeThisUsers)
           std::string::npos);
 }
 
-TEST(MenuDeletesFromTheCloudOnlyASaveTheConsoleHasNot)
+TEST(BrowserDeletesFromTheCloudOnlyASaveTheConsoleHasNot)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -1003,7 +1152,7 @@ TEST(MenuDeletesFromTheCloudOnlyASaveTheConsoleHasNot)
           std::string::npos);
 }
 
-TEST(MenuListsGamesByTrimmedNameAndSavesNewestFirst)
+TEST(BrowserListsGamesByTrimmedNameAndSavesNewestFirst)
 {
     Setup setup;
     setup.cloud.Store(TestCloudItem{"BLES00009-A.tar", setup.rootId, octetMime, MakeTar({})});
@@ -1076,7 +1225,7 @@ TEST(UsbSavesGoUpKeptInTheCloudOnly)
     CHECK_EQUAL(std::size_t(2), Import(setup, setup.console).skipped);
 }
 
-TEST(SaveKeptInTheCloudOnlyComesDownOnlyFromTheMenu)
+TEST(SaveKeptInTheCloudOnlyComesDownOnlyWhenPicked)
 {
     Setup setup;
     setup.console.MakeDirectories(kSavedata);

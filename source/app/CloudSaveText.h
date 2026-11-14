@@ -35,22 +35,13 @@ std::string ShownSize(unsigned long long bytes);
  */
 std::string ShownTime(const std::string &modified, const DateStyle &style);
 
-/** What a save's status means to the user. */
-const char *ShownStatus(SaveStatus status);
-
 /**
- * A cloud save's details, as a game's load screen shows them: the game, the save's subtitle and
- * detail, then its folder, date, size and how it is on the console; short enough for the
- * system dialog, which the detail gives way to.
- * @param game the game, as its list's heading names it
- * @param name the save folder's name
- * @param save the save in the cloud
- * @param status how the save is on the console
- * @param style how the console shows dates
- * @return the text
+ * A text short enough for the system dialog, which takes fewer than 512 bytes: the middle part
+ * gives way, cut where a UTF-8 character starts, so the head and the tail stay readable.
+ * @return head, middle and tail together
  */
-std::string ShownDetails(const std::string &game, const std::string &name, const CloudSave &save,
-                         SaveStatus status, const DateStyle &style);
+std::string FitInDialog(const std::string &head, const std::string &middle,
+                        const std::string &tail);
 
 /** What loading a save came to, as the user reads it. */
 std::string ShownResult(const std::string &name, LoadResult result);
