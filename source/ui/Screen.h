@@ -13,7 +13,7 @@ struct ScreenView
 {
     /** A line about what the app is doing, or what it did last; may be empty. */
     std::string message;
-    /** The heading of a list; empty for a menu that fits under the logo. */
+    /** The heading of a list; empty for a short menu low on the screen. */
     std::string heading;
     /** The menu's rows; empty when no menu is shown. */
     std::vector<std::string> rows;
@@ -21,7 +21,7 @@ struct ScreenView
     std::size_t cursor;
     /** The buttons the menu takes. */
     std::string hint;
-    /** A line at the top while a menu is under the logo, such as whose app it is; may be empty. */
+    /** A line at the top while a short menu is shown, such as whose app it is; may be empty. */
     std::string caption;
 };
 
@@ -34,10 +34,9 @@ class Screen
   public:
     /**
      * @param surface the video surface
-     * @param background drawn first on every frame that changes
      * @param font the text's font
      */
-    Screen(SDL_Surface *surface, SDL_Surface *background, TTF_Font *font);
+    Screen(SDL_Surface *surface, TTF_Font *font);
     ~Screen();
     Screen(const Screen &) = delete;
     Screen &operator=(const Screen &) = delete;
@@ -48,7 +47,7 @@ class Screen
     void Draw();
 
   private:
-    /** Lays the light panel over the background, which a list would otherwise cover. */
+    /** Lays the panel under a list, which sets it apart from the screen. */
     void DrawPanel();
     /** Draws a line of text with its left edge at x, or centred when x is below zero. */
     void DrawText(const std::string &text, int x, int y, SDL_Color color);
@@ -59,7 +58,6 @@ class Screen
     void DrawRows(const ScreenView &view, int x, int top, int bottom);
 
     SDL_Surface *m_surface;
-    SDL_Surface *m_background;
     SDL_Surface *m_panel;
     TTF_Font *m_font;
     SDL_mutex *m_lock;
