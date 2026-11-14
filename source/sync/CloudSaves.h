@@ -2,6 +2,7 @@
 #pragma once
 
 #include "sync/CloudStorage.h"
+#include "sync/ParamSfo.h"
 #include "sync/SyncState.h"
 
 #include <map>
@@ -12,8 +13,8 @@ struct CloudSave
 {
     std::string fileId;
     std::string md5;
-    /** The game's title, as the console that sent the archive read it; may be empty. */
-    std::string title;
+    /** Its PARAM.SFO's texts, as the console that sent it read them; may be empty. */
+    SaveTexts texts;
     /** The archive's size in bytes. */
     unsigned long long size;
     /** When it was last stored, as Drive gives it: UTC in RFC 3339. */
@@ -28,6 +29,24 @@ struct CloudSave
  * @return the title
  */
 std::string ArchiveTitle(const std::string &save);
+
+/**
+ * A save's texts as its archive's description in the cloud keeps them, so that every console can
+ * show them without bringing the archive down: the title, the subtitle and the detail, each from
+ * a line of its own. Line breaks in the title and the subtitle become spaces, so the description
+ * always has its three lines, which tells it from an older one.
+ * @param texts the texts
+ * @return the description
+ */
+std::string DescribeSave(const SaveTexts &texts);
+
+/**
+ * The texts an archive's description holds; an older description holds the title alone, maybe
+ * over two lines.
+ * @param description the description
+ * @return the texts
+ */
+SaveTexts ReadDescription(const std::string &description);
 
 /**
  * The save archives in a cloud folder, by save name. Of two archives of one save the one the base

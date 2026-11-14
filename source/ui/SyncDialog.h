@@ -26,6 +26,8 @@ class SyncDialog : public SyncDisplay
     void Close();
     /** Shows an error in place of the progress bars and waits until the user closes it. */
     void ShowError(const std::string &message);
+    /** Shows a message and waits until the user closes it. */
+    void ShowInfo(const std::string &message);
 
     /** Brings the progress bars back first when a question or an error took their place. */
     void SetText(ProgressBar bar, const std::string &text) override;
@@ -44,6 +46,8 @@ class SyncDialog : public SyncDisplay
      * @return false when the app closes first
      */
     bool OpenWhenFree(int type, const std::string &text);
+    /** Shows a message with an OK button of the given type and waits until the user closes it. */
+    void ShowNotice(int type, const std::string &message);
     /**
      * Waits until a button closes the question or error.
      * @return the button; MSG_DIALOG_BTN_NONE when the app closes first

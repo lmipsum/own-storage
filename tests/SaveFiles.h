@@ -9,6 +9,12 @@
 /** A save owner for tests: a user number, a PSID of one repeated byte, and an account id. */
 SaveOwner TestOwner(std::uint32_t userId, char psidByte, const std::string &accountId);
 
+/**
+ * A PARAM.SFO with a save's texts and an owner, laid out as the console lays it out; a subtitle
+ * or a detail that is empty is left out.
+ */
+std::string MakeSfo(const SaveTexts &texts, const SaveOwner &owner);
+
 /** A PARAM.SFO with a title and an owner, laid out as the console lays it out. */
 std::string MakeSfo(const std::string &title, const SaveOwner &owner);
 

@@ -218,13 +218,13 @@ std::string Sync::QuestionText(Doubt doubt, const std::string &titleId,
     std::string title;
     for (const Question *question : questions)
     {
-        if (!question->cloud.title.empty())
+        if (!question->cloud.texts.title.empty())
         {
-            title = question->cloud.title;
+            title = question->cloud.texts.title;
         }
         else if (question->local != nullptr)
         {
-            title = m_archives.LocalTitle(question->name);
+            title = m_archives.LocalTexts(question->name).title;
         }
         if (!title.empty())
         {

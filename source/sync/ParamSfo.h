@@ -32,6 +32,24 @@ bool operator==(const SaveOwner &a, const SaveOwner &b);
  */
 std::string ReadSfoTitle(const std::string &sfo);
 
+/** What a save's PARAM.SFO tells the user of it, as a game's load screen shows it. */
+struct SaveTexts
+{
+    /** The game's title. */
+    std::string title;
+    /** The save's own title, such as the chapter it was made in. */
+    std::string subtitle;
+    /** What the game says of the save, such as the progress; may run over several lines. */
+    std::string detail;
+};
+
+/**
+ * The texts a PARAM.SFO holds about its save.
+ * @param sfo the whole file
+ * @return the texts; each empty when the file lacks it or is not a PARAM.SFO
+ */
+SaveTexts ReadSfoTexts(const std::string &sfo);
+
 /**
  * Whose a save is, as its PARAM.SFO says.
  * @param sfo the whole file

@@ -4,11 +4,20 @@
 #include "app/DebugLog.h"
 #include "sync/Tar.h"
 
+#include <algorithm>
 #include <stdlib.h>
 #include <utility>
 
 namespace
 {
+/** A text on one line: its line breaks become spaces. */
+std::string OneLine(std::string text)
+{
+    std::replace(text.begin(), text.end(), '\n', ' ');
+    std::replace(text.begin(), text.end(), '\r', ' ');
+    return text;
+}
+
 // A save's archive in the cloud is named after the save folder.
 const char kArchiveSuffix[] = ".tar";
 const std::size_t kArchiveSuffixLength = sizeof kArchiveSuffix - 1;
@@ -48,6 +57,26 @@ std::string ArchiveTitle(const std::string &save)
     return save + kArchiveSuffix;
 }
 
+std::string DescribeSave(const SaveTexts &texts)
+{
+    return OneLine(texts.title) + '\n' + OneLine(texts.subtitle) + '\n' + texts.detail;
+}
+
+SaveTexts ReadDescription(const std::string &description)
+{
+    const std::size_t titleEnd = description.find('\n');
+    const std::size_t subtitleEnd =
+        titleEnd == std::string::npos ? std::string::npos : description.find('\n', titleEnd + 1);
+    // An older description is the title alone, which may run over two lines itself.
+    if (subtitleEnd == std::string::npos)
+    {
+        return SaveTexts{OneLine(description), std::string(), std::string()};
+    }
+    return SaveTexts{description.substr(0, titleEnd),
+                     description.substr(titleEnd + 1, subtitleEnd - titleEnd - 1),
+                     description.substr(subtitleEnd + 1)};
+}
+
 bool ListCloudSaves(CloudStorage &cloud, const std::string &folderId, const std::string &ownSave,
                     const SyncState &state, std::map<std::string, CloudSave> &saves)
 {
@@ -64,7 +93,8 @@ bool ListCloudSaves(CloudStorage &cloud, const std::string &folderId, const std:
         {
             continue;
         }
-        const CloudSave save{file["id"].Str(), file["md5Checksum"].Str(), file["description"].Str(),
+        const CloudSave save{file["id"].Str(), file["md5Checksum"].Str(),
+                             ReadDescription(file["description"].Str()),
                              // The console's C++ library offers strtoull only outside std.
                              strtoull(file["fileSize"].Str().c_str(), nullptr, 10),
                              file["modifiedDate"].Str(), IsMarkedCloudOnly(file)};

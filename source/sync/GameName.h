@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 /**
@@ -27,3 +28,11 @@ std::string GameName(const std::string &titleId, const std::string &title);
  * @return such as "Heavenly Sword (BCES00078)"
  */
 std::string GameLabel(const std::string &titleId, const std::string &title);
+
+/**
+ * A text cut to a number of bytes where a UTF-8 character starts, so no character is cut in two.
+ * @param text the text
+ * @param bytes the most bytes it may keep
+ * @return the text, or as much of it as fits
+ */
+std::string CutText(const std::string &text, std::size_t bytes);

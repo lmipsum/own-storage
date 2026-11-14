@@ -29,18 +29,7 @@ std::string ShownTitle(const std::string &title)
         }
     }
     // Some games start their titles with spaces, which would put them first in a sorted list.
-    shown = Trim(shown);
-    if (shown.size() <= kMaxTitleLength)
-    {
-        return shown;
-    }
-    std::size_t end = kMaxTitleLength;
-    // Bytes 10xxxxxx continue a character; the cut goes before the byte that starts it.
-    while (end > 0 && (static_cast<unsigned char>(shown[end]) & 0xc0) == 0x80)
-    {
-        --end;
-    }
-    return Trim(shown.substr(0, end));
+    return Trim(CutText(Trim(shown), kMaxTitleLength));
 }
 } // namespace
 
@@ -59,4 +48,19 @@ std::string GameLabel(const std::string &titleId, const std::string &title)
 {
     const std::string shown = ShownTitle(title);
     return shown.empty() ? titleId : shown + " (" + titleId + ")";
+}
+
+std::string CutText(const std::string &text, std::size_t bytes)
+{
+    if (text.size() <= bytes)
+    {
+        return text;
+    }
+    std::size_t end = bytes;
+    // Bytes 10xxxxxx continue a character; the cut goes before the byte that starts it.
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xc0) == 0x80)
+    {
+        --end;
+    }
+    return text.substr(0, end);
 }

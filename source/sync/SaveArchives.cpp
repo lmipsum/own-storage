@@ -129,11 +129,11 @@ BroughtDown SaveArchives::BringDown(const std::string &name, const CloudSave &cl
     return resignRefused ? BroughtDown::DoneNotResigned : BroughtDown::Done;
 }
 
-std::string SaveArchives::LocalTitle(const std::string &name) const
+SaveTexts SaveArchives::LocalTexts(const std::string &name) const
 {
     std::string sfo;
-    return m_storage.Read(m_savedata + "/" + name + "/" + paramSfoName, sfo) ? ReadSfoTitle(sfo)
-                                                                             : std::string();
+    return m_storage.Read(m_savedata + "/" + name + "/" + paramSfoName, sfo) ? ReadSfoTexts(sfo)
+                                                                             : SaveTexts();
 }
 
 void SaveArchives::QueueUpload(const LocalSave &save, const std::string &folderId,
@@ -149,11 +149,14 @@ void SaveArchives::QueueUpload(const LocalSave &save, const std::string &folderI
             {
                 return false;
             }
-            // Every console can then name the game without bringing the archive down, and the
-            // cloud dates the save as the console does, not by its upload.
-            file = FileToStore{
-                ArchiveTitle(save.name), LocalTitle(save.name), folderId, fileId, cloudOnly,
-                CloudTime(save.modified)};
+            // Every console can then show what the save is without bringing the archive down,
+            // and the cloud dates the save as the console does, not by its upload.
+            file = FileToStore{ArchiveTitle(save.name),
+                               DescribeSave(LocalTexts(save.name)),
+                               folderId,
+                               fileId,
+                               cloudOnly,
+                               CloudTime(save.modified)};
             std::ostringstream text;
             text << m_cloud.Running() + 1 << " saves in progress, last: " << save.name;
             m_display.SetText(ProgressBar::Current, text.str());

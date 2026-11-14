@@ -69,8 +69,8 @@ class SaveArchives
      * @return what came of it
      */
     BroughtDown BringDown(const std::string &name, const CloudSave &cloudSave);
-    /** The game title in a save's PARAM.SFO on the console; empty when it cannot be read. */
-    std::string LocalTitle(const std::string &name) const;
+    /** The texts of a save's PARAM.SFO on the console; empty when it cannot be read. */
+    SaveTexts LocalTexts(const std::string &name) const;
     /**
      * Queues a save's archive to go up; the archive is written when its turn comes and removed
      * once it is up.

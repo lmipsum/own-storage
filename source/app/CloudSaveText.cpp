@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/CloudSaveText.h"
 
+#include "sync/GameName.h"
+
 #include <iomanip>
 #include <sstream>
 
@@ -18,6 +20,8 @@ const std::size_t kDayAt = 8;
 const std::size_t kHourAt = 11;
 const std::size_t kMinuteAt = 14;
 const std::size_t kFieldLength = 2;
+// The system dialog takes a text of fewer than 512 bytes.
+const std::size_t kDialogTextBytes = 511;
 const std::size_t kShortestTime = kMinuteAt + kFieldLength;
 // Later years would not fit the minutes counted on the console's 32-bit long.
 const long kLastYear = 3000;
@@ -165,6 +169,32 @@ const char *ShownStatus(SaveStatus status)
     default:
         return "different on this PS3";
     }
+}
+
+std::string ShownDetails(const std::string &game, const std::string &name, const CloudSave &save,
+                         SaveStatus status, const DateStyle &style)
+{
+    std::string texts;
+    for (const std::string &text : {save.texts.subtitle, save.texts.detail})
+    {
+        const std::string line = text.substr(0, text.find_last_not_of('\n') + 1);
+        if (!line.empty())
+        {
+            texts += (texts.empty() ? "" : "\n") + line;
+        }
+    }
+    if (texts.empty())
+    {
+        texts = "The details come with the save's next upload.";
+    }
+    const std::string head = game + '\n';
+    const std::string tail = "\n\n" + name + '\n' + ShownTime(save.modified, style) + "   " +
+                             ShownSize(save.size) + "   " + ShownStatus(status);
+    // The texts give way first, so what the menu row shows stays readable.
+    const std::size_t room = head.size() + tail.size() < kDialogTextBytes
+                                 ? kDialogTextBytes - head.size() - tail.size()
+                                 : 0;
+    return head + CutText(texts, room) + tail;
 }
 
 std::string ShownResult(const std::string &name, LoadResult result)

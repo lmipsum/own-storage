@@ -51,8 +51,8 @@ std::vector<CloudGame> SaveBrowser::Games() const
         }
         if (title.empty())
         {
-            title =
-                save.second.title.empty() ? m_archives.LocalTitle(save.first) : save.second.title;
+            title = save.second.texts.title.empty() ? m_archives.LocalTexts(save.first).title
+                                                    : save.second.texts.title;
             games.back().name = GameName(titleId, title);
             games.back().label = GameLabel(titleId, title);
         }
@@ -107,8 +107,9 @@ LoadResult SaveBrowser::Load(const std::string &name)
     }
     if (status == SaveStatus::Different)
     {
-        const std::string local = m_archives.LocalTitle(name);
-        const std::string game = GameLabel(TitleId(name), local.empty() ? Save(name).title : local);
+        const std::string local = m_archives.LocalTexts(name).title;
+        const std::string game =
+            GameLabel(TitleId(name), local.empty() ? Save(name).texts.title : local);
         if (m_display.Ask(game + ":\n" + name +
                           " on this PS3 differs from the cloud's copy.\n\n"
                           "Yes: the cloud's copy replaces it.\nNo: keep this PS3's.") !=
@@ -137,7 +138,7 @@ RemoveResult SaveBrowser::Remove(const std::string &name)
     }
     const CloudSave &save = Save(name);
     // The console has no PARAM.SFO of it to read the title from.
-    const std::string game = GameLabel(TitleId(name), save.title);
+    const std::string game = GameLabel(TitleId(name), save.texts.title);
     if (m_display.Ask(game + ":\n" + name +
                       " is not on this PS3. Delete it from the cloud? It goes to the Drive "
                       "trash.\n\nYes: delete it.\nNo: keep it.") != Answer::Yes)

@@ -109,28 +109,55 @@ SaveOwner TestOwner(std::uint32_t userId, char psidByte, const std::string &acco
     return SaveOwner{userId, std::string(kPsidSize, psidByte), account};
 }
 
-std::string MakeSfo(const std::string &title, const SaveOwner &owner)
+std::string MakeSfo(const SaveTexts &texts, const SaveOwner &owner)
 {
-    // The keys sorted A to Z, as the console sorts them; their table is 24 bytes, 4-aligned.
-    const std::string keys("ACCOUNT_ID\0PARAMS\0TITLE\0", 24);
-    const std::uint32_t paramsSize = 0x400;
-    const std::uint32_t keyTable = 20 + 3 * 16;
-    std::string sfo("\0PSF", 4);
-    PutLittleEndian(sfo, 0x0101, 4);
-    PutLittleEndian(sfo, keyTable, 4);
-    PutLittleEndian(sfo, keyTable + keys.size(), 4);
-    PutLittleEndian(sfo, 3, 4);
-    PutEntry(sfo, 0, 0x0004, kAccountIdSize, 0);
-    PutEntry(sfo, 11, 0x0004, paramsSize, kAccountIdSize);
-    PutEntry(sfo, 18, 0x0204, title.size() + 1, kAccountIdSize + paramsSize);
-    std::string params(paramsSize, '\0');
+    std::string params(0x400, '\0');
     std::string userId;
     PutLittleEndian(userId, owner.userId, 4);
     params.replace(0x18, 4, userId);
     params.replace(0x1C, kPsidSize, owner.psid);
     params.replace(0x2C, 4, userId);
     params.replace(0x30, kAccountIdSize, owner.accountId);
-    return sfo + keys + owner.accountId + params + title + '\0';
+    const struct
+    {
+        const char *key;
+        std::uint32_t format;
+        std::string value;
+    } all[] = {
+        {"ACCOUNT_ID", 0x0004, owner.accountId},
+        {"DETAIL", 0x0204, texts.detail.empty() ? std::string() : texts.detail + '\0'},
+        {"PARAMS", 0x0004, params},
+        {"SUB_TITLE", 0x0204, texts.subtitle.empty() ? std::string() : texts.subtitle + '\0'},
+        {"TITLE", 0x0204, texts.title + '\0'}};
+    // The keys sorted A to Z, as the console sorts them, in a table padded to 4 bytes.
+    std::string keys;
+    std::string entries;
+    std::string data;
+    std::uint32_t count = 0;
+    for (const auto &value : all)
+    {
+        if (value.value.empty())
+        {
+            continue;
+        }
+        PutEntry(entries, keys.size(), value.format, value.value.size(), data.size());
+        keys += std::string(value.key) + '\0';
+        data += value.value;
+        ++count;
+    }
+    keys.resize((keys.size() + 3) / 4 * 4, '\0');
+    const std::uint32_t keyTable = 20 + count * 16;
+    std::string sfo("\0PSF", 4);
+    PutLittleEndian(sfo, 0x0101, 4);
+    PutLittleEndian(sfo, keyTable, 4);
+    PutLittleEndian(sfo, keyTable + keys.size(), 4);
+    PutLittleEndian(sfo, count, 4);
+    return sfo + entries + keys + data;
+}
+
+std::string MakeSfo(const std::string &title, const SaveOwner &owner)
+{
+    return MakeSfo(SaveTexts{title, std::string(), std::string()}, owner);
 }
 
 std::string MakeSfo(const std::string &title)
