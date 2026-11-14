@@ -44,6 +44,11 @@ struct FileToStore
     std::string fileId;
     /** Whether it is marked as kept in the cloud only; an upload without the mark clears it. */
     bool cloudOnly;
+    /**
+     * When its content last changed, as Drive writes modifiedDate; empty to leave Drive the time
+     * of the upload.
+     */
+    std::string modifiedDate;
 };
 
 /**

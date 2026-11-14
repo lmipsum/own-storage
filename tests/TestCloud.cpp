@@ -74,6 +74,25 @@ void TestCloud::SetModified(const std::string &id, const std::string &modified)
     m_modified[id] = modified;
 }
 
+std::string TestCloud::Modified(const std::string &id) const
+{
+    const auto modified = m_modified.find(id);
+    return modified == m_modified.end() ? std::string() : modified->second;
+}
+
+void TestCloud::TakeDate(const std::string &id, const FileToStore &file)
+{
+    // Like Drive, the cloud dates an upload that brings no date by the time it came.
+    if (file.modifiedDate.empty())
+    {
+        m_modified.erase(id);
+    }
+    else
+    {
+        m_modified[id] = file.modifiedDate;
+    }
+}
+
 const std::map<std::string, TestCloudItem> &TestCloud::Items() const
 {
     return m_items;
@@ -181,8 +200,11 @@ Json TestCloud::UploadFile(const std::string &path, const FileToStore &file,
     content << local.rdbuf();
     if (file.fileId.empty())
     {
-        return Create(TestCloudItem{file.title, file.parentId, mimeType, content.str()},
-                      file.description, file.cloudOnly);
+        const Json created =
+            Create(TestCloudItem{file.title, file.parentId, mimeType, content.str()},
+                   file.description, file.cloudOnly);
+        TakeDate(created["id"].Str(), file);
+        return created;
     }
     if (m_items.count(file.fileId) == 0)
     {
@@ -191,6 +213,7 @@ Json TestCloud::UploadFile(const std::string &path, const FileToStore &file,
     m_items[file.fileId].content = content.str();
     m_descriptions[file.fileId] = file.description;
     m_cloudOnly[file.fileId] = file.cloudOnly;
+    TakeDate(file.fileId, file);
     ++m_updates;
     return Describe(file.fileId);
 }
@@ -199,6 +222,7 @@ bool TestCloud::TrashFile(const std::string &fileId)
 {
     m_descriptions.erase(fileId);
     m_cloudOnly.erase(fileId);
+    m_modified.erase(fileId);
     return m_items.erase(fileId) == 1;
 }
 

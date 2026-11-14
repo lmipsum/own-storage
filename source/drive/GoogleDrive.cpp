@@ -7,6 +7,7 @@
 #include "app/Files.h"
 
 #include <cstddef>
+#include <memory>
 #include <sstream>
 
 #include <sys/file.h>
@@ -83,6 +84,10 @@ std::string BuildMetadata(const FileToStore &file, const std::string &mimeType)
     }
     meta.Add("parents", Json(parents));
     meta.Add("mimeType", Json(mimeType));
+    if (!file.modifiedDate.empty())
+    {
+        meta.Add("modifiedDate", Json(file.modifiedDate));
+    }
     if (mimeType != folderMime)
     {
         // Sent either way, so an upload without the mark takes it off a file that had it.
@@ -93,6 +98,44 @@ std::string BuildMetadata(const FileToStore &file, const std::string &mimeType)
         meta.Add("properties", Json(Json::Array{mark}));
     }
     return meta.Str();
+}
+
+/**
+ * The query parameter that has Drive take the metadata's modifiedDate, which only an update may
+ * set.
+ * @param file the file to store
+ * @return the parameter; empty for a create or when the file brings no date
+ */
+std::string ModifiedDateParameter(const FileToStore &file)
+{
+    return !file.fileId.empty() && !file.modifiedDate.empty() ? "&setModifiedDate=true"
+                                                              : std::string();
+}
+
+/**
+ * Whether a stored file still needs its date: Drive takes modifiedDate only in an update, so a
+ * created file gets it in a request of its own.
+ * @param file how the file was stored
+ * @param stored what Drive answered
+ * @return true for a file just created that brings a date
+ */
+bool NeedsDate(const FileToStore &file, const Json &stored)
+{
+    return file.fileId.empty() && !file.modifiedDate.empty() && stored.Has("id");
+}
+
+/**
+ * Logs a date request that failed.
+ * @param status the HTTP status, or below zero when no answer came
+ * @param reply the body Drive answered with
+ */
+void NoteDate(long status, const std::string &reply)
+{
+    // The file is stored either way; it is dated by its upload until it goes up again.
+    if (!HttpClient::Succeeded(status) || !Json::Parse(reply).Has("id"))
+    {
+        debugPrintf("NoteDate: the file keeps the time of its upload, status %ld\n", status);
+    }
 }
 
 /**
@@ -227,42 +270,66 @@ Json GoogleDrive::UploadFile(const std::string &path, const FileToStore &file,
         debugPrintf("UploadFile: Could not read %s\n", path.c_str());
         return Json();
     }
-    const std::string meta = BuildMetadata(file, mimeType);
     std::string content;
-    if (entry.st_size <= kMultipartUploadLimit && ReadWholeFile(path, content) &&
-        content.find(kMultipartBoundary) == std::string::npos)
+    const Json stored = entry.st_size <= kMultipartUploadLimit && ReadWholeFile(path, content) &&
+                                content.find(kMultipartBoundary) == std::string::npos
+                            ? UploadInOneRequest(path, file, mimeType, content)
+                            : UploadResumable(path, file, mimeType, entry.st_size);
+    if (NeedsDate(file, stored))
     {
-        return UploadInOneRequest(path, meta, mimeType, content, file.fileId);
+        const QueuedRequest request = BuildDateRequest(file, mimeType, stored["id"].Str());
+        std::string reply;
+        const long status = SendAuthorized(
+            m_auth, request.headers, [&](const HttpClient::Headers &withToken, std::string &body)
+            { return m_http.Put(request.url, request.body, withToken, body); }, reply);
+        NoteDate(status, reply);
     }
-    return UploadResumable(path, meta, mimeType, entry.st_size, file.fileId);
+    return stored;
 }
 
-QueuedRequest GoogleDrive::BuildMultipartRequest(const std::string &meta,
-                                                 const std::string &mimeType,
-                                                 const std::string &content,
-                                                 const std::string &fileId)
+QueuedRequest GoogleDrive::BuildDateRequest(const FileToStore &file, const std::string &mimeType,
+                                            const std::string &fileId)
 {
+    FileToStore created = file;
+    created.fileId = fileId;
+    QueuedRequest request;
+    request.method = "PUT";
+    request.url = std::string(kFilesUrl) + "/" + fileId +
+                  "?setModifiedDate=true&fields=" + m_http.Escape(kStoredFileFields);
+    request.headers.push_back("Content-Type: " + jsonMime);
+    request.headers.push_back("Expect:");
+    // The whole metadata again, so the update cannot take anything else off the file.
+    request.body = BuildMetadata(created, mimeType);
+    return request;
+}
+
+QueuedRequest GoogleDrive::BuildMultipartRequest(const FileToStore &file,
+                                                 const std::string &mimeType,
+                                                 const std::string &content)
+{
+    const std::string &fileId = file.fileId;
     QueuedRequest request;
     request.method = fileId.empty() ? "POST" : "PUT";
     request.url = std::string(kUploadUrl) + (fileId.empty() ? std::string() : "/" + fileId) +
-                  "?uploadType=multipart&fields=" + m_http.Escape(kStoredFileFields);
+                  "?uploadType=multipart" + ModifiedDateParameter(file) +
+                  "&fields=" + m_http.Escape(kStoredFileFields);
     request.headers.push_back("Content-Type: multipart/related; boundary=" + kMultipartBoundary);
     request.headers.push_back("Expect:");
     request.body = "--" + kMultipartBoundary +
-                   "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + meta + "\r\n--" +
-                   kMultipartBoundary + "\r\nContent-Type: " + mimeType + "\r\n\r\n" + content +
-                   "\r\n--" + kMultipartBoundary + "--\r\n";
+                   "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" +
+                   BuildMetadata(file, mimeType) + "\r\n--" + kMultipartBoundary +
+                   "\r\nContent-Type: " + mimeType + "\r\n\r\n" + content + "\r\n--" +
+                   kMultipartBoundary + "--\r\n";
     // A create sent twice makes two files, so it is not sent again when it may have been done;
     // the caller looks for the file on the next run instead.
     request.retry = fileId.empty() ? Retry::OnlyRefused : Retry::AnyTransient;
     return request;
 }
 
-Json GoogleDrive::UploadInOneRequest(const std::string &path, const std::string &meta,
-                                     const std::string &mimeType, const std::string &content,
-                                     const std::string &fileId)
+Json GoogleDrive::UploadInOneRequest(const std::string &path, const FileToStore &file,
+                                     const std::string &mimeType, const std::string &content)
 {
-    const QueuedRequest request = BuildMultipartRequest(meta, mimeType, content, fileId);
+    const QueuedRequest request = BuildMultipartRequest(file, mimeType, content);
     m_display.begin(path);
     std::string reply;
     const long status = SendAuthorized(
@@ -281,15 +348,16 @@ Json GoogleDrive::UploadInOneRequest(const std::string &path, const std::string 
     }
     m_display.end();
 
-    const Json file = Json::Parse(reply);
-    debugPrintf("UploadInOneRequest: stored %s\n", file["id"].Str().c_str());
-    return file;
+    const Json stored = Json::Parse(reply);
+    debugPrintf("UploadInOneRequest: stored %s\n", stored["id"].Str().c_str());
+    return stored;
 }
 
-Json GoogleDrive::UploadResumable(const std::string &path, const std::string &meta,
-                                  const std::string &mimeType, long long size,
-                                  const std::string &fileId)
+Json GoogleDrive::UploadResumable(const std::string &path, const FileToStore &file,
+                                  const std::string &mimeType, long long size)
 {
+    const std::string &fileId = file.fileId;
+    const std::string meta = BuildMetadata(file, mimeType);
     std::ostringstream announcedSize;
     announcedSize << "X-Upload-Content-Length: " << size;
     HttpClient::Headers sessionHeaders;
@@ -297,9 +365,10 @@ Json GoogleDrive::UploadResumable(const std::string &path, const std::string &me
     sessionHeaders.push_back("X-Upload-Content-Type: " + mimeType);
     sessionHeaders.push_back(announcedSize.str());
     sessionHeaders.push_back("Expect:");
-    const std::string sessionUrl =
-        std::string(kUploadUrl) + (fileId.empty() ? std::string() : "/" + fileId) +
-        "?uploadType=resumable&fields=" + m_http.Escape(kStoredFileFields);
+    const std::string sessionUrl = std::string(kUploadUrl) +
+                                   (fileId.empty() ? std::string() : "/" + fileId) +
+                                   "?uploadType=resumable" + ModifiedDateParameter(file) +
+                                   "&fields=" + m_http.Escape(kStoredFileFields);
 
     std::string sessionReply;
     const long sessionStatus = SendAuthorized(
@@ -339,16 +408,16 @@ Json GoogleDrive::UploadResumable(const std::string &path, const std::string &me
         return Json();
     }
 
-    const Json file = Json::Parse(reply);
-    if (file.Has("id"))
+    const Json stored = Json::Parse(reply);
+    if (stored.Has("id"))
     {
-        debugPrintf("UploadResumable: stored %s\n", file["id"].Str().c_str());
+        debugPrintf("UploadResumable: stored %s\n", stored["id"].Str().c_str());
     }
     else
     {
         debugPrintf("UploadResumable: Resource id not found\n");
     }
-    return file;
+    return stored;
 }
 
 bool GoogleDrive::DownloadFile(const std::string &fileId, const std::string &localPath)
@@ -407,11 +476,12 @@ bool GoogleDrive::TrashFile(const std::string &fileId)
 
 void GoogleDrive::QueueFile(const std::string &path, const PrepareFile &prepare, const Done &done)
 {
+    // Filled in when the file's turn comes; its date may need a request of its own afterwards.
+    const std::shared_ptr<FileToStore> file = std::make_shared<FileToStore>();
     m_queue.Add(
-        [this, path, prepare, done](QueuedRequest &request)
+        [this, path, prepare, done, file](QueuedRequest &request)
         {
-            FileToStore file{};
-            if (!prepare(file))
+            if (!prepare(*file))
             {
                 return false;
             }
@@ -421,15 +491,33 @@ void GoogleDrive::QueueFile(const std::string &path, const PrepareFile &prepare,
                 !ReadWholeFile(path, content) ||
                 content.find(kMultipartBoundary) != std::string::npos)
             {
-                m_resumable.push_back(ResumableFile{path, file, done});
+                m_resumable.push_back(ResumableFile{path, *file, done});
                 return false;
             }
-            request = BuildMultipartRequest(BuildMetadata(file, octetMime), octetMime, content,
-                                            file.fileId);
+            request = BuildMultipartRequest(*file, octetMime, content);
             return true;
         },
-        [this, done](long status, const std::string &reply)
-        { FinishQueued("QueueFile: Could not upload file", status, reply, done); });
+        [this, done, file](long status, const std::string &reply)
+        {
+            const Json stored =
+                FinishQueued("QueueFile: Could not upload file", status, reply, done);
+            if (NeedsDate(*file, stored))
+            {
+                QueueDate(*file, stored["id"].Str());
+            }
+        });
+}
+
+void GoogleDrive::QueueDate(const FileToStore &file, const std::string &fileId)
+{
+    const QueuedRequest dated = BuildDateRequest(file, octetMime, fileId);
+    m_queue.Add(
+        [dated](QueuedRequest &request)
+        {
+            request = dated;
+            return true;
+        },
+        [](long status, const std::string &reply) { NoteDate(status, reply); });
 }
 
 void GoogleDrive::RunQueue(const Stop &stop)
@@ -455,17 +543,17 @@ unsigned int GoogleDrive::Running() const
     return m_queue.Running();
 }
 
-void GoogleDrive::FinishQueued(const char *what, long status, const std::string &reply,
+Json GoogleDrive::FinishQueued(const char *what, long status, const std::string &reply,
                                const Done &done)
 {
-    const Json item = Json::Parse(reply);
+    Json item = Json::Parse(reply);
     if (!HttpClient::Succeeded(status) || !item.Has("id"))
     {
         NoteFailure(what, status, reply);
-        done(Json());
-        return;
+        item = Json();
     }
     done(item);
+    return item;
 }
 
 void GoogleDrive::NoteFailure(const char *what, long status, const std::string &reply)

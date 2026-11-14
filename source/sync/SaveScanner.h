@@ -3,6 +3,7 @@
 
 #include "sync/LocalStorage.h"
 
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,8 @@ struct LocalSave
      * the save needs no reading to tell that.
      */
     std::string fingerprint;
+    /** When a file in it last changed; 0 when it has none. */
+    std::time_t modified = 0;
 };
 
 /** Finds what there is to back up of one user: the save folders. */

@@ -46,7 +46,10 @@ class AuthorizedQueue
     AuthorizedQueue(GoogleDeviceAuth &auth, unsigned int parallel);
     ~AuthorizedQueue();
 
-    /** Queues a request; nothing is sent before Run(). */
+    /**
+     * Queues a request; nothing is sent before Run(). A Done callback may queue more, which the
+     * same Run() sends.
+     */
     void Add(const Prepare &prepare, const Done &done);
     /** Sends the queued requests, at most parallel at a time, until all are done or stopped. */
     void Run(const Stop &stop);
