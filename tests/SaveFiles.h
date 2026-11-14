@@ -2,9 +2,26 @@
 #pragma once
 
 #include "sync/ParamSfo.h"
+#include "sync/Tar.h"
 
 #include <cstdint>
 #include <string>
+#include <vector>
+
+/**
+ * A save's archive, in memory, as the app writes one a file at a time.
+ * @param files the save's files; every name archivable
+ * @return the archive
+ */
+std::string MakeTar(std::vector<TarFile> files);
+
+/**
+ * Unpacks a save's archive in memory.
+ * @param archive the archive
+ * @param files receives the files
+ * @return false when it is not a save's archive, or is cut short
+ */
+bool ReadTar(const std::string &archive, std::vector<TarFile> &files);
 
 /** A save owner for tests: a user number, a PSID of one repeated byte, and an account id. */
 SaveOwner TestOwner(std::uint32_t userId, char psidByte, const std::string &accountId);

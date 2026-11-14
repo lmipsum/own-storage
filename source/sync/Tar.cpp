@@ -6,7 +6,6 @@
 
 namespace
 {
-const std::size_t kBlock = 512;
 // Where the ustar header keeps each field, and how long it is.
 const std::size_t kNameOffset = 0;
 const std::size_t kNameLength = 100;
@@ -57,7 +56,7 @@ bool GetOctal(const std::string &block, std::size_t offset, std::size_t length,
 unsigned long long Checksum(const std::string &header)
 {
     unsigned long long sum = 0;
-    for (std::size_t i = 0; i < kBlock; ++i)
+    for (std::size_t i = 0; i < kTarBlock; ++i)
     {
         const bool inField = i >= kChecksumOffset && i < kChecksumOffset + kChecksumLength;
         sum += inField ? ' ' : static_cast<unsigned char>(header[i]);
@@ -65,15 +64,16 @@ unsigned long long Checksum(const std::string &header)
     return sum;
 }
 
-/** The header block of a file. */
-std::string Header(const TarFile &file)
+} // namespace
+
+std::string TarHeader(const std::string &name, unsigned long long size)
 {
-    std::string header(kBlock, '\0');
-    header.replace(kNameOffset, file.name.size(), file.name);
+    std::string header(kTarBlock, '\0');
+    header.replace(kNameOffset, name.size(), name);
     PutOctal(header, kModeOffset, kIdLength, kFileMode);
     PutOctal(header, kOwnerOffset, kIdLength, 0);
     PutOctal(header, kGroupOffset, kIdLength, 0);
-    PutOctal(header, kSizeOffset, kSizeLength, file.content.size());
+    PutOctal(header, kSizeOffset, kSizeLength, size);
     PutOctal(header, kTimeOffset, kTimeLength, 0);
     header[kTypeOffset] = kRegularFile;
     header.replace(kMagicOffset, sizeof kMagic, kMagic, sizeof kMagic);
@@ -88,73 +88,39 @@ std::string Header(const TarFile &file)
     return header;
 }
 
-/** The zero bytes that fill content up to a whole block. */
-std::size_t Padding(std::size_t size)
+std::size_t TarPadding(unsigned long long size)
 {
-    return (kBlock - size % kBlock) % kBlock;
+    return static_cast<std::size_t>((kTarBlock - size % kTarBlock) % kTarBlock);
 }
-} // namespace
+
+std::string TarEnd()
+{
+    return std::string(2 * kTarBlock, '\0');
+}
+
+TarBlock ReadTarHeader(const std::string &block, std::string &name, unsigned long long &size)
+{
+    if (block.size() != kTarBlock)
+    {
+        return TarBlock::Bad;
+    }
+    if (block == std::string(kTarBlock, '\0'))
+    {
+        return TarBlock::End;
+    }
+    unsigned long long checksum;
+    if (block.compare(kMagicOffset, sizeof kMagic - 1, kMagic) != 0 ||
+        block[kTypeOffset] != kRegularFile || !GetOctal(block, kSizeOffset, kSizeLength, size) ||
+        !GetOctal(block, kChecksumOffset, kChecksumLength, checksum) || checksum != Checksum(block))
+    {
+        return TarBlock::Bad;
+    }
+    name = block.substr(kNameOffset, std::min(block.find('\0', kNameOffset), kNameLength));
+    return IsArchivableName(name) ? TarBlock::File : TarBlock::Bad;
+}
 
 bool IsArchivableName(const std::string &name)
 {
     return !name.empty() && name.size() < kNameLength && name.find('/') == std::string::npos &&
            name != "." && name != "..";
-}
-
-std::string MakeTar(std::vector<TarFile> files)
-{
-    std::sort(files.begin(), files.end(),
-              [](const TarFile &a, const TarFile &b) { return a.name < b.name; });
-    std::size_t size = 2 * kBlock;
-    for (const TarFile &file : files)
-    {
-        size += kBlock + file.content.size() + Padding(file.content.size());
-    }
-    // Reserved whole, so growing the archive never copies it.
-    std::string archive;
-    archive.reserve(size);
-    for (const TarFile &file : files)
-    {
-        archive += Header(file);
-        archive += file.content;
-        archive.append(Padding(file.content.size()), '\0');
-    }
-    // Two zero blocks end the archive.
-    archive.append(2 * kBlock, '\0');
-    return archive;
-}
-
-bool ReadTar(const std::string &archive, std::vector<TarFile> &files)
-{
-    files.clear();
-    std::size_t offset = 0;
-    while (offset + kBlock <= archive.size())
-    {
-        const std::string header = archive.substr(offset, kBlock);
-        if (header == std::string(kBlock, '\0'))
-        {
-            return true;
-        }
-        unsigned long long size;
-        unsigned long long checksum;
-        if (header.compare(kMagicOffset, sizeof kMagic - 1, kMagic) != 0 ||
-            header[kTypeOffset] != kRegularFile ||
-            !GetOctal(header, kSizeOffset, kSizeLength, size) ||
-            !GetOctal(header, kChecksumOffset, kChecksumLength, checksum) ||
-            checksum != Checksum(header))
-        {
-            return false;
-        }
-        const std::string name =
-            header.substr(kNameOffset, std::min(header.find('\0', kNameOffset), kNameLength));
-        offset += kBlock;
-        if (!IsArchivableName(name) || size > archive.size() - offset)
-        {
-            return false;
-        }
-        files.push_back(TarFile{name, archive.substr(offset, size)});
-        offset += size + Padding(size);
-    }
-    // Without the end blocks the archive was cut short.
-    return false;
 }

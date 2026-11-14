@@ -61,9 +61,10 @@ class SaveArchives
      */
     std::string ArchiveMd5(const LocalSave &save);
     /**
-     * Brings a save down from the cloud. The archive is checked whole before any file of the save
-     * is replaced, and the base says a download is under way until every file is written. A save of
-     * another user or console is made the target's; one that cannot be still comes down, as it is.
+     * Brings a save down from the cloud. The archive's MD5 and every header are checked before
+     * any file of the save is replaced, and the base says a download is under way until every file
+     * is written, so a disk failure halfway is known to the next run. A save of another user or
+     * console is made the target's; one that cannot be still comes down, as it is.
      * @param name the save
      * @param cloudSave its archive in the cloud
      * @return what came of it
@@ -94,6 +95,46 @@ class SaveArchives
     bool Stopped() const;
 
   private:
+    /** Where a file's content lies in an archive. */
+    struct ArchivedFile
+    {
+        std::string name;
+        unsigned long long offset;
+        unsigned long long size;
+    };
+
+    /**
+     * Copies part of a file to the end of another, a piece at a time.
+     * @param to the file to add to; Write() created it
+     * @param from the file to copy from
+     * @param offset where the part starts in from
+     * @param size the part's bytes
+     * @return false when from cannot be read whole, or to cannot be written
+     */
+    bool CopyPart(const std::string &to, const std::string &from, unsigned long long offset,
+                  unsigned long long size);
+    /**
+     * Reads an archive's headers, and the content of the files a resign changes.
+     * @param path the archive
+     * @param files receives where each file lies in it
+     * @param signing receives PARAM.SFO and PARAM.PFD, which are small
+     * @return false when it is not a save's archive, is cut short, or holds a PARAM.SFO or
+     * PARAM.PFD too large to be one
+     */
+    bool ListArchive(const std::string &path, std::vector<ArchivedFile> &files,
+                     std::vector<TarFile> &signing) const;
+    /**
+     * Writes a save's files from its archive into the save folder.
+     * @param folder the save folder
+     * @param path the archive
+     * @param files where each file lies in the archive
+     * @param signing the files a resign changed, written as they are now
+     * @return false when a file cannot be written
+     */
+    bool WriteSaveFiles(const std::string &folder, const std::string &path,
+                        const std::vector<ArchivedFile> &files,
+                        const std::vector<TarFile> &signing);
+
     CloudStorage &m_cloud;
     SyncState &m_state;
     LocalStorage &m_storage;

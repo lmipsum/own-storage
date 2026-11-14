@@ -17,6 +17,9 @@
 #include "sync/SyncState.h"
 #include "sync/Tar.h"
 
+#include <mbedtls/md.h>
+
+#include <cstdio>
 #include <ctime>
 #include <string>
 #include <vector>
@@ -192,6 +195,54 @@ struct Browsing
     SaveBrowser browser;
 };
 } // namespace
+
+TEST(ArchiveKeepsTheBytesOfTheArchivesSentBefore)
+{
+    Setup setup;
+    setup.console.Put(std::string(kSavedata) + "/BLES00009-GOLD/B.BIN", "bb", kWritten);
+    setup.console.Put(std::string(kSavedata) + "/BLES00009-GOLD/A.BIN", "a", kWritten);
+    setup.Run();
+    // The MD5 an archive of these files had before archives were written a file at a time.
+    const std::string archive = setup.cloud.Items().at(setup.ArchiveId("BLES00009-GOLD")).content;
+    unsigned char digest[16];
+    mbedtls_md(mbedtls_md_info_from_type(MBEDTLS_MD_MD5),
+               reinterpret_cast<const unsigned char *>(archive.data()), archive.size(), digest);
+    std::string md5;
+    for (const unsigned char byte : digest)
+    {
+        char hex[3];
+        std::snprintf(hex, sizeof hex, "%02x", byte);
+        md5 += hex;
+    }
+    CHECK_EQUAL(std::string("7ac9469dbf90f4831dc4e29f4bb1cc57"), md5);
+}
+
+TEST(LargeSaveGoesUpAndComesDownAPieceAtATime)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    // Larger than the pieces a large file moves in, and not a whole number of them.
+    std::string big(2 * 1024 * 1024 + 700, '\0');
+    for (std::size_t i = 0; i < big.size(); ++i)
+    {
+        big[i] = static_cast<char>(i % 251);
+    }
+    setup.console.Put(std::string(kSave) + "/BIG.DAT", big, kWritten);
+    setup.Run();
+    // The archive is the one a save always gave, so its MD5 matches the archives sent before.
+    std::string data;
+    std::string sfo;
+    setup.console.Read(std::string(kSave) + "/DATA.BIN", data);
+    setup.console.Read(std::string(kSave) + "/PARAM.SFO", sfo);
+    CHECK(setup.cloud.Items().at(setup.ArchiveId("BLES00001-SAVE")).content ==
+          MakeTar({{"BIG.DAT", big}, {"DATA.BIN", data}, {"PARAM.SFO", sfo}}));
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    setup.Run(other, kSavedata);
+    std::string brought;
+    CHECK(other.Read(std::string(kSave) + "/BIG.DAT", brought));
+    CHECK(brought == big);
+}
 
 TEST(ArchiveIsTheSameWhateverTheOrderAndReadsBack)
 {

@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+// A save's archive is an uncompressed ustar archive. Its writer puts the files in sorted by name,
+// and every file gets the same owner, mode and time, so two archives of one save have the same
+// MD5.
+
+#include <cstddef>
 #include <string>
-#include <vector>
+
+/** The size of an archive's blocks: a header is one, and a file's content fills whole ones. */
+const std::size_t kTarBlock = 512;
 
 /** One file of a save, as an archive holds it. */
 struct TarFile
@@ -18,19 +25,36 @@ struct TarFile
  */
 bool IsArchivableName(const std::string &name);
 
-/**
- * Packs a save into one uncompressed ustar archive. The same files always give the same bytes:
- * they go in sorted by name, with fixed owner, mode and time, so two archives of one save have
- * the same MD5.
- * @param files the save's files; every name archivable
- * @return the archive
- */
-std::string MakeTar(std::vector<TarFile> files);
+/** What a header block of an archive is. */
+enum class TarBlock
+{
+    /** A file's header. */
+    File,
+    /** The zero block that ends the archive. */
+    End,
+    /** Anything else, which a save's archive never holds. */
+    Bad
+};
 
 /**
- * Unpacks an archive that MakeTar made.
- * @param archive the archive
- * @param files receives the files
- * @return false when it is not such an archive, or a name would leave the save folder
+ * The header block of a file, with the fixed owner, mode and time every file gets.
+ * @param name the file's name; archivable
+ * @param size the content's size in bytes
+ * @return the block
  */
-bool ReadTar(const std::string &archive, std::vector<TarFile> &files);
+std::string TarHeader(const std::string &name, unsigned long long size);
+
+/** The zero bytes that fill a file's content of the given size up to a whole block. */
+std::size_t TarPadding(unsigned long long size);
+
+/** The two zero blocks that end an archive. */
+std::string TarEnd();
+
+/**
+ * Reads a header block.
+ * @param block the block, kTarBlock bytes
+ * @param name receives the file's name, when the block names a file
+ * @param size receives the content's size in bytes, when the block names a file
+ * @return what the block is; Bad too for a name that would leave the save folder
+ */
+TarBlock ReadTarHeader(const std::string &block, std::string &name, unsigned long long &size);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <ctime>
 #include <string>
 #include <vector>
@@ -48,12 +49,29 @@ class LocalStorage
      */
     virtual bool Read(const std::string &path, std::string &content) const = 0;
     /**
+     * Reads part of a file.
+     * @param path the file
+     * @param offset where the part starts
+     * @param size the part's bytes
+     * @param content receives the part
+     * @return false when the file cannot be read, or ends before the part does
+     */
+    virtual bool ReadPart(const std::string &path, unsigned long long offset, std::size_t size,
+                          std::string &content) const = 0;
+    /**
      * Writes a whole file, replacing one that is there.
      * @param path the file
      * @param content its content
      * @return false when it cannot be written
      */
     virtual bool Write(const std::string &path, const std::string &content) = 0;
+    /**
+     * Adds to the end of a file that Write() created.
+     * @param path the file
+     * @param content what to add
+     * @return false when it cannot be written
+     */
+    virtual bool Append(const std::string &path, const std::string &content) = 0;
     /** Deletes a file; one that is not there is fine. */
     virtual void Remove(const std::string &path) = 0;
     /** Creates a directory; one that exists already stays as it is. */
