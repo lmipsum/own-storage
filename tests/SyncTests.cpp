@@ -922,10 +922,13 @@ TEST(XmbListsRowsThatStartTheAppThroughWebman)
     CHECK(saveScript);
     CHECK_EQUAL(std::string("del /dev_hdd0/game/OWNS00001/USRDIR/act.txt\n"
                             "logfile /dev_hdd0/game/OWNS00001/USRDIR/act.txt\n"
-                            "log sync\n/play.ps3?col=game&seg=OWNS00001\n"),
+                            "log sync\ndel /dev_hdd0/tmp/wm_request\n"
+                            "logfile /dev_hdd0/tmp/wm_request\nlog /play.ps3?OWNS00001\n"),
                 XmbScriptText(kXmbPlace, XmbScript{"owns_sync", xmbSync}));
-    CHECK(XmbScriptText(kXmbPlace, XmbScript{"owns_save_0", "save:BLES00001-SAVE"})
-              .find("\nlog save:BLES00001-SAVE\n") != std::string::npos);
+    const std::string saveScriptText =
+        XmbScriptText(kXmbPlace, XmbScript{"owns_save_0", "save:BLES00001-SAVE"});
+    CHECK(saveScriptText.find("\nlog save:BLES00001-SAVE\n") != std::string::npos);
+    CHECK(saveScriptText.find("\nlog /play.ps3?OWNS00001\n") != std::string::npos);
 }
 
 TEST(XmbSaveOfANameNoConsoleGivesIsOnlyListed)
