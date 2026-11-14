@@ -27,7 +27,7 @@ struct SaveBase
 /**
  * The base of every save: what it was like when the console and the cloud last held the same.
  * A change since then, on either side, is what the sync acts on. Saved in full after every
- * change, with a backup. For the sync thread only.
+ * change, with a backup. For the app thread only.
  */
 class SyncState
 {

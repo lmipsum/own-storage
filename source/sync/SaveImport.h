@@ -28,7 +28,7 @@ struct ImportResult
 /**
  * Brings saves copied off the console, such as to a USB drive, into the cloud, so they need not
  * be kept there. They go among the user's saves marked as kept in the cloud only: no sync brings
- * them down by itself, and the user loads the ones wanted from the menu. For the app thread only.
+ * them down by itself, and the user picks the ones wanted in the XMB. For the app thread only.
  */
 class SaveImport
 {

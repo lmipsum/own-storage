@@ -31,7 +31,6 @@
 #include <sys/systime.h>
 #include <sys/file.h>
 #include <sys/thread.h>
-#include <io/pad.h>
 
 #include <sysutil/sysutil.h>
 #include <sysutil/video.h>
@@ -46,7 +45,6 @@
 
 #include <SDL/SDL.h>
 #include <SDL/SDL_ttf.h>
-#include <SDL/SDL_thread.h>
 
 #include "auth/ClientCredentials.h"
 #include "drive/GoogleDrive.h"
@@ -55,11 +53,12 @@
 #include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
 #include "app/ConsoleStorage.h"
-#include "app/CloudSaveMenu.h"
 #include "app/ConsoleIdentity.h"
 #include "app/ConsoleSettings.h"
 #include "app/NetworkStart.h"
 #include "app/Profile.h"
+#include "app/XmbInstall.h"
+#include "app/XmbPick.h"
 #include "sync/SaveBrowser.h"
 #include "sync/SaveImport.h"
 #include "sync/SaveScanner.h"
@@ -68,7 +67,6 @@
 #include "json/Json.h"
 #include "app/DebugLog.h"
 #include "app/Paths.h"
-#include "ui/Menu.h"
 #include "ui/Screen.h"
 #include "ui/SyncDialog.h"
 #include "ui/TransferBar.h"
@@ -80,7 +78,7 @@ const std::string userClientFile = APP_DIR "client.json";
 // overlap. Eight went 1.5 times as fast as four, with no request refused.
 const unsigned int parallelUploads = 8;
 const unsigned int microsecondsPerSecond = 1000000;
-// How often a wait checks whether the user has gone back.
+// How often a wait checks whether the user has closed the sign-in message.
 const unsigned int backPollMicroseconds = 100000;
 
 HttpClient http;
@@ -96,6 +94,12 @@ std::atomic<int> exitapp(0);
 SyncDialog syncDialog(exitapp);
 NetworkStart networkStart(exitapp);
 
+const char targetUnknownMessage[] =
+    "This PS3's or the user's ids cannot be read, so saves of other users come down as they are.";
+
+// Where the XMB's lists go, beside webMAN MOD's own, and how their rows start the app.
+const XmbPlace xmbPlace{"/dev_hdd0/xmlhost/game_plugin/", APP_DIR "xmb_action.txt", APP_ID};
+
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then sync again.";
 const char driveUnreachableMessage[] = "Cannot reach Google Drive. Check the network.";
@@ -105,15 +109,6 @@ const char signInExpiredMessage[] =
 const char localFileMessage[] =
     "Own Storage cannot write to the PS3 hard disk. Check the free space.";
 const char unknownUserMessage[] = "Own Storage cannot tell which user is logged in.";
-
-// The main menu's rows.
-const char signInRow[] = "Sign in to Google Drive";
-const char syncRow[] = "Sync";
-const char cloudSavesRow[] = "Saves in the cloud";
-const char signOutRow[] = "Sign out";
-const char quitRow[] = "Quit";
-
-int xmbopen = 0;
 
 int appWidth = 1280;
 int appHeight = 720;
@@ -138,12 +133,6 @@ void sysevent_callback(u64 status, u64 param, void *userdata)
     case SYSUTIL_EXIT_GAME:
         exitapp = 1;
         break;
-    case SYSUTIL_MENU_OPEN:
-        xmbopen = 1;
-        break;
-    case SYSUTIL_MENU_CLOSE:
-        xmbopen = 0;
-        break;
     }
 }
 
@@ -161,12 +150,6 @@ const char *driveFailureMessage()
     }
 }
 
-/** The hint of a menu that only takes a pick. */
-std::string selectHint(const Menu &menu)
-{
-    return menu.Buttons().confirm + ": select";
-}
-
 /** Where a user's sync state is kept. */
 std::string stateFile(const std::string &profile)
 {
@@ -179,33 +162,35 @@ std::string stateBackup(const std::string &profile)
     return profile + "/state.backup";
 }
 
-/** Shows why the app cannot go on, and waits until the user quits. */
-void waitForQuit(Menu &menu, const std::string &message)
+/** Shows why the app cannot go on, and closes it once the user has read that. */
+void stopWith(const std::string &message)
 {
-    menu.ShowMessage(message);
-    while (exitapp == 0 && menu.Choose("", {quitRow}, selectHint(menu), 0) == Menu::kNone)
-    {
-    }
+    syncDialog.ShowError(message);
+    syncDialog.Close();
+    exitapp = 1;
 }
 
 /**
  * Signs the user in with a code to enter on another device, and keeps the sign-in for the next
- * runs. The user may go back while the code is shown.
- * @param menu where the code is shown
+ * runs. The user may close the code's message to stop.
+ * @param screen says what the app is doing
  * @param profile the user's directory of the app
  * @param config receives the sign-in
+ * @return what came of it, as the user reads it
  */
-void signIn(Menu &menu, const std::string &profile, Config &config)
+std::string signIn(Screen &screen, const std::string &profile, Config &config)
 {
-    menu.ShowMessage("Asking Google for a sign-in code...");
+    screen.ShowMessage("Asking Google for a sign-in code...");
     const std::string code = googleAuth.Start();
     if (code.empty())
     {
-        menu.ShowMessage("Cannot reach Google. Check the network.");
-        return;
+        return "Cannot reach Google. Check the network.";
     }
-    menu.ShowMessage("On a phone or computer, open " + googleAuth.VerificationUrl() +
-                     " and enter " + code + "    " + menu.Buttons().back + ": cancel");
+    if (!syncDialog.ShowWaiting("On a phone or computer, open " + googleAuth.VerificationUrl() +
+                                " and enter this code:\n\n" + code))
+    {
+        return "Sign-in cancelled.";
+    }
     GoogleDeviceAuth::Status status = GoogleDeviceAuth::Pending;
     while (status == GoogleDeviceAuth::Pending)
     {
@@ -214,32 +199,35 @@ void signIn(Menu &menu, const std::string &profile, Config &config)
              waited < googleAuth.PollIntervalSeconds() * microsecondsPerSecond;
              waited += backPollMicroseconds)
         {
-            if (exitapp != 0 || menu.TakeBack())
+            if (exitapp != 0 || syncDialog.WaitingClosed())
             {
-                menu.ShowMessage("Sign-in cancelled.");
-                return;
+                syncDialog.Close();
+                return "Sign-in cancelled.";
             }
             sysUsleep(backPollMicroseconds);
         }
         status = googleAuth.Poll();
     }
+    syncDialog.Close();
     if (status != GoogleDeviceAuth::Approved)
     {
-        menu.ShowMessage("The sign-in did not go through. Try again.");
-        return;
+        return "The sign-in did not go through. Try again.";
     }
     config.refreshToken = googleAuth.RefreshToken();
     SaveConfig(profile, config);
-    menu.ShowMessage("Signed in.");
+    return "Signed in.";
 }
 
-/** Forgets the user's sign-in, so that the user may sign in again, with another account too. */
-void signOut(Menu &menu, const std::string &profile, Config &config)
+/**
+ * Forgets the user's sign-in, so that the user may sign in again, with another account too.
+ * @return what came of it, as the user reads it
+ */
+std::string signOut(const std::string &profile, Config &config)
 {
     config = Config();
     SaveConfig(profile, config);
     googleAuth.SetRefreshToken(std::string());
-    menu.ShowMessage("Signed out.");
+    return "Signed out.";
 }
 
 /**
@@ -267,11 +255,14 @@ bool findBackupFolder(bool create, std::string &folderId)
     return true;
 }
 
-/** Brings the user's saves and their backup in line. */
-void runSync(Menu &menu, ConsoleStorage &storage, const std::string &profile,
-             const std::string &savedata, const SaveTarget *target)
+/**
+ * Brings the user's saves and their backup in line.
+ * @return what came of it, as the user reads it
+ */
+std::string runSync(Screen &screen, ConsoleStorage &storage, const std::string &profile,
+                    const std::string &savedata, const SaveTarget *target)
 {
-    menu.ShowMessage("Syncing... Do not quit or switch off the PS3.");
+    screen.ShowMessage("Syncing... Do not quit or switch off the PS3.");
     syncDialog.Open();
     std::string folderId;
     std::size_t notResigned = 0;
@@ -294,32 +285,29 @@ void runSync(Menu &menu, ConsoleStorage &storage, const std::string &profile,
     syncDialog.Close();
     if (!done)
     {
-        menu.ShowMessage(driveFailureMessage());
+        return driveFailureMessage();
     }
-    else if (full)
+    if (full)
     {
-        menu.ShowMessage("The sync stopped: the Google storage is full.");
+        return "The sync stopped: the Google storage is full.";
     }
-    else if (syncDialog.Cancelled())
+    if (syncDialog.Cancelled())
     {
-        menu.ShowMessage("The sync was stopped.");
+        return "The sync was stopped.";
     }
-    else if (notResigned == 1)
+    if (notResigned == 1)
     {
-        menu.ShowMessage("The sync is done; a save of another user came down as it was, and the "
-                         "game may refuse it.");
+        return "The sync is done; a save of another user came down as it was, and the game may "
+               "refuse it.";
     }
-    else if (notResigned > 1)
+    if (notResigned > 1)
     {
         std::ostringstream text;
         text << "The sync is done; " << notResigned
              << " saves of other users came down as they were, and the games may refuse them.";
-        menu.ShowMessage(text.str());
+        return text.str();
     }
-    else
-    {
-        menu.ShowMessage("The sync is done.");
-    }
+    return "The sync is done.";
 }
 
 // The USB drives the console can have: /dev_usb000 to /dev_usb007.
@@ -377,40 +365,102 @@ std::string importUsbSaves(ConsoleStorage &storage, SyncState &state, const std:
     return text.str();
 }
 
-/** Lets the user load or delete saves of the backup one by one, or import saves into it. */
-void browseCloudSaves(Menu &menu, ConsoleStorage &storage, const std::string &profile,
-                      const std::string &savedata, const SaveTarget *target)
+/**
+ * Lists the saves in the cloud for the XMB anew. When they cannot be listed the XMB keeps the
+ * lists it has, which are better than none.
+ * @param signedIn whether the user is signed in, without which only the sign-in row is listed
+ */
+void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::string &savedata,
+                const SaveTarget *target, bool signedIn)
 {
-    menu.ShowMessage("Looking for the backup...");
-    std::string folderId;
-    // Created when missing, so that saves can be imported into an empty backup.
-    if (!findBackupFolder(true, folderId))
+    std::vector<XmbSave> saves;
+    if (signedIn)
     {
-        menu.ShowMessage(driveFailureMessage());
-        return;
+        std::string folderId;
+        if (!findBackupFolder(false, folderId))
+        {
+            return;
+        }
+        SyncState state(stateFile(profile), stateBackup(profile));
+        state.Load();
+        SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata,
+                            profileMarkerSave, profile, target);
+        // A user who has never synced has no backup folder, and so no saves to list.
+        if (!folderId.empty() && !browser.Refresh())
+        {
+            return;
+        }
+        saves = XmbSaves(browser, storage, savedata, ReadDateStyle());
     }
-    SyncState state(stateFile(profile), stateBackup(profile));
-    state.Load();
-    SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
-                        profile, target);
-    const auto importSaves = [&]() { return importUsbSaves(storage, state, profile, folderId); };
-    if (!BrowseCloudSaves(menu, syncDialog, browser, ReadDateStyle(), importSaves))
-    {
-        menu.ShowMessage(driveFailureMessage());
-    }
+    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, saves));
 }
 
 /**
- * The app on its own thread: finds the logged-in user, then runs the main menu until the user
- * quits. The menu waits for the main thread's pad presses.
- * @param menu shows the app and takes the main thread's pad presses
+ * Does what a row of the XMB asked for.
+ * @param action the action the row left
+ * @return what came of it, as the user reads it; empty for an action this app does not know
  */
-void runApp(Menu &menu)
+std::string runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &profile,
+                         const std::string &savedata, const SaveTarget *target, Config &config,
+                         const std::string &action)
+{
+    if (action == xmbSignIn)
+    {
+        return signIn(screen, profile, config);
+    }
+    if (config.refreshToken.empty())
+    {
+        return "Sign in to Google Drive first.";
+    }
+    if (action == xmbSignOut)
+    {
+        return signOut(profile, config);
+    }
+    if (action == xmbSync)
+    {
+        return runSync(screen, storage, profile, savedata, target);
+    }
+    std::string folderId;
+    const bool isSave = action.compare(0, sizeof xmbSave - 1, xmbSave) == 0;
+    if (action != xmbUsbImport && !isSave)
+    {
+        return std::string();
+    }
+    // An import creates the folder when it is missing, so that saves can go into it.
+    if (!findBackupFolder(!isSave, folderId))
+    {
+        return driveFailureMessage();
+    }
+    SyncState state(stateFile(profile), stateBackup(profile));
+    state.Load();
+    if (!isSave)
+    {
+        return importUsbSaves(storage, state, profile, folderId);
+    }
+    SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
+                        profile, target);
+    if (folderId.empty())
+    {
+        return "There are no saves in the cloud.";
+    }
+    if (!browser.Refresh())
+    {
+        return driveFailureMessage();
+    }
+    return PickXmbSave(browser, syncDialog, action.substr(sizeof xmbSave - 1));
+}
+
+/**
+ * The app on its own thread: finds the logged-in user, does what the XMB's row asked for, lists
+ * the saves in the cloud for the XMB anew and goes back to the XMB. Started from its own icon, it
+ * only lists them, or signs the user in first.
+ * @param screen says what the app is doing behind the system's dialogs
+ */
+void runApp(Screen &screen)
 {
     if (!networkStart.Connect())
     {
-        waitForQuit(menu, "Own Storage needs a network connection.");
-        exitapp = 1;
+        stopWith("Own Storage needs a network connection.");
         return;
     }
     ClientCredentials client = LoadUserCredentials(userClientFile, "google");
@@ -420,8 +470,7 @@ void runApp(Menu &menu)
     }
     if (!client.IsComplete())
     {
-        waitForQuit(menu, "Cannot reach the Own Storage configuration. Check the network.");
-        exitapp = 1;
+        stopWith("Cannot reach the Own Storage configuration. Check the network.");
         return;
     }
     googleAuth.SetClient(client);
@@ -430,8 +479,7 @@ void runApp(Menu &menu)
     const std::optional<std::string> user = FindLoggedInUser(consoleStorage);
     if (!user)
     {
-        waitForQuit(menu, unknownUserMessage);
-        exitapp = 1;
+        stopWith(unknownUserMessage);
         return;
     }
     const std::string profile = MakeProfileDirectory(consoleStorage, *user);
@@ -439,60 +487,43 @@ void runApp(Menu &menu)
     // Saves of another user or console are made this user's as they come down.
     const std::optional<SaveTarget> target = ReadSaveTarget(*user);
     const SaveTarget *saveTarget = target ? &*target : nullptr;
-    if (saveTarget == nullptr)
-    {
-        menu.ShowMessage("This PS3's or the user's ids cannot be read, so saves of other users "
-                         "come down as they are.");
-    }
     Config config;
     LoadConfig(profile, config);
     // The first request finds the access token missing and gets one with this.
     googleAuth.SetRefreshToken(config.refreshToken);
 
-    // Read once: the user cannot change while the app runs.
-    const std::string userName = CurrentUserName();
-    std::size_t cursor = 0;
-    while (exitapp == 0)
+    if (!InstallXmbFolder(consoleStorage, xmbPlace))
     {
-        const bool signedIn = !config.refreshToken.empty();
-        if (!userName.empty())
+        syncDialog.ShowError("Own Storage cannot put its folder in the XMB.");
+    }
+    std::string action = TakeXmbAction(consoleStorage, xmbPlace);
+    if (action.empty() && config.refreshToken.empty())
+    {
+        // Without a sign-in the XMB has nothing to list.
+        action = xmbSignIn;
+    }
+    if (!action.empty())
+    {
+        const std::string result =
+            runXmbAction(screen, consoleStorage, profile, savedata, saveTarget, config, action);
+        if (!result.empty())
         {
-            menu.ShowCaption(userName +
-                             (signedIn ? ": signed in to Google Drive" : ": not signed in"));
-        }
-        const std::vector<std::string> rows =
-            signedIn ? std::vector<std::string>{syncRow, cloudSavesRow, signOutRow, quitRow}
-                     : std::vector<std::string>{signInRow, quitRow};
-        const int chosen = menu.Choose("", rows, selectHint(menu), cursor);
-        if (chosen == Menu::kNone)
-        {
-            continue;
-        }
-        cursor = static_cast<std::size_t>(chosen);
-        const std::string &row = rows[cursor];
-        if (row == signInRow)
-        {
-            signIn(menu, profile, config);
-            cursor = 0;
-        }
-        else if (row == syncRow)
-        {
-            runSync(menu, consoleStorage, profile, savedata, saveTarget);
-        }
-        else if (row == cloudSavesRow)
-        {
-            browseCloudSaves(menu, consoleStorage, profile, savedata, saveTarget);
-        }
-        else if (row == signOutRow)
-        {
-            signOut(menu, profile, config);
-            cursor = 0;
-        }
-        else
-        {
-            exitapp = 1;
+            syncDialog.ShowInfo(result);
         }
     }
+    // A quit from the XMB leaves the lists as they are: the system may end the app any time.
+    if (exitapp != 0)
+    {
+        return;
+    }
+    screen.ShowMessage("Listing the saves in the cloud...");
+    refreshXmb(consoleStorage, profile, savedata, saveTarget, !config.refreshToken.empty());
+    if (saveTarget == nullptr)
+    {
+        syncDialog.ShowInfo(targetUnknownMessage);
+    }
+    syncDialog.Close();
+    exitapp = 1;
 }
 
 // SDL gives its threads a 16 KB stack, too small for the app's work.
@@ -502,79 +533,12 @@ const s32 appThreadPriority = 1500;
 
 /**
  * Runs the app on a thread of its own; see runApp.
- * @param menu the Menu
+ * @param screen the Screen
  */
-void runAppThread(void *menu)
+void runAppThread(void *screen)
 {
-    runApp(*static_cast<Menu *>(menu));
+    runApp(*static_cast<Screen *>(screen));
     sysThreadExit(0);
-}
-
-// The pad buttons the menus take, as bits of what a pad holds down.
-const unsigned int padUp = 1 << 0;
-const unsigned int padDown = 1 << 1;
-const unsigned int padLeft = 1 << 2;
-const unsigned int padRight = 1 << 3;
-const unsigned int padCross = 1 << 4;
-const unsigned int padCircle = 1 << 5;
-const unsigned int padTriangle = 1 << 6;
-const unsigned int padSquare = 1 << 7;
-
-/** The menu buttons a pad holds down. */
-unsigned int heldButtons(const padData &data)
-{
-    return (data.BTN_UP ? padUp : 0) | (data.BTN_DOWN ? padDown : 0) |
-           (data.BTN_LEFT ? padLeft : 0) | (data.BTN_RIGHT ? padRight : 0) |
-           (data.BTN_CROSS ? padCross : 0) | (data.BTN_CIRCLE ? padCircle : 0) |
-           (data.BTN_TRIANGLE ? padTriangle : 0) | (data.BTN_SQUARE ? padSquare : 0);
-}
-
-/**
- * Hands the menu every button that went down on a pad since its last report.
- * @param menu takes the presses
- * @param held what each pad held down at its last report; updated
- * @param circleConfirms whether Circle selects and Cross goes back, as the console is set
- */
-void readPads(Menu &menu, unsigned int held[MAX_PADS], bool circleConfirms)
-{
-    const struct
-    {
-        unsigned int bit;
-        PadButton button;
-    } presses[] = {{padUp, PadButton::Up},
-                   {padDown, PadButton::Down},
-                   {padLeft, PadButton::PageUp},
-                   {padRight, PadButton::PageDown},
-                   {circleConfirms ? padCircle : padCross, PadButton::Select},
-                   {circleConfirms ? padCross : padCircle, PadButton::Back},
-                   {padTriangle, PadButton::Remove},
-                   {padSquare, PadButton::Extra}};
-    padInfo info;
-    ioPadGetInfo(&info);
-    for (int pad = 0; pad < MAX_PADS; ++pad)
-    {
-        if (!info.status[pad])
-        {
-            // A pad plugged in again starts with nothing held.
-            held[pad] = 0;
-            continue;
-        }
-        padData data;
-        // A pad without a new report keeps what it held.
-        if (ioPadGetData(pad, &data) != 0 || data.len == 0)
-        {
-            continue;
-        }
-        const unsigned int now = heldButtons(data);
-        for (const auto &press : presses)
-        {
-            if ((now & press.bit) != 0 && (held[pad] & press.bit) == 0)
-            {
-                menu.Press(press.button);
-            }
-        }
-        held[pad] = now;
-    }
 }
 
 int main(int argc, char **argv)
@@ -604,40 +568,29 @@ int main(int argc, char **argv)
     Sans = TTF_OpenFont(FontPath, 20.0);
 
     sysUtilRegisterCallback(SYSUTIL_EVENT_SLOT0, sysevent_callback, NULL);
-    ioPadInit(7);
     {
         // Gone before SDL shuts down, which the screen's surfaces need.
         Screen appScreen(screen, Sans);
-        // The font has no button symbols, so the hints name them.
-        const bool circleConfirms = CircleConfirms();
-        Menu menu(appScreen, exitapp,
-                  circleConfirms ? ButtonNames{"O", "X"} : ButtonNames{"X", "O"});
         sys_ppu_thread_t appThread;
         const s32 created =
-            sysThreadCreate(&appThread, runAppThread, &menu, appThreadPriority, appThreadStackSize,
-                            THREAD_JOINABLE, const_cast<char *>("app"));
+            sysThreadCreate(&appThread, runAppThread, &appScreen, appThreadPriority,
+                            appThreadStackSize, THREAD_JOINABLE, const_cast<char *>("app"));
         if (created != 0)
         {
             debugPrintf("The app thread cannot start: %08x\n", static_cast<unsigned int>(created));
             exitapp = 1;
         }
-        unsigned int held[MAX_PADS] = {};
 
         while (exitapp == 0)
         {
             sysUtilCheckCallback();
-
-            if (xmbopen != 1)
-            {
-                readPads(menu, held, circleConfirms);
-            }
             appScreen.Draw();
             SDL_Flip(screen);
         }
 
         debugPrintf("The application exited...%d\n", exitapp.load());
 
-        // The app's thread uses the menu and the screen, which go when this block ends, and may
+        // The app's thread uses the screen, which goes when this block ends, and may
         // still open the sync dialog.
         if (created == 0)
         {
@@ -655,7 +608,6 @@ int main(int argc, char **argv)
     networkStart.Stop();
     debugClose();
     netDeinitialize();
-    ioPadEnd();
 
     return 0;
 }

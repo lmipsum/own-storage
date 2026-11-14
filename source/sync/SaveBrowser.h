@@ -89,6 +89,8 @@ class SaveBrowser
 
     /** Lists the saves in the cloud anew; false when they cannot be listed. */
     bool Refresh();
+    /** Whether the cloud has a save of the name, as last listed. */
+    bool Has(const std::string &name) const;
     /** The games with saves in the cloud, sorted by name from A to Z. */
     std::vector<CloudGame> Games() const;
     /**

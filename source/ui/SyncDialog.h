@@ -7,10 +7,10 @@
 #include <string>
 
 /**
- * The sync in the system's message dialog: two progress bars, and in their place a question or
- * an error when one comes. The system reports the buttons on the main thread, while it runs its
- * callbacks, and the main thread closes the dialog when the app ends; everything else is for the
- * sync thread.
+ * What the app tells and asks the user, in the system's message dialog: two progress bars, and in
+ * their place a question, a message or an error when one comes. The system reports the buttons on
+ * the main thread, while it runs its callbacks, and the main thread closes the dialog when the app
+ * ends; everything else is for the app thread.
  */
 class SyncDialog : public SyncDisplay
 {
@@ -28,6 +28,14 @@ class SyncDialog : public SyncDisplay
     void ShowError(const std::string &message);
     /** Shows a message and waits until the user closes it. */
     void ShowInfo(const std::string &message);
+    /**
+     * Shows a message that stays while the app waits, until the user closes it with the back
+     * button or Close() takes it away.
+     * @return false when the app closes before it can be shown
+     */
+    bool ShowWaiting(const std::string &message);
+    /** Whether the user has closed the message ShowWaiting() shows. */
+    bool WaitingClosed() const;
 
     /** Brings the progress bars back first when a question or an error took their place. */
     void SetText(ProgressBar bar, const std::string &text) override;
@@ -57,7 +65,7 @@ class SyncDialog : public SyncDisplay
     const std::atomic<int> &m_quit;
     /** Set when the user closes the progress bars, which stops the sync. */
     std::atomic<bool> m_cancelled;
-    /** The button that closed the last question or error. */
+    /** The button that closed the last question or message. */
     std::atomic<int> m_button;
     std::atomic<bool> m_progressShown;
 };

@@ -19,7 +19,7 @@
  * Keeps a user's saves and their backup in line. Every save is one archive in the cloud. A save
  * that changed since its base only on the console goes up, one that changed only in the cloud
  * comes down. A save that changed on both sides, or was deleted on the console, needs the user's
- * say: once the rest is done, the user is asked once per game. For the sync thread only.
+ * say: once the rest is done, the user is asked once per game. For the app thread only.
  */
 class Sync
 {
@@ -111,14 +111,21 @@ class Sync
      */
     Plan Settle(const std::vector<Question> &questions);
     /**
-     * The question for one game.
-     * @param doubt why its saves need a say
+     * How the user sees one game named in a question, from the first of its saves with a title.
      * @param titleId the game's ID
      * @param questions its saves
-     * @return the question, naming the game and what each answer does
+     * @return the game's title and ID, or its ID alone when no save names it
      */
-    std::string QuestionText(Doubt doubt, const std::string &titleId,
+    std::string QuestionGame(const std::string &titleId,
                              const std::vector<const Question *> &questions) const;
+    /**
+     * The question for one game.
+     * @param doubt why its saves need a say
+     * @param game the game, as QuestionGame() names it
+     * @param saves how many of its saves the question covers
+     * @return the question, naming the game
+     */
+    static std::string QuestionText(Doubt doubt, const std::string &game, std::size_t saves);
     /**
      * Queues a save's archive to go up.
      * @param save the save
