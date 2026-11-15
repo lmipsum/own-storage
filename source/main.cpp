@@ -278,18 +278,33 @@ bool findBackupFolder(bool create, std::string &folderId)
     return true;
 }
 
+/** What a run's action found in the cloud already, which the XMB's lists need not ask again. */
+struct RunListing
+{
+    /** Whether the backup folder is known: its id, or that there is none. */
+    bool folderKnown = false;
+    /** The backup folder's id; empty when there is none. */
+    std::string folderId;
+    /** Whether games holds the saves in the cloud as they are after the action. */
+    bool gamesKnown = false;
+    std::vector<XmbGame> games;
+};
+
 /**
  * Brings the user's saves and their backup in line.
+ * @param listing receives the backup folder
  * @return what came of it, as the user is told it
  */
 Notice runSync(Screen &screen, ConsoleStorage &storage, const std::string &profile,
-               const std::string &savedata, const SaveTarget *target)
+               const std::string &savedata, const SaveTarget *target, RunListing &listing)
 {
     screen.ShowMessage("Syncing... Do not quit or switch off the PS3.");
     syncDialog.Open();
     std::string folderId;
     std::size_t notResigned = 0;
     bool done = findBackupFolder(true, folderId);
+    listing.folderKnown = done;
+    listing.folderId = folderId;
     if (done)
     {
         // Without a state of its own every save starts without a base; the sync works it out.
@@ -398,15 +413,18 @@ Notice importUsbSaves(ConsoleStorage &storage, SyncState &state, const std::stri
  * Lists the saves in the cloud for the XMB anew. When they cannot be listed the XMB keeps the
  * lists it has, which are better than none.
  * @param signedIn whether the user is signed in, without which only the sign-in row is listed
+ * @param listing what the run's action found in the cloud already
  */
 void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::string &savedata,
-                const SaveTarget *target, bool signedIn)
+                const SaveTarget *target, bool signedIn, const RunListing &listing)
 {
-    std::vector<XmbGame> games;
-    if (signedIn)
+    // How long it takes is logged, to tell what keeps the user waiting.
+    const std::time_t started = systemClock.Seconds();
+    std::vector<XmbGame> games = listing.games;
+    if (signedIn && !listing.gamesKnown)
     {
-        std::string folderId;
-        if (!findBackupFolder(false, folderId))
+        std::string folderId = listing.folderId;
+        if (!listing.folderKnown && !findBackupFolder(false, folderId))
         {
             return;
         }
@@ -433,16 +451,19 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
         storageUse = ShownStorageUse(used, total);
     }
     WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, rowsRun, storageUse, games));
+    debugPrintf("refreshXmb: the lists took %ld s\n",
+                static_cast<long>(systemClock.Seconds() - started));
 }
 
 /**
  * Does what a row of the XMB asked for.
  * @param action the action the row left
+ * @param listing receives what the action found in the cloud
  * @return what came of it, as the user is told it; empty for an action this app does not know
  */
 Notice runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &profile,
                     const std::string &savedata, const SaveTarget *target, Config &config,
-                    const std::string &action)
+                    const std::string &action, RunListing &listing)
 {
     if (action == xmbSignIn)
     {
@@ -459,7 +480,7 @@ Notice runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &
     }
     if (action == xmbSync)
     {
-        return runSync(screen, storage, profile, savedata, target);
+        return runSync(screen, storage, profile, savedata, target, listing);
     }
     std::string folderId;
     const bool isSave = action.compare(0, sizeof xmbSave - 1, xmbSave) == 0;
@@ -472,6 +493,8 @@ Notice runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &
     {
         return Problem(driveFailureMessage());
     }
+    listing.folderKnown = true;
+    listing.folderId = folderId;
     SyncState state(stateFile(profile), stateBackup(profile));
     state.Load();
     if (!isSave)
@@ -488,7 +511,11 @@ Notice runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &
     {
         return Problem(driveFailureMessage());
     }
-    return PickXmbSave(browser, syncDialog, action.substr(sizeof xmbSave - 1));
+    const Notice picked = PickXmbSave(browser, syncDialog, action.substr(sizeof xmbSave - 1));
+    // A download leaves the cloud as it was, and the browser knows of a save it moved to the trash.
+    listing.games = XmbGames(browser, storage, savedata, ReadDateStyle());
+    listing.gamesKnown = true;
+    return picked;
 }
 
 /**
@@ -609,7 +636,7 @@ void runApp(Screen &screen)
     // when the user quits at the sign-in, as after an update.
     if (config.refreshToken.empty())
     {
-        refreshXmb(consoleStorage, profile, savedata, saveTarget, false);
+        refreshXmb(consoleStorage, profile, savedata, saveTarget, false, RunListing());
     }
     std::string action = TakeXmbAction(consoleStorage, xmbPlace);
     if (action.empty() && config.refreshToken.empty())
@@ -617,10 +644,11 @@ void runApp(Screen &screen)
         // Without a sign-in the XMB has nothing to list.
         action = xmbSignIn;
     }
+    RunListing listing;
     if (!action.empty())
     {
-        tell(consoleStorage,
-             runXmbAction(screen, consoleStorage, profile, savedata, saveTarget, config, action));
+        tell(consoleStorage, runXmbAction(screen, consoleStorage, profile, savedata, saveTarget,
+                                          config, action, listing));
     }
     // A quit from the XMB leaves the lists as they are: the system may end the app any time.
     if (exitapp != 0)
@@ -628,7 +656,8 @@ void runApp(Screen &screen)
         return;
     }
     screen.ShowMessage("Updating the list...");
-    refreshXmb(consoleStorage, profile, savedata, saveTarget, !config.refreshToken.empty());
+    refreshXmb(consoleStorage, profile, savedata, saveTarget, !config.refreshToken.empty(),
+               listing);
     if (saveTarget == nullptr)
     {
         tell(consoleStorage, Result(targetUnknownMessage));
