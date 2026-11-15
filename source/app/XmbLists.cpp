@@ -10,17 +10,24 @@ const char kFolderView[] = "owns_folder_view";
 const char kMenuView[] = "owns_menu_view";
 const char kSavesView[] = "owns_saves_view";
 const char kSaveKeyPrefix[] = "owns_save_";
-// The key of the Own Storage folder in category_game.xml, which tells it is there already.
+// The key of the app's folder in category_game.xml, which tells it is there already.
 const char kCategoryKey[] = "owns_root";
 // The Saved Data Utility for PS3 saves in category_game.xml; the folder goes after it.
 const char kSavedDataUtilityKey[] = "key=\"seg_sdps3\"";
-const char kOwnStorageInfo[] =
-    "Stores saved data in your Google Drive.\nExpand your gaming horizons by downloading your "
-    "saved data to a friend's PS3\xE2\x84\xA2 system to continue your game, or by backing up your "
-    "data online.";
+// The folder is named like the system's Saved Data Utility, beside which it is.
+const char kFolderTitle[] = "Cloud Save Utility";
+// The system's own texts, by their names in the Game column's resources, which the XMB shows in the
+// system's language; only the USB row's description has none like it.
+const char kFolderInfoRsc[] = "msg_online_storage_explanation";
+const char kCloudSavesRsc[] = "msg_online_storage";
+const char kSyncRsc[] = "msg_sync_with_server";
+const char kUsbRsc[] = "msg_usb";
+const char kSignInRsc[] = "msg_signin";
+const char kSignOutRsc[] = "msg_signout";
+const char kUsbInfo[] = "Uploads the saves on a USB drive to your Google Drive.";
 // The system's icons, from those the Game column can show: the rows' own; a downloaded save
 // without an icon of its own, which the folder of the saves in the cloud shares; and a save only
-// in the cloud, which the Own Storage folder and the row that asks for webMAN share.
+// in the cloud, which the Cloud Save Utility folder and the row that asks for webMAN share.
 const char kSyncIcon[] = "tex_loading_icon";
 const char kUsbIcon[] = "item_tex_usb_connection";
 const char kAccountIcon[] = "tex_Avatar_Default";
@@ -156,12 +163,13 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
     XmbLists lists;
     lists.folder = Document(
         View(kFolderView,
-             Table("owns_folder", Pair("icon_rsc", kInCloudIcon) + Pair("title", "Own Storage") +
-                                      Pair("info", kOwnStorageInfo)),
+             Table("owns_folder", Pair("icon_rsc", kInCloudIcon) + Pair("title", kFolderTitle) +
+                                      Pair("info_rsc", kFolderInfoRsc)),
              FolderItem("owns_folder", ViewSource(place, xmbMenuFile, kMenuView))));
 
     std::string tables;
     std::string items;
+    // A row's title is a system text; its description, when it has one, is the app's own.
     const auto addAction = [&](const char *key, const char *icon, const char *title,
                                const char *info, const char *action)
     {
@@ -169,7 +177,8 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
         {
             return;
         }
-        tables += Table(key, Pair("icon_rsc", icon) + Pair("title", title) + Pair("info", info) +
+        const std::string described = info != nullptr ? Pair("info", info) : std::string();
+        tables += Table(key, Pair("icon_rsc", icon) + Pair("title_rsc", title) + described +
                                  ActionPairs(place, key));
         items += ActionItem(key);
         lists.scripts.push_back(XmbScript{key, action});
@@ -183,21 +192,16 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
     }
     if (!signedIn)
     {
-        addAction("owns_signin", kAccountIcon, "Sign in", "Signs this user in to Google Drive.",
-                  xmbSignIn);
+        addAction("owns_signin", kAccountIcon, kSignInRsc, nullptr, xmbSignIn);
     }
     else
     {
-        addAction("owns_sync", kSyncIcon, "Full sync",
-                  "Backs up this user's saves and downloads the newer ones.", xmbSync);
-        addAction("owns_usb", kUsbIcon, "Upload from USB",
-                  "Uploads the saves on a USB drive to your Google Drive.", xmbUsbImport);
-        tables += Table("owns_cloud", Pair("icon_rsc", kDownloadedIcon) +
-                                          Pair("title", "Saves in the cloud") +
-                                          Pair("info", "The saves in your Google Drive."));
+        addAction("owns_sync", kSyncIcon, kSyncRsc, nullptr, xmbSync);
+        addAction("owns_usb", kUsbIcon, kUsbRsc, kUsbInfo, xmbUsbImport);
+        tables += Table("owns_cloud",
+                        Pair("icon_rsc", kDownloadedIcon) + Pair("title_rsc", kCloudSavesRsc));
         items += FolderItem("owns_cloud", ViewSource(place, xmbSavesFile, kSavesView));
-        addAction("owns_signout", kAccountIcon, "Sign out", "Signs this user out of Google Drive.",
-                  xmbSignOut);
+        addAction("owns_signout", kAccountIcon, kSignOutRsc, nullptr, xmbSignOut);
     }
     lists.menu = Document(View(kMenuView, tables, items));
 

@@ -61,7 +61,7 @@ const char xmbSavesFile[] = "owns_saves.xml";
 /** The list files, one level of folders each. */
 struct XmbLists
 {
-    /** The Own Storage folder, which the Game column lists. */
+    /** The app's folder, Cloud Save Utility, which the Game column lists. */
     std::string folder;
     /** Its rows, and the folder of the saves in the cloud. */
     std::string menu;
@@ -102,14 +102,14 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
 std::string XmbScriptText(const XmbPlace &place, const XmbScript &script);
 
 /**
- * The line of category_game.xml that puts the Own Storage folder in the XMB's Game column.
+ * The line of category_game.xml that puts the app's folder in the XMB's Game column.
  * @param place where the lists are
  * @return the line, without its indentation
  */
 std::string XmbCategoryEntry(const XmbPlace &place);
 
 /**
- * Puts the Own Storage folder in category_game.xml, after the Saved Data Utility for PS3 saves in
+ * Puts the app's folder in category_game.xml, after the Saved Data Utility for PS3 saves in
  * every view that lists it, or first in the Game column's own view when none does; the file's own
  * line ends are kept.
  * @param category the file's content; changed in place
