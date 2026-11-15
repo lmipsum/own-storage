@@ -1,0 +1,106 @@
+{
+  "name": "owns_menu",
+  "texts": {
+    "msg_owns_info": "Information",
+    "msg_owns_delete": "Delete"
+  },
+  "page": {
+    "kind": "page",
+    "name": "owns_menu",
+    "attributes": {"onCancel": "Owns::cbCancel", "onContextMenu": "Owns::cbContextMenu"},
+    "children": [
+      {
+        "kind": "plane",
+        "name": "plane_menu0",
+        "children": [
+          {"kind": "plane", "name": "plane_menu0_BG0"},
+          {"kind": "plane", "name": "plane_menu0_BG1"},
+          {
+            "kind": "mlist",
+            "name": "plane_menu0_LowerMenu",
+            "attributes": {
+              "iconOffset": "0x110000", "unknown17": "0x101f6", "unknown18": "0x101f7",
+              "unknown19": "0x101f8", "unknown23": 7,
+              "onPush": "Owns::cbPush", "onFocusRight": "Owns::cbFocusRight",
+              "onFocusUp": "Owns::cbFocusUp",
+              "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+            }
+          },
+          {
+            "kind": "mlist",
+            "name": "plane_menu0_UpperMenu",
+            "attributes": {
+              "iconOffset": "0x210000", "unknown17": "0x101f9", "unknown18": "0x101fa",
+              "unknown19": "0x101fb",
+              "onPush": "Owns::cbPush", "onFocusRight": "Owns::cbFocusRight",
+              "onFocusDown": "Owns::cbFocusDown",
+              "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+            }
+          }
+        ]
+      },
+      {
+        "kind": "plane",
+        "name": "plane_menu1",
+        "attributes": {"width": 128.0, "height": 272.0},
+        "children": [
+          {"kind": "plane", "name": "plane_menu1_BG0"},
+          {"kind": "plane", "name": "plane_menu1_BG1"},
+          {
+            "kind": "mlist",
+            "name": "plane_menu1_LowerMenu",
+            "attributes": {
+              "iconOffset": "0x110000", "unknown17": "0x101f6", "unknown18": "0x101f7",
+              "unknown19": "0x101f8",
+              "onPush": "Owns::cbPush", "onFocusLeft": "Owns::cbFocusLeft",
+              "onFocusRight": "Owns::cbFocusRight", "onFocusUp": "Owns::cbFocusUp",
+              "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+            }
+          },
+          {
+            "kind": "mlist",
+            "name": "plane_menu1_UpperMenu",
+            "attributes": {
+              "iconOffset": "0x210000", "unknown17": "0x101f9", "unknown18": "0x101fa",
+              "unknown19": "0x101fb", "unknown29": "0x1fc",
+              "onPush": "Owns::cbPush", "onFocusLeft": "Owns::cbFocusLeft",
+              "onFocusRight": "Owns::cbFocusRight", "onFocusDown": "Owns::cbFocusDown",
+              "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+            }
+          }
+        ]
+      },
+      {
+        "kind": "plane",
+        "name": "plane_menu2",
+        "attributes": {"width": 128.0, "height": 272.0},
+        "children": [
+          {"kind": "plane", "name": "plane_menu2_BG0"},
+          {"kind": "plane", "name": "plane_menu2_BG1"},
+          {
+            "kind": "mlist",
+            "name": "plane_menu2_LowerMenu",
+            "attributes": {
+              "iconOffset": "0x110000", "unknown17": "0x101f6", "unknown18": "0x101f7",
+              "unknown19": "0x101f8",
+              "onPush": "Owns::cbPush", "onFocusLeft": "Owns::cbFocusLeft",
+              "onFocusUp": "Owns::cbFocusUp",
+              "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+            }
+          },
+          {
+            "kind": "mlist",
+            "name": "plane_menu2_UpperMenu",
+            "attributes": {
+              "iconOffset": "0x210000", "unknown17": "0x101f9", "unknown18": "0x101fa",
+              "unknown19": "0x101fb",
+              "onPush": "Owns::cbPush", "onFocusLeft": "Owns::cbFocusLeft",
+              "onFocusDown": "Owns::cbFocusDown",
+              "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

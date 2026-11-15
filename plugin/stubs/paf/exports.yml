@@ -1,0 +1,51 @@
+# The VSH's paf library, which both plugin modules import; the NIDs are the system's.
+library: paf
+module: paf
+archive_name: paf
+version: 1
+exports:
+  - name: View_Find
+    nid: '0xf21655f3'
+    signature: 'int View_Find(const char *name);'
+  - name: plugin_GetInterface
+    nid: '0x23afb290'
+    signature: 'void *plugin_GetInterface(int view, int id);'
+  - name: View_GetString
+    nid: '0x89b67b9c'
+    signature: 'const unsigned short *View_GetString(int view, const char *label);'
+  - name: View_InitParam_ctor
+    nid: '0x2c4e7d1c'
+    signature: 'void View_InitParam_ctor(void *init_param);'
+  - name: View_LoadAsync
+    nid: '0x28b0a5d9'
+    signature: 'void View_LoadAsync(const void *init_param, void *on_loaded, int no_input_lock);'
+  - name: View_UnloadAsync
+    nid: '0x65be85b3'
+    signature: 'void View_UnloadAsync(const char *name, void *on_unloaded, int no_input_lock);'
+  - name: View_SetEventHandler
+    nid: '0x9db21a04'
+    signature: 'void View_SetEventHandler(int view, const void *entries);'
+  - name: Module_SetInterface
+    nid: '0x3f7cb0bf'
+    signature: 'int Module_SetInterface(int module, int id, const void *entries);'
+  - name: View_PageActivateByName
+    nid: '0x7ee103ef'
+    signature: 'int View_PageActivateByName(int view, const char *page);'
+  - name: View_Activate
+    nid: '0x92f7e387'
+    signature: 'void View_Activate(int view);'
+  - name: View_PageRoot
+    nid: '0x11e195b3'
+    signature: 'void *View_PageRoot(int view, const char *page);'
+  - name: PhWidget_GetChild
+    nid: '0x3cf24218'
+    signature: 'void *PhWidget_GetChild(void *widget, int index);'
+  - name: PhMenuList_SetSelected
+    nid: '0x4618f156'
+    signature: 'int PhMenuList_SetSelected(void *list, int index);'
+  - name: PhXmList_WidgetType
+    nid: '0x4ff7b8a9'
+    signature: 'const char *PhXmList_WidgetType(void);'
+  - name: PhXmList_GetItemWidget
+    nid: '0x796a32fe'
+    signature: 'void *PhXmList_GetItemWidget(void *list, int item);'
