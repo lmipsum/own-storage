@@ -17,8 +17,8 @@ struct XmbPlace
     std::string scriptDirectory;
     /** The file a row's script writes its action to before it starts the app. */
     std::string actionFile;
-    /** The app's title ID, which webMAN starts it by. */
-    std::string appId;
+    /** The file a row's script writes to have the launcher plugin start the app. */
+    std::string launchRequest;
 };
 
 /** A save as the XMB lists it, like the Saved Data Utility. */
@@ -38,8 +38,8 @@ struct XmbSave
 
 /**
  * What a row of the XMB starts: a webMAN script that writes the row's action to the action file
- * and has webMAN start the app. webMAN runs scripts in its user mode, where its web commands write
- * no files.
+ * and asks the launcher plugin to start the app. webMAN runs scripts in its user mode, where its
+ * web commands write no files.
  */
 struct XmbScript
 {
@@ -80,9 +80,9 @@ const char xmbSave[] = "save:";
 
 /**
  * The XMB's lists. Each row starts a webMAN script, which leaves its action for the app and
- * asks webMAN to start it; the XMB cannot start the app by itself. Without webMAN the rows that act
- * give way to a row that says so, and the saves are only listed, as is a save of a name no console
- * gives.
+ * asks the launcher plugin to start it; the XMB cannot start the app by itself. Without webMAN the
+ * rows that act give way to a row that says so, and the saves are only listed, as is a save of a
+ * name no console gives.
  * @param place where the lists are, and how the app is started
  * @param signedIn whether the user is signed in; without it only the sign-in row is listed
  * @param webman whether webMAN MOD is there to run the rows' scripts
@@ -94,10 +94,10 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
 
 /**
  * A row's webMAN script.
- * @param place where the action file is, and the app's ID
+ * @param place where the action file and the launch request are
  * @param script the row's script
  * @return the script: it writes the row's action to the action file anew, so that the file is as
- *         old as the row's choice, then has webMAN start the app once the script is done
+ *         old as the row's choice, then the launch request
  */
 std::string XmbScriptText(const XmbPlace &place, const XmbScript &script);
 

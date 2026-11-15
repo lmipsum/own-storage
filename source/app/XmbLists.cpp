@@ -30,8 +30,6 @@ const char kInCloudIcon[] = "tex_album_icon";
 const char kSaveIcon[] = "ICON0.PNG";
 // The longest name the console gives a save folder.
 const std::size_t kSaveNameMaxBytes = 31;
-// The file webMAN takes a command from and runs on its own, after the script that wrote it.
-const char kWebmanRequestFile[] = "/dev_hdd0/tmp/wm_request";
 
 /** A count in digits; the console's C++ library offers no std::to_string. */
 std::string Digits(std::size_t count)
@@ -227,11 +225,10 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
 std::string XmbScriptText(const XmbPlace &place, const XmbScript &script)
 {
     // A copy would keep the time the lists were written, and "log" adds to the file it names.
-    // Started from within the script, the app fails to start as if webMAN had put nothing in
-    // place; a request runs once the script is done, and starts it.
+    // The launcher plugin starts the app as its icon does, whatever game is mounted; webMAN's own
+    // start goes through /app_home, which a mounted game takes.
     return "del " + place.actionFile + "\nlogfile " + place.actionFile + "\nlog " + script.action +
-           "\ndel " + kWebmanRequestFile + "\nlogfile " + kWebmanRequestFile + "\nlog /play.ps3?" +
-           place.appId + "\n";
+           "\ndel " + place.launchRequest + "\nlogfile " + place.launchRequest + "\nlog launch\n";
 }
 
 std::string XmbCategoryEntry(const XmbPlace &place)
