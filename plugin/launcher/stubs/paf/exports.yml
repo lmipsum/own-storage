@@ -10,3 +10,6 @@ exports:
   - name: plugin_GetInterface
     nid: '0x23afb290'
     signature: 'void *plugin_GetInterface(int view, int id);'
+  - name: View_GetString
+    nid: '0x89b67b9c'
+    signature: 'const unsigned short *View_GetString(int view, const char *label);'

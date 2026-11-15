@@ -60,6 +60,7 @@
 #include "app/NetworkStart.h"
 #include "app/Profile.h"
 #include "app/LauncherSetup.h"
+#include "app/Notice.h"
 #include "app/XmbInstall.h"
 #include "app/XmbPick.h"
 #include "sync/Clock.h"
@@ -114,6 +115,13 @@ const LauncherPlace launcherPlace{APP_DIR "plugins/owns_launcher.sprx",
                                   "/dev_hdd0/boot_plugins.txt", APP_DIR "boot_plugins.bak"};
 // Kept once the user has been told the console lacks Cobra, so it is told once.
 const char cobraMissingTold[] = APP_DIR "cobra_missing.txt";
+// The file the launcher plugin shows notifications from, a line each, as plugin/launcher reads it.
+const char notificationRequest[] = "/dev_hdd0/tmp/owns_notify";
+// Whether the launcher plugin runs, and so can show notifications: it is set up unchanged since
+// the console started, and has taken every notification so far.
+bool launcherRuns = false;
+// How long the launcher plugin takes at most to take a notification: two of its polls.
+const unsigned int notificationWaitMicroseconds = 700000;
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then sync again.";
@@ -191,20 +199,20 @@ void stopWith(const std::string &message)
  * @param screen says what the app is doing
  * @param profile the user's directory of the app
  * @param config receives the sign-in
- * @return what came of it, as the user reads it
+ * @return what came of it, as the user is told it
  */
-std::string signIn(Screen &screen, const std::string &profile, Config &config)
+Notice signIn(Screen &screen, const std::string &profile, Config &config)
 {
     screen.ShowMessage("Asking Google for a sign-in code...");
     const std::string code = googleAuth.Start();
     if (code.empty())
     {
-        return "Cannot reach Google. Check the network.";
+        return Problem("Cannot reach Google. Check the network.");
     }
     if (!syncDialog.ShowWaiting("On a phone or computer, open " + googleAuth.VerificationUrl() +
                                 " and enter this code:\n\n" + code))
     {
-        return "Sign-in cancelled.";
+        return Result("Sign-in cancelled.");
     }
     GoogleDeviceAuth::Status status = GoogleDeviceAuth::Pending;
     while (status == GoogleDeviceAuth::Pending)
@@ -217,7 +225,7 @@ std::string signIn(Screen &screen, const std::string &profile, Config &config)
             if (exitapp != 0 || syncDialog.WaitingClosed())
             {
                 syncDialog.Close();
-                return "Sign-in cancelled.";
+                return Result("Sign-in cancelled.");
             }
             sysUsleep(backPollMicroseconds);
         }
@@ -226,23 +234,23 @@ std::string signIn(Screen &screen, const std::string &profile, Config &config)
     syncDialog.Close();
     if (status != GoogleDeviceAuth::Approved)
     {
-        return "The sign-in did not go through. Try again.";
+        return Problem("The sign-in did not go through. Try again.");
     }
     config.refreshToken = googleAuth.RefreshToken();
     SaveConfig(profile, config);
-    return "Signed in.";
+    return Result("Signed in.", "{system_plugin:msg_sigined_in}");
 }
 
 /**
  * Forgets the user's sign-in, so that the user may sign in again, with another account too.
- * @return what came of it, as the user reads it
+ * @return what came of it, as the user is told it
  */
-std::string signOut(const std::string &profile, Config &config)
+Notice signOut(const std::string &profile, Config &config)
 {
     config = Config();
     SaveConfig(profile, config);
     googleAuth.SetRefreshToken(std::string());
-    return "Signed out.";
+    return Result("Signed out.", "{system_plugin:msg_signed_out}");
 }
 
 /**
@@ -272,10 +280,10 @@ bool findBackupFolder(bool create, std::string &folderId)
 
 /**
  * Brings the user's saves and their backup in line.
- * @return what came of it, as the user reads it
+ * @return what came of it, as the user is told it
  */
-std::string runSync(Screen &screen, ConsoleStorage &storage, const std::string &profile,
-                    const std::string &savedata, const SaveTarget *target)
+Notice runSync(Screen &screen, ConsoleStorage &storage, const std::string &profile,
+               const std::string &savedata, const SaveTarget *target)
 {
     screen.ShowMessage("Syncing... Do not quit or switch off the PS3.");
     syncDialog.Open();
@@ -300,20 +308,20 @@ std::string runSync(Screen &screen, ConsoleStorage &storage, const std::string &
     syncDialog.Close();
     if (!done)
     {
-        return driveFailureMessage();
+        return Problem(driveFailureMessage());
     }
     if (full)
     {
-        return "The sync stopped: the Google storage is full.";
+        return Result("The sync stopped: the Google storage is full.");
     }
     if (syncDialog.Cancelled())
     {
-        return "The sync was stopped.";
+        return Result("The sync was stopped.");
     }
     if (notResigned == 1)
     {
-        return "The sync is done; a save of another user was downloaded as it was, and the "
-               "game may refuse it.";
+        return Result("The sync is done; a save of another user was downloaded as it was, and "
+                      "the game may refuse it.");
     }
     if (notResigned > 1)
     {
@@ -321,9 +329,10 @@ std::string runSync(Screen &screen, ConsoleStorage &storage, const std::string &
         text << "The sync is done; " << notResigned
              << " saves of other users were downloaded as they were, and the games may refuse "
                 "them.";
-        return text.str();
+        return Result(text.str());
     }
-    return "The sync is done.";
+    return Result("The sync is done.",
+                  "{explore_plugin:msg_sync_with_server}: {explore_plugin:msg_completed_count}");
 }
 
 // The USB drives the console can have: /dev_usb000 to /dev_usb007.
@@ -335,10 +344,10 @@ const char lastUsbDrive = '7';
  * @param state the user's bases
  * @param profile the user's directory of the app, which holds the archives while they move
  * @param folderId the cloud id of the Own Storage folder
- * @return what came of it, as the user reads it
+ * @return what came of it, as the user is told it
  */
-std::string importUsbSaves(ConsoleStorage &storage, SyncState &state, const std::string &profile,
-                           const std::string &folderId)
+Notice importUsbSaves(ConsoleStorage &storage, SyncState &state, const std::string &profile,
+                      const std::string &folderId)
 {
     std::vector<std::string> folders;
     for (char number = '0'; number <= lastUsbDrive; ++number)
@@ -351,7 +360,8 @@ std::string importUsbSaves(ConsoleStorage &storage, SyncState &state, const std:
     }
     if (folders.empty())
     {
-        return "No USB drive with saves in PS3/SAVEDATA was found.";
+        return Result("No USB drive with saves in PS3/SAVEDATA was found.",
+                      "{explore_plugin:msg_usb}: {explore_plugin:msg_error_no_savedata}");
     }
     syncDialog.Open();
     SaveImport import(drive, state, storage, syncDialog, systemClock, folderId, profileMarkerSave,
@@ -359,7 +369,7 @@ std::string importUsbSaves(ConsoleStorage &storage, SyncState &state, const std:
     ImportResult result;
     if (!import.Run(folders, result))
     {
-        return driveFailureMessage();
+        return Problem(driveFailureMessage());
     }
     if (drive.IsFull())
     {
@@ -376,10 +386,12 @@ std::string importUsbSaves(ConsoleStorage &storage, SyncState &state, const std:
     {
         text << ", " << result.failed << " not uploaded";
     }
+    const bool whole = !drive.IsFull() && !syncDialog.Cancelled() && result.failed == 0;
     text << (drive.IsFull()           ? ": the Google storage is full."
              : syncDialog.Cancelled() ? ": the import was stopped."
                                       : ".");
-    return text.str();
+    // The system's words leave the counts out, so they tell only an import that went through.
+    return Result(text.str(), whole ? "{explore_plugin:msg_imported}" : std::string());
 }
 
 /**
@@ -426,11 +438,11 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
 /**
  * Does what a row of the XMB asked for.
  * @param action the action the row left
- * @return what came of it, as the user reads it; empty for an action this app does not know
+ * @return what came of it, as the user is told it; empty for an action this app does not know
  */
-std::string runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &profile,
-                         const std::string &savedata, const SaveTarget *target, Config &config,
-                         const std::string &action)
+Notice runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &profile,
+                    const std::string &savedata, const SaveTarget *target, Config &config,
+                    const std::string &action)
 {
     if (action == xmbSignIn)
     {
@@ -438,7 +450,8 @@ std::string runXmbAction(Screen &screen, ConsoleStorage &storage, const std::str
     }
     if (config.refreshToken.empty())
     {
-        return "Sign in to Google Drive first.";
+        return Result("Sign in to Google Drive first.",
+                      "{explore_plugin:msg_error_cannot_operate_signin_pls}");
     }
     if (action == xmbSignOut)
     {
@@ -452,12 +465,12 @@ std::string runXmbAction(Screen &screen, ConsoleStorage &storage, const std::str
     const bool isSave = action.compare(0, sizeof xmbSave - 1, xmbSave) == 0;
     if (action != xmbUsbImport && !isSave)
     {
-        return std::string();
+        return Result(std::string());
     }
     // An import creates the folder when it is missing, so that saves can go into it.
     if (!findBackupFolder(!isSave, folderId))
     {
-        return driveFailureMessage();
+        return Problem(driveFailureMessage());
     }
     SyncState state(stateFile(profile), stateBackup(profile));
     state.Load();
@@ -469,13 +482,46 @@ std::string runXmbAction(Screen &screen, ConsoleStorage &storage, const std::str
                         profile, target);
     if (folderId.empty())
     {
-        return "There are no saves in the cloud.";
+        return Result("There are no saves in the cloud.", "{explore_plugin:msg_error_no_savedata}");
     }
     if (!browser.Refresh())
     {
-        return driveFailureMessage();
+        return Problem(driveFailureMessage());
     }
     return PickXmbSave(browser, syncDialog, action.substr(sizeof xmbSave - 1));
+}
+
+/**
+ * Tells the user what came of something: a notification for a result, while the launcher plugin
+ * runs to show it; a dialog for a problem, which should not be missed, or without the plugin.
+ * @param storage the console's hard disk
+ * @param notice what to tell
+ */
+void tell(ConsoleStorage &storage, const Notice &notice)
+{
+    if (notice.text.empty())
+    {
+        return;
+    }
+    if (!notice.problem && launcherRuns &&
+        storage.Append(notificationRequest, NotificationLine(notice) + "\n"))
+    {
+        // The plugin takes it at once, unless the user put off the restart that loads it; then
+        // the rest of the run tells in dialogs.
+        FileStatus left;
+        for (unsigned int waited = 0; waited < notificationWaitMicroseconds;
+             waited += backPollMicroseconds)
+        {
+            sysUsleep(backPollMicroseconds);
+            if (!storage.Status(notificationRequest, left))
+            {
+                return;
+            }
+        }
+        storage.Remove(notificationRequest);
+        launcherRuns = false;
+    }
+    syncDialog.ShowInfo(notice.text);
 }
 
 /**
@@ -496,7 +542,10 @@ void setUpLauncher(ConsoleStorage &storage)
         }
         return;
     }
-    if (SetUpLauncher(storage, launcherPlace) == LauncherSetup::Changed &&
+    const LauncherSetup setup = SetUpLauncher(storage, launcherPlace);
+    // Unchanged, the plugin has run since the console started; changed, only from the next start.
+    launcherRuns = setup == LauncherSetup::Unchanged;
+    if (setup == LauncherSetup::Changed &&
         syncDialog.Ask("Own Storage has set up its XMB helper. Restart the PS3 now?") ==
             Answer::Yes)
     {
@@ -564,12 +613,8 @@ void runApp(Screen &screen)
     }
     if (!action.empty())
     {
-        const std::string result =
-            runXmbAction(screen, consoleStorage, profile, savedata, saveTarget, config, action);
-        if (!result.empty())
-        {
-            syncDialog.ShowInfo(result);
-        }
+        tell(consoleStorage,
+             runXmbAction(screen, consoleStorage, profile, savedata, saveTarget, config, action));
     }
     // A quit from the XMB leaves the lists as they are: the system may end the app any time.
     if (exitapp != 0)
@@ -580,7 +625,7 @@ void runApp(Screen &screen)
     refreshXmb(consoleStorage, profile, savedata, saveTarget, !config.refreshToken.empty());
     if (saveTarget == nullptr)
     {
-        syncDialog.ShowInfo(targetUnknownMessage);
+        tell(consoleStorage, Result(targetUnknownMessage));
     }
     syncDialog.Close();
     exitapp = 1;

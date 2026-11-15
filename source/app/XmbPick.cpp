@@ -4,12 +4,12 @@
 #include "app/CloudSaveText.h"
 #include "sync/GameName.h"
 
-std::string PickXmbSave(SaveBrowser &browser, SyncDisplay &display, const std::string &name)
+Notice PickXmbSave(SaveBrowser &browser, SyncDisplay &display, const std::string &name)
 {
     // The XMB lists what the cloud had when the app last ran.
     if (!browser.Has(name))
     {
-        return name + " is no longer in the cloud.";
+        return Result(name + " is no longer in the cloud.");
     }
     switch (browser.Status(name))
     {

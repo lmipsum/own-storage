@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "app/Notice.h"
 #include "sync/SaveBrowser.h"
 
 #include <string>
@@ -52,7 +53,7 @@ std::string FitInDialog(const std::string &head, const std::string &middle,
                         const std::string &tail);
 
 /** What loading a save came to, as the user reads it. */
-std::string ShownResult(const std::string &name, LoadResult result);
+Notice ShownResult(const std::string &name, LoadResult result);
 
 /** What deleting a save from the cloud came to, as the user reads it. */
-std::string ShownResult(const std::string &name, RemoveResult result);
+Notice ShownResult(const std::string &name, RemoveResult result);
