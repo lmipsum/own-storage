@@ -41,7 +41,6 @@ INCLUDES	:=	source
 SFOXML		:=	$(CURDIR)/sfo.xml
 PKGFILES	:=	$(CURDIR)/package
 ICON0		:=	$(CURDIR)/package/ICON0.PNG
-PIC1		:=	$(CURDIR)/package/PIC1.PNG
 
 TITLE		:=	Own Storage
 APPID		:=	OWNS00001
