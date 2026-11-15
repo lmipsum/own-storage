@@ -36,6 +36,17 @@ struct XmbSave
     bool downloaded;
 };
 
+/** A game as the XMB lists it: a folder of its saves. */
+struct XmbGame
+{
+    /** The game's title. */
+    std::string title;
+    /** The game's ID. */
+    std::string titleId;
+    /** Its saves, the one stored last first. */
+    std::vector<XmbSave> saves;
+};
+
 /**
  * What a row of the XMB starts: a webMAN script that writes the row's action to the action file
  * and asks the launcher plugin to start the app. webMAN runs scripts in its user mode, where its
@@ -57,6 +68,7 @@ const char xmbScriptSuffix[] = ".bat";
 const char xmbFolderFile[] = "owns_folder.xml";
 const char xmbMenuFile[] = "owns_menu.xml";
 const char xmbSavesFile[] = "owns_saves.xml";
+const char xmbGamesFile[] = "owns_games.xml";
 
 /** The list files, one level of folders each. */
 struct XmbLists
@@ -65,8 +77,10 @@ struct XmbLists
     std::string folder;
     /** Its rows, and the folder of the saves in the cloud. */
     std::string menu;
-    /** The saves in the cloud. */
+    /** The games in the cloud, a folder each. */
     std::string saves;
+    /** Each game's saves. */
+    std::string games;
     /** Each row's script by its name in XmbPlace::scriptDirectory, with the action it leaves. */
     std::vector<XmbScript> scripts;
 };
@@ -82,17 +96,17 @@ const char xmbSave[] = "save:";
  * The XMB's lists. Each row starts a webMAN script, which leaves its action for the app and
  * asks the launcher plugin to start it; the XMB cannot start the app by itself. Without webMAN the
  * rows that act give way to a row that says so, and the saves are only listed, as is a save of a
- * name no console gives.
+ * name no console gives. The saves in the cloud, a folder per game, come before the rows that act.
  * @param place where the lists are, and how the app is started
  * @param signedIn whether the user is signed in; without it only the sign-in row is listed
  * @param webman whether webMAN MOD is there to run the rows' scripts
  * @param storageUse how full the Google storage is, shown under the saves in the cloud; empty when
  *        not known
- * @param saves the saves in the cloud
+ * @param games the games in the cloud, with their saves
  * @return the files' content
  */
 XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
-                      const std::string &storageUse, const std::vector<XmbSave> &saves);
+                      const std::string &storageUse, const std::vector<XmbGame> &games);
 
 /**
  * A row's webMAN script.
@@ -121,13 +135,13 @@ std::string XmbCategoryEntry(const XmbPlace &place);
 bool AddXmbCategoryEntry(std::string &category, const std::string &entry);
 
 /**
- * The saves in the cloud as the XMB lists them, game by game and each game's newest first. A save
- * the console has the cloud's copy of shows its own icon.
+ * The games in the cloud as the XMB lists them, with each game's saves, newest first. A save the
+ * console has the cloud's copy of shows its own icon.
  * @param browser the saves in the cloud, listed already
  * @param storage the console's hard disk
  * @param savedata the user's savedata directory
  * @param style how the console shows dates
- * @return the saves
+ * @return the games
  */
-std::vector<XmbSave> XmbSaves(SaveBrowser &browser, const LocalStorage &storage,
+std::vector<XmbGame> XmbGames(SaveBrowser &browser, const LocalStorage &storage,
                               const std::string &savedata, const DateStyle &style);
