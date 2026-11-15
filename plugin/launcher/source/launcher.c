@@ -194,19 +194,29 @@ static void notify(const char *line, size_t size)
     }
 }
 
-/** Shows the app's results, a notification a line, and removes them. */
-static void show_notices(void)
+/**
+ * Takes the app's results from their file, which tells the app they are taken, after those taken
+ * before.
+ * @param notices the results taken so far
+ * @param size their bytes; grows by those taken now
+ */
+static void take_notices(char *notices, uint64_t *size)
 {
-    char notices[NOTICES_BYTES];
-    uint64_t size = 0;
     int file;
     if (cellFsOpen(kNotices, CELL_FS_O_RDONLY, &file, NULL, 0) != 0)
     {
         return;
     }
-    cellFsRead(file, notices, sizeof notices, &size);
+    uint64_t read = 0;
+    cellFsRead(file, notices + *size, NOTICES_BYTES - *size, &read);
     cellFsClose(file);
     cellFsUnlink(kNotices);
+    *size += read;
+}
+
+/** Shows results, a notification a line. */
+static void show_notices(const char *notices, uint64_t size)
+{
     size_t start = 0;
     for (size_t i = 0; i <= size; ++i)
     {
@@ -222,6 +232,9 @@ static void show_notices(void)
 static void watch(void *unused)
 {
     (void)unused;
+    // The results taken but not shown yet; the thread's own, as nothing here writes to a global.
+    char notices[NOTICES_BYTES];
+    uint64_t taken = 0;
     // A request left from before the console started, as when the user used a row before the
     // restart that loads this plugin, would start the app unasked.
     cellFsUnlink(kRequest);
@@ -237,7 +250,14 @@ static void watch(void *unused)
         }
         if (cellFsStat(kNotices, &status) == 0)
         {
-            show_notices();
+            take_notices(notices, &taken);
+        }
+        // They show once the user is back on the XMB, with explore_plugin loaded, whose texts they
+        // use; while the app runs they would show without them.
+        if (taken > 0 && View_Find("explore_plugin") != 0)
+        {
+            show_notices(notices, taken);
+            taken = 0;
         }
         sysUsleep(kPollMicroseconds);
     }
