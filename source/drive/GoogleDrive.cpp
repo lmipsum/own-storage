@@ -15,6 +15,9 @@
 namespace
 {
 const char kFilesUrl[] = "https://www.googleapis.com/drive/v2/files";
+// The storage Google counts against the account: all its services' use, and the limit.
+const char kAboutUrl[] = "https://www.googleapis.com/drive/v2/about";
+const char kStorageFields[] = "quotaBytesUsedAggregate,quotaBytesTotal";
 const char kUploadUrl[] = "https://www.googleapis.com/upload/drive/v2/files";
 const char kFoundItemFields[] =
     "items(fileSize,id,md5Checksum,mimeType,modifiedDate,parents/id,title)";
@@ -151,6 +154,14 @@ std::string DescribeDriveError(const std::string &reply)
         return reply.substr(0, kMaxLoggedReplyLength);
     }
     return ReadErrorReason(reply) + ": " + error["message"].Str();
+}
+
+/** A count Drive gives as text; 0 when there is none. The console's library has no strtoull. */
+unsigned long long CountOf(const std::string &text)
+{
+    unsigned long long count = 0;
+    std::istringstream(text) >> count;
+    return count;
 }
 } // namespace
 
@@ -559,6 +570,33 @@ void GoogleDrive::NoteFailure(const char *what, long status, const std::string &
     {
         m_full = true;
     }
+}
+
+bool GoogleDrive::StorageUse(unsigned long long &used, unsigned long long &total)
+{
+    used = 0;
+    total = 0;
+    const std::string url = std::string(kAboutUrl) + "?fields=" + m_http.Escape(kStorageFields);
+    std::string reply;
+    const long status = SendAuthorized(
+        m_auth, HttpClient::Headers(), [&](const HttpClient::Headers &withToken, std::string &body)
+        { return m_http.Get(url, withToken, body); }, reply);
+    if (!HttpClient::Succeeded(status))
+    {
+        NoteFailure("StorageUse: Could not ask", status, reply);
+        return false;
+    }
+    // Drive gives the counts as text, as JSON numbers lose large ones.
+    const Json about = Json::Parse(reply);
+    const std::string usedText = about["quotaBytesUsedAggregate"].Str();
+    if (usedText.empty())
+    {
+        debugPrintf("StorageUse: The reply has no use\n");
+        return false;
+    }
+    used = CountOf(usedText);
+    total = CountOf(about["quotaBytesTotal"].Str());
+    return true;
 }
 
 bool GoogleDrive::IsFull() const

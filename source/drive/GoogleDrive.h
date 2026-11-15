@@ -63,6 +63,14 @@ class GoogleDrive : public CloudStorage
     bool IsFull() const override;
     Failure LastFailure() const override;
 
+    /**
+     * How full the Google storage is: Drive, Gmail and Photos together, as Google counts them.
+     * @param used receives the bytes in use
+     * @param total receives the storage's size; 0 when it has no limit
+     * @return false when Drive cannot be asked
+     */
+    bool StorageUse(unsigned long long &used, unsigned long long &total);
+
   private:
     GoogleDrive(const GoogleDrive &) = delete;
     GoogleDrive &operator=(const GoogleDrive &) = delete;

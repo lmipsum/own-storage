@@ -27,6 +27,14 @@ struct DateStyle
 std::string ShownSize(unsigned long long bytes);
 
 /**
+ * How full the Google storage is, in numbers alone, so it reads alike in every language.
+ * @param used the bytes in use
+ * @param total the storage's size; 0 when it has no limit
+ * @return such as "3.2 GB / 15 GB", or "850 MB / 15 GB"; the used size alone without a limit
+ */
+std::string ShownStorageUse(unsigned long long used, unsigned long long total);
+
+/**
  * Drive's time of a change in local time, the way the console shows dates.
  * @param modified UTC, such as "2026-11-14T10:56:21.672Z"
  * @param style the console's date and time settings

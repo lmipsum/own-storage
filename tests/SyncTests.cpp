@@ -954,23 +954,28 @@ TEST(XmbListsTheSavesWithTheirIcons)
 
 TEST(XmbListsRowsThatStartTheAppThroughTheLauncher)
 {
-    const XmbLists signedOut = MakeXmbLists(kXmbPlace, false, true, {});
+    const XmbLists signedOut = MakeXmbLists(kXmbPlace, false, true, "", {});
     CHECK(signedOut.menu.find("<String>msg_signin</String>") != std::string::npos);
     CHECK(signedOut.menu.find("msg_sync_with_server") == std::string::npos);
     CHECK(signedOut.menu.find("msg_online_storage") == std::string::npos);
     const XmbSave inCloud{"BLES00001-SAVE", "Game One (BLES00001)", "Chapter \"3\" & more", "",
                           false};
     const XmbSave downloaded{"BLES00001-AUTO", "Game One (BLES00001)", "Auto", "", true};
-    const XmbLists lists = MakeXmbLists(kXmbPlace, true, true, {inCloud, downloaded});
+    const XmbLists lists =
+        MakeXmbLists(kXmbPlace, true, true, "3.2 GB / 15 GB", {inCloud, downloaded});
     CHECK(lists.folder.find("src=\"xmb://localhost/dev_hdd0/xmlhost/game_plugin/owns_menu.xml#") !=
           std::string::npos);
     CHECK(lists.menu.find("<Pair key=\"title_rsc\"><String>msg_sync_with_server</String>") !=
           std::string::npos);
     CHECK(lists.menu.find("msg_signout") != std::string::npos);
     CHECK(lists.menu.find("msg_signin") == std::string::npos);
-    // Only the USB row has a description of the app's own; the others have none.
+    // Only the USB row has a description of the app's own, and the saves in the cloud tell how full
+    // the Google storage is; the others have none.
     CHECK(lists.menu.find("Uploads the saves on a USB drive") != std::string::npos);
-    CHECK(lists.menu.find("<Pair key=\"info\">") == lists.menu.rfind("<Pair key=\"info\">"));
+    const std::size_t firstInfo = lists.menu.find("<Pair key=\"info\">");
+    const std::size_t secondInfo = lists.menu.find("<Pair key=\"info\">", firstInfo + 1);
+    CHECK(secondInfo != std::string::npos &&
+          lists.menu.find("<Pair key=\"info\">", secondInfo + 1) == std::string::npos);
     CHECK(lists.folder.find("<String>Cloud Save Utility</String>") != std::string::npos);
     CHECK(lists.folder.find("<Pair key=\"info_rsc\"><String>msg_online_storage_explanation") !=
           std::string::npos);
@@ -980,6 +985,8 @@ TEST(XmbListsRowsThatStartTheAppThroughTheLauncher)
     CHECK(lists.menu.find("<String>tex_Avatar_Default</String>") != std::string::npos);
     // Sign out comes last.
     CHECK(lists.menu.find("msg_online_storage") < lists.menu.find("msg_signout"));
+    // The saves in the cloud tell how full the Google storage is.
+    CHECK(lists.menu.find("<String>3.2 GB / 15 GB</String>") != std::string::npos);
     // The saves are in a folder of their own, in a file of their own, not split by game.
     CHECK(lists.menu.find("owns_saves.xml#") != std::string::npos);
     CHECK(lists.menu.find("Game One") == std::string::npos);
@@ -1067,12 +1074,23 @@ TEST(LauncherOnAConsoleWithoutABootListStartsOne)
     CHECK(!without.Exists(kLauncherPlace.bootList));
 }
 
+TEST(StorageUseReadsInNumbersAlone)
+{
+    const unsigned long long gigabyte = 1024ULL * 1024 * 1024;
+    CHECK_EQUAL(std::string("3.2 GB / 15 GB"), ShownStorageUse(gigabyte * 32 / 10, 15 * gigabyte));
+    CHECK_EQUAL(std::string("850 MB / 15 GB"),
+                ShownStorageUse(850ULL * 1024 * 1024, 15 * gigabyte));
+    CHECK_EQUAL(std::string("1 GB / 2048 GB"), ShownStorageUse(gigabyte, 2048 * gigabyte));
+    // A storage without a limit tells only what it holds.
+    CHECK_EQUAL(std::string("7.5 GB"), ShownStorageUse(gigabyte * 75 / 10, 0));
+}
+
 TEST(XmbSaveOfANameNoConsoleGivesIsOnlyListed)
 {
     // Such a name, from a file put in the Drive by hand, could add a command to a script.
     const XmbSave odd{"X;reboot", "Odd", "Odd", "", false};
     const XmbSave lower{"bles00001-save", "Lower", "Lower", "", false};
-    const XmbLists lists = MakeXmbLists(kXmbPlace, true, true, {odd, lower});
+    const XmbLists lists = MakeXmbLists(kXmbPlace, true, true, "", {odd, lower});
     CHECK(lists.saves.find("Odd") != std::string::npos);
     CHECK(lists.saves.find("Lower") != std::string::npos);
     CHECK(lists.saves.find("owns_save_0.bat") == std::string::npos);
@@ -1086,7 +1104,7 @@ TEST(XmbSaveOfANameNoConsoleGivesIsOnlyListed)
 TEST(XmbListsWithoutWebmanOnlyListTheSaves)
 {
     const XmbSave save{"BLES00001-SAVE", "Game One", "Save", "", false};
-    const XmbLists lists = MakeXmbLists(kXmbPlace, true, false, {save});
+    const XmbLists lists = MakeXmbLists(kXmbPlace, true, false, "", {save});
     CHECK(lists.menu.find("Install webMAN MOD") != std::string::npos);
     CHECK(lists.menu.find("msg_sync_with_server") == std::string::npos);
     CHECK(lists.menu.find("msg_online_storage") != std::string::npos);

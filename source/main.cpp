@@ -52,6 +52,7 @@
 #include "app/Config.h"
 #include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
+#include "app/CloudSaveText.h"
 #include "app/Cobra.h"
 #include "app/ConsoleStorage.h"
 #include "app/ConsoleIdentity.h"
@@ -411,7 +412,15 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
     // A row needs webMAN to run its script, and Cobra to load the plugin that starts the app.
     FileStatus proxy;
     const bool rowsRun = storage.Status(webmanProxy, proxy) && CobraRuns();
-    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, rowsRun, saves));
+    // Not known, the storage's use is left out rather than kept from a run long gone.
+    std::string storageUse;
+    unsigned long long used = 0;
+    unsigned long long total = 0;
+    if (signedIn && drive.StorageUse(used, total))
+    {
+        storageUse = ShownStorageUse(used, total);
+    }
+    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, rowsRun, storageUse, saves));
 }
 
 /**

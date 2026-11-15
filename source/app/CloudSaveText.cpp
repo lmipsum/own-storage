@@ -98,6 +98,37 @@ std::string ShownSize(unsigned long long bytes)
     return text.str();
 }
 
+namespace
+{
+const unsigned long long kBytesPerMegabyte = 1024 * 1024;
+const unsigned long long kBytesPerGigabyte = 1024 * kBytesPerMegabyte;
+
+/** A storage size: whole megabytes below a gigabyte, gigabytes to one decimal from there on. */
+std::string ShownStorageSize(unsigned long long bytes)
+{
+    std::ostringstream text;
+    if (bytes < kBytesPerGigabyte)
+    {
+        text << (bytes + kBytesPerMegabyte / 2) / kBytesPerMegabyte << " MB";
+        return text.str();
+    }
+    const unsigned long long tenths = (bytes * 10 + kBytesPerGigabyte / 2) / kBytesPerGigabyte;
+    text << tenths / 10;
+    if (tenths % 10 != 0)
+    {
+        text << '.' << tenths % 10;
+    }
+    text << " GB";
+    return text.str();
+}
+} // namespace
+
+std::string ShownStorageUse(unsigned long long used, unsigned long long total)
+{
+    return total == 0 ? ShownStorageSize(used)
+                      : ShownStorageSize(used) + " / " + ShownStorageSize(total);
+}
+
 std::string ShownTime(const std::string &modified, const DateStyle &style)
 {
     long year;
