@@ -955,24 +955,31 @@ TEST(XmbListsTheSavesWithTheirIcons)
 TEST(XmbListsRowsThatStartTheAppThroughTheLauncher)
 {
     const XmbLists signedOut = MakeXmbLists(kXmbPlace, false, true, {});
-    CHECK(signedOut.menu.find("Sign in") != std::string::npos);
-    CHECK(signedOut.menu.find("Full sync") == std::string::npos);
-    CHECK(signedOut.menu.find("Saves in the cloud") == std::string::npos);
+    CHECK(signedOut.menu.find("<String>msg_signin</String>") != std::string::npos);
+    CHECK(signedOut.menu.find("msg_sync_with_server") == std::string::npos);
+    CHECK(signedOut.menu.find("msg_online_storage") == std::string::npos);
     const XmbSave inCloud{"BLES00001-SAVE", "Game One (BLES00001)", "Chapter \"3\" & more", "",
                           false};
     const XmbSave downloaded{"BLES00001-AUTO", "Game One (BLES00001)", "Auto", "", true};
     const XmbLists lists = MakeXmbLists(kXmbPlace, true, true, {inCloud, downloaded});
     CHECK(lists.folder.find("src=\"xmb://localhost/dev_hdd0/xmlhost/game_plugin/owns_menu.xml#") !=
           std::string::npos);
-    CHECK(lists.menu.find("Full sync") != std::string::npos);
-    CHECK(lists.menu.find("Sign out") != std::string::npos);
-    CHECK(lists.menu.find("Sign in<") == std::string::npos);
+    CHECK(lists.menu.find("<Pair key=\"title_rsc\"><String>msg_sync_with_server</String>") !=
+          std::string::npos);
+    CHECK(lists.menu.find("msg_signout") != std::string::npos);
+    CHECK(lists.menu.find("msg_signin") == std::string::npos);
+    // Only the USB row has a description of the app's own; the others have none.
+    CHECK(lists.menu.find("Uploads the saves on a USB drive") != std::string::npos);
+    CHECK(lists.menu.find("<Pair key=\"info\">") == lists.menu.rfind("<Pair key=\"info\">"));
+    CHECK(lists.folder.find("<String>Cloud Save Utility</String>") != std::string::npos);
+    CHECK(lists.folder.find("<Pair key=\"info_rsc\"><String>msg_online_storage_explanation") !=
+          std::string::npos);
     // The rows show the system's icons.
     CHECK(lists.menu.find("<String>tex_loading_icon</String>") != std::string::npos);
     CHECK(lists.menu.find("<String>item_tex_usb_connection</String>") != std::string::npos);
     CHECK(lists.menu.find("<String>tex_Avatar_Default</String>") != std::string::npos);
     // Sign out comes last.
-    CHECK(lists.menu.find("Saves in the cloud") < lists.menu.find("Sign out"));
+    CHECK(lists.menu.find("msg_online_storage") < lists.menu.find("msg_signout"));
     // The saves are in a folder of their own, in a file of their own, not split by game.
     CHECK(lists.menu.find("owns_saves.xml#") != std::string::npos);
     CHECK(lists.menu.find("Game One") == std::string::npos);
@@ -1081,8 +1088,8 @@ TEST(XmbListsWithoutWebmanOnlyListTheSaves)
     const XmbSave save{"BLES00001-SAVE", "Game One", "Save", "", false};
     const XmbLists lists = MakeXmbLists(kXmbPlace, true, false, {save});
     CHECK(lists.menu.find("Install webMAN MOD") != std::string::npos);
-    CHECK(lists.menu.find("Full sync") == std::string::npos);
-    CHECK(lists.menu.find("Saves in the cloud") != std::string::npos);
+    CHECK(lists.menu.find("msg_sync_with_server") == std::string::npos);
+    CHECK(lists.menu.find("msg_online_storage") != std::string::npos);
     CHECK(lists.saves.find("Game One") != std::string::npos);
     CHECK(lists.saves.find("/play.ps3") == std::string::npos);
     CHECK(lists.scripts.empty());
