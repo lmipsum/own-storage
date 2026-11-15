@@ -605,6 +605,12 @@ void runApp(Screen &screen)
     {
         syncDialog.ShowError("Own Storage cannot put its folder in the XMB.");
     }
+    // Signed out, the lists need nothing from the cloud; written now, they are this app's even
+    // when the user quits at the sign-in, as after an update.
+    if (config.refreshToken.empty())
+    {
+        refreshXmb(consoleStorage, profile, savedata, saveTarget, false);
+    }
     std::string action = TakeXmbAction(consoleStorage, xmbPlace);
     if (action.empty() && config.refreshToken.empty())
     {
