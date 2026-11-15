@@ -32,6 +32,8 @@ class TestConsole : public LocalStorage
     bool Exists(const std::string &path) const;
     /** A directory on the PC for files outside the console, such as the sync state. */
     const std::string &Scratch() const;
+    /** Whether a directory has been listed, which tells what was read of a drive. */
+    bool WasListed(const std::string &directory) const;
 
     std::vector<std::string> List(const std::string &directory) const override;
     bool Status(const std::string &path, FileStatus &status) const override;
@@ -47,4 +49,5 @@ class TestConsole : public LocalStorage
   private:
     std::string m_root;
     std::string m_scratch;
+    mutable std::vector<std::string> m_listed;
 };

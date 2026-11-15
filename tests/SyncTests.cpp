@@ -1471,6 +1471,21 @@ TEST(UsbSavesAreUploadedKeptInTheCloudOnly)
     CHECK_EQUAL(std::size_t(2), Import(setup, setup.console).skipped);
 }
 
+TEST(UsbImportLeavesTheSavesTheCloudHasUnread)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    PutUsbSave(setup.console, kUsbSaves, "BLES00001-SAVE", "old copy");
+    PutUsbSave(setup.console, kUsbSaves, "NPEB00003-USB", "usb");
+    const ImportResult result = Import(setup, setup.console);
+    CHECK_EQUAL(std::size_t(1), result.skipped);
+    CHECK_EQUAL(std::size_t(1), result.imported);
+    // Reading a save is listing its folder: the one the cloud has is not read.
+    CHECK(!setup.console.WasListed(std::string(kUsbSaves) + "/BLES00001-SAVE"));
+    CHECK(setup.console.WasListed(std::string(kUsbSaves) + "/NPEB00003-USB"));
+}
+
 TEST(SaveKeptInTheCloudOnlyIsDownloadedOnlyWhenPicked)
 {
     Setup setup;

@@ -17,17 +17,20 @@ SaveScanner::SaveScanner(const LocalStorage &storage, const std::string &savedat
 {
 }
 
-std::vector<LocalSave> SaveScanner::Scan() const
+std::vector<std::string> SaveScanner::Names() const
 {
     std::vector<std::string> names = m_storage.List(m_savedata);
+    names.erase(std::remove(names.begin(), names.end(), m_ownSave), names.end());
     std::sort(names.begin(), names.end());
+    return names;
+}
+
+std::vector<LocalSave> SaveScanner::Scan() const
+{
     std::vector<LocalSave> saves;
-    for (const std::string &name : names)
+    for (const std::string &name : Names())
     {
-        if (name != m_ownSave)
-        {
-            saves.push_back(ScanSave(name));
-        }
+        saves.push_back(ScanSave(name));
     }
     debugPrintf("SaveScanner::Scan: %u save folders\n", static_cast<unsigned int>(saves.size()));
     return saves;
