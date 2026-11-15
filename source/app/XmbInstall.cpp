@@ -145,7 +145,8 @@ bool WriteXmbLists(LocalStorage &storage, const XmbPlace &place, const XmbLists 
     // of a row of the last lists that had its key.
     bool written = storage.Write(place.directory + xmbFolderFile, lists.folder) &&
                    storage.Write(place.directory + xmbMenuFile, lists.menu) &&
-                   storage.Write(place.directory + xmbSavesFile, lists.saves);
+                   storage.Write(place.directory + xmbSavesFile, lists.saves) &&
+                   storage.Write(place.directory + xmbGamesFile, lists.games);
     // The rows of the last lists, such as of a save gone from the cloud, start nothing any more.
     for (const std::string &old : storage.List(place.scriptDirectory))
     {

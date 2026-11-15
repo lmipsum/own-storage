@@ -9,6 +9,8 @@ namespace
 const char kFolderView[] = "owns_folder_view";
 const char kMenuView[] = "owns_menu_view";
 const char kSavesView[] = "owns_saves_view";
+const char kGameKeyPrefix[] = "owns_game_";
+const char kGameViewSuffix[] = "_view";
 const char kSaveKeyPrefix[] = "owns_save_";
 // The key of the app's folder in category_game.xml, which tells it is there already.
 const char kCategoryKey[] = "owns_root";
@@ -26,8 +28,9 @@ const char kSignInRsc[] = "msg_signin";
 const char kSignOutRsc[] = "msg_signout";
 const char kUsbInfo[] = "Uploads the saves on a USB drive to your Google Drive.";
 // The system's icons, from those the Game column can show: the rows' own; a downloaded save
-// without an icon of its own, which the folder of the saves in the cloud shares; and a save only
-// in the cloud, which the Cloud Save Utility folder and the row that asks for webMAN share.
+// without an icon of its own, which the folders of the saves in the cloud and of each game share;
+// and a save only in the cloud, which the Cloud Save Utility folder and the row that asks for
+// webMAN share.
 const char kSyncIcon[] = "tex_loading_icon";
 const char kUsbIcon[] = "item_tex_usb_connection";
 const char kAccountIcon[] = "tex_Avatar_Default";
@@ -95,6 +98,12 @@ std::string Escaped(const std::string &text)
     return escaped;
 }
 
+/** How many saves a game has in the cloud, as its folder's description tells it. */
+std::string SaveCount(std::size_t count)
+{
+    return Digits(count) + (count == 1 ? " save" : " saves");
+}
+
 /** A pair of an attribute table. */
 std::string Pair(const char *key, const std::string &value)
 {
@@ -158,7 +167,7 @@ std::string Document(const std::string &views)
 } // namespace
 
 XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
-                      const std::string &storageUse, const std::vector<XmbSave> &saves)
+                      const std::string &storageUse, const std::vector<XmbGame> &games)
 {
     XmbLists lists;
     lists.folder = Document(
@@ -196,34 +205,51 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
     }
     else
     {
-        addAction("owns_sync", kSyncIcon, kSyncRsc, nullptr, xmbSync);
-        addAction("owns_usb", kUsbIcon, kUsbRsc, kUsbInfo, xmbUsbImport);
         const std::string used = storageUse.empty() ? std::string() : Pair("info", storageUse);
         tables += Table("owns_cloud", Pair("icon_rsc", kDownloadedIcon) +
                                           Pair("title_rsc", kCloudSavesRsc) + used);
         items += FolderItem("owns_cloud", ViewSource(place, xmbSavesFile, kSavesView));
+        addAction("owns_sync", kSyncIcon, kSyncRsc, nullptr, xmbSync);
+        addAction("owns_usb", kUsbIcon, kUsbRsc, kUsbInfo, xmbUsbImport);
         addAction("owns_signout", kAccountIcon, kSignOutRsc, nullptr, xmbSignOut);
     }
     lists.menu = Document(View(kMenuView, tables, items));
 
     tables.clear();
     items.clear();
-    for (std::size_t s = 0; signedIn && s < saves.size(); ++s)
+    std::string gameViews;
+    // The saves' keys run on from game to game, as each names a script of the one folder.
+    std::size_t saveNumber = 0;
+    for (std::size_t g = 0; signedIn && g < games.size(); ++g)
     {
-        const XmbSave &save = saves[s];
-        const std::string key = kSaveKeyPrefix + Digits(s);
-        // A save of a name no console gives is only listed.
-        const bool acts = webman && IsSaveFolderName(save.name);
-        const std::string actionPairs = acts ? ActionPairs(place, key) : std::string();
-        tables += Table(key, IconPair(save.icon, save.downloaded ? kDownloadedIcon : kInCloudIcon) +
-                                 Pair("title", save.title) + Pair("info", save.info) + actionPairs);
-        items += ActionItem(key);
-        if (acts)
+        const XmbGame &game = games[g];
+        const std::string gameKey = kGameKeyPrefix + Digits(g);
+        const std::string gameView = gameKey + kGameViewSuffix;
+        tables +=
+            Table(gameKey, Pair("icon_rsc", kDownloadedIcon) + Pair("title", game.title) +
+                               Pair("info", game.titleId + " | " + SaveCount(game.saves.size())));
+        items += FolderItem(gameKey, ViewSource(place, xmbGamesFile, gameView));
+        std::string saveTables;
+        std::string saveItems;
+        for (const XmbSave &save : game.saves)
         {
-            lists.scripts.push_back(XmbScript{key, xmbSave + save.name});
+            const std::string key = kSaveKeyPrefix + Digits(saveNumber++);
+            // A save of a name no console gives is only listed.
+            const bool acts = webman && IsSaveFolderName(save.name);
+            const std::string actionPairs = acts ? ActionPairs(place, key) : std::string();
+            saveTables +=
+                Table(key, IconPair(save.icon, save.downloaded ? kDownloadedIcon : kInCloudIcon) +
+                               Pair("title", save.title) + Pair("info", save.info) + actionPairs);
+            saveItems += ActionItem(key);
+            if (acts)
+            {
+                lists.scripts.push_back(XmbScript{key, xmbSave + save.name});
+            }
         }
+        gameViews += View(gameView, saveTables, saveItems);
     }
     lists.saves = Document(View(kSavesView, tables, items));
+    lists.games = Document(gameViews);
     return lists;
 }
 
@@ -277,12 +303,13 @@ bool AddXmbCategoryEntry(std::string &category, const std::string &entry)
     return true;
 }
 
-std::vector<XmbSave> XmbSaves(SaveBrowser &browser, const LocalStorage &storage,
+std::vector<XmbGame> XmbGames(SaveBrowser &browser, const LocalStorage &storage,
                               const std::string &savedata, const DateStyle &style)
 {
-    std::vector<XmbSave> saves;
+    std::vector<XmbGame> games;
     for (const CloudGame &game : browser.Games())
     {
+        XmbGame listed{game.name, game.titleId, {}};
         for (const std::string &name : game.saves)
         {
             const CloudSave &cloudSave = browser.Save(name);
@@ -297,8 +324,9 @@ std::vector<XmbSave> XmbSaves(SaveBrowser &browser, const LocalStorage &storage,
                         ShownSize(cloudSave.size);
             save.downloaded = browser.Status(name) == SaveStatus::Same;
             save.icon = save.downloaded && storage.Status(icon, iconStatus) ? icon : std::string();
-            saves.push_back(save);
+            listed.saves.push_back(save);
         }
+        games.push_back(listed);
     }
-    return saves;
+    return games;
 }

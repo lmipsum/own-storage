@@ -932,25 +932,34 @@ TEST(XmbListsTheSavesWithTheirIcons)
     setup.console.Put(std::string(kSave) + "/ICON0.PNG", "icon", kWritten);
     setup.Run();
     Browsing here(setup, setup.console);
-    // Game by game, by name: the game without a known title is named by its ID, which comes first.
-    std::vector<XmbSave> saves = XmbSaves(here.browser, setup.console, kSavedata, kXmbDates);
-    CHECK_EQUAL(std::size_t(2), saves.size());
-    if (saves.size() == 2)
+    // By name: the game without a known title is named by its ID, which comes first.
+    std::vector<XmbGame> games = XmbGames(here.browser, setup.console, kSavedata, kXmbDates);
+    CHECK_EQUAL(std::size_t(2), games.size());
+    if (games.size() == 2 && games[0].saves.size() == 1 && games[1].saves.size() == 1)
     {
+        CHECK_EQUAL(std::string("BLUS00002"), games[0].title);
+        CHECK_EQUAL(std::string("Game One"), games[1].title);
+        CHECK_EQUAL(std::string("BLES00001"), games[1].titleId);
         // On the console without an icon of its own.
-        CHECK_EQUAL(std::string("BLUS00002"), saves[0].title);
-        CHECK(saves[0].downloaded && saves[0].icon.empty());
+        const XmbSave &noIcon = games[0].saves[0];
+        CHECK(noIcon.downloaded && noIcon.icon.empty());
         // On the console with its icon.
-        CHECK_EQUAL(std::string("Game One"), saves[1].title);
-        CHECK_EQUAL(0u, saves[1].info.find("BLES00001-SAVE\nBLES00001 | "));
-        CHECK(saves[1].downloaded);
-        CHECK_EQUAL(std::string(kSave) + "/ICON0.PNG", saves[1].icon);
+        const XmbSave &withIcon = games[1].saves[0];
+        CHECK_EQUAL(std::string("Game One"), withIcon.title);
+        CHECK_EQUAL(0u, withIcon.info.find("BLES00001-SAVE\nBLES00001 | "));
+        CHECK(withIcon.downloaded);
+        CHECK_EQUAL(std::string(kSave) + "/ICON0.PNG", withIcon.icon);
+    }
+    else
+    {
+        CHECK(false);
     }
     // A save the console has otherwise counts as not downloaded, so it shows no icon.
     setup.console.Put(std::string(kSave) + "/DATA.BIN", "played on", kChanged);
     Browsing changed(setup, setup.console);
-    saves = XmbSaves(changed.browser, setup.console, kSavedata, kXmbDates);
-    CHECK(saves.size() == 2 && !saves[1].downloaded && saves[1].icon.empty());
+    games = XmbGames(changed.browser, setup.console, kSavedata, kXmbDates);
+    CHECK(games.size() == 2 && games[1].saves.size() == 1 && !games[1].saves[0].downloaded &&
+          games[1].saves[0].icon.empty());
 }
 
 TEST(XmbListsRowsThatStartTheAppThroughTheLauncher)
@@ -962,8 +971,10 @@ TEST(XmbListsRowsThatStartTheAppThroughTheLauncher)
     const XmbSave inCloud{"BLES00001-SAVE", "Game One (BLES00001)", "Chapter \"3\" & more", "",
                           false};
     const XmbSave downloaded{"BLES00001-AUTO", "Game One (BLES00001)", "Auto", "", true};
-    const XmbLists lists =
-        MakeXmbLists(kXmbPlace, true, true, "3.2 GB / 15 GB", {inCloud, downloaded});
+    const XmbSave other{"BLUS00002-SAVE", "Game Two", "Two", "", false};
+    const XmbLists lists = MakeXmbLists(kXmbPlace, true, true, "3.2 GB / 15 GB",
+                                        {XmbGame{"Game One", "BLES00001", {inCloud, downloaded}},
+                                         XmbGame{"Game Two", "BLUS00002", {other}}});
     CHECK(lists.folder.find("src=\"xmb://localhost/dev_hdd0/xmlhost/game_plugin/owns_menu.xml#") !=
           std::string::npos);
     CHECK(lists.menu.find("<Pair key=\"title_rsc\"><String>msg_sync_with_server</String>") !=
@@ -984,20 +995,32 @@ TEST(XmbListsRowsThatStartTheAppThroughTheLauncher)
     CHECK(lists.menu.find("<String>tex_loading_icon</String>") != std::string::npos);
     CHECK(lists.menu.find("<String>item_tex_usb_connection</String>") != std::string::npos);
     CHECK(lists.menu.find("<String>tex_Avatar_Default</String>") != std::string::npos);
-    // Sign out comes last.
-    CHECK(lists.menu.find("msg_online_storage") < lists.menu.find("msg_signout"));
+    // The saves in the cloud come first, sign out last.
+    CHECK(lists.menu.find("msg_online_storage") < lists.menu.find("msg_sync_with_server"));
+    CHECK(lists.menu.find("msg_usb") < lists.menu.find("msg_signout"));
     // The saves in the cloud tell how full the Google storage is.
     CHECK(lists.menu.find("<String>3.2 GB / 15 GB</String>") != std::string::npos);
-    // The saves are in a folder of their own, in a file of their own, not split by game.
+    // The saves are in a folder of their own, in a file of their own, a folder per game, whose
+    // saves are in yet another file.
     CHECK(lists.menu.find("owns_saves.xml#") != std::string::npos);
     CHECK(lists.menu.find("Game One") == std::string::npos);
-    CHECK(lists.saves.find("Game One (BLES00001)") != std::string::npos);
-    CHECK(lists.saves.find("<String>tex_album_icon</String>") != std::string::npos);
-    CHECK(lists.saves.find("<String>item_tex_ps3util</String>") != std::string::npos);
+    CHECK(lists.saves.find("<String>Game One</String>") != std::string::npos);
+    CHECK(lists.saves.find("<String>BLES00001 | 2 saves</String>") != std::string::npos);
+    CHECK(lists.saves.find("<String>BLUS00002 | 1 save</String>") != std::string::npos);
+    CHECK(lists.saves.find("owns_games.xml#owns_game_1_view") != std::string::npos);
+    CHECK(lists.saves.find("BLES00001-SAVE") == std::string::npos);
+    CHECK(lists.games.find("<View id=\"owns_game_0_view\">") <
+          lists.games.find("Game One (BLES00001)"));
+    CHECK(lists.games.find("Game One (BLES00001)") <
+          lists.games.find("<View id=\"owns_game_1_view\">"));
+    CHECK(lists.games.find("<String>tex_album_icon</String>") != std::string::npos);
+    CHECK(lists.games.find("<String>item_tex_ps3util</String>") != std::string::npos);
+    // The saves' keys run on from game to game.
+    CHECK(lists.games.find("key=\"owns_save_2\"") > lists.games.find("owns_game_1_view"));
     // The texts are escaped, and the row runs its script, which leaves its action and starts the
     // app: webMAN does not write files for the XMB in its user mode, but its scripts do.
-    CHECK(lists.saves.find("Chapter &quot;3&quot; &amp; more") != std::string::npos);
-    CHECK(lists.saves.find("<String>/play.ps3/dev_hdd0/game/OWNS00001/USRDIR/xmb/owns_save_0.bat"
+    CHECK(lists.games.find("Chapter &quot;3&quot; &amp; more") != std::string::npos);
+    CHECK(lists.games.find("<String>/play.ps3/dev_hdd0/game/OWNS00001/USRDIR/xmb/owns_save_0.bat"
                            "</String>") != std::string::npos);
     bool saveScript = false;
     for (const XmbScript &script : lists.scripts)
@@ -1104,11 +1127,12 @@ TEST(XmbSaveOfANameNoConsoleGivesIsOnlyListed)
     // Such a name, from a file put in the Drive by hand, could add a command to a script.
     const XmbSave odd{"X;reboot", "Odd", "Odd", "", false};
     const XmbSave lower{"bles00001-save", "Lower", "Lower", "", false};
-    const XmbLists lists = MakeXmbLists(kXmbPlace, true, true, "", {odd, lower});
-    CHECK(lists.saves.find("Odd") != std::string::npos);
-    CHECK(lists.saves.find("Lower") != std::string::npos);
-    CHECK(lists.saves.find("owns_save_0.bat") == std::string::npos);
-    CHECK(lists.saves.find("owns_save_1.bat") == std::string::npos);
+    const XmbLists lists =
+        MakeXmbLists(kXmbPlace, true, true, "", {XmbGame{"Odd", "BLES00001", {odd, lower}}});
+    CHECK(lists.games.find("Odd") != std::string::npos);
+    CHECK(lists.games.find("Lower") != std::string::npos);
+    CHECK(lists.games.find("owns_save_0.bat") == std::string::npos);
+    CHECK(lists.games.find("owns_save_1.bat") == std::string::npos);
     for (const XmbScript &script : lists.scripts)
     {
         CHECK(script.key.compare(0, 10, "owns_save_") != 0);
@@ -1118,12 +1142,14 @@ TEST(XmbSaveOfANameNoConsoleGivesIsOnlyListed)
 TEST(XmbListsWithoutWebmanOnlyListTheSaves)
 {
     const XmbSave save{"BLES00001-SAVE", "Game One", "Save", "", false};
-    const XmbLists lists = MakeXmbLists(kXmbPlace, true, false, "", {save});
+    const XmbLists lists =
+        MakeXmbLists(kXmbPlace, true, false, "", {XmbGame{"Game One", "BLES00001", {save}}});
     CHECK(lists.menu.find("Install webMAN MOD") != std::string::npos);
     CHECK(lists.menu.find("msg_sync_with_server") == std::string::npos);
     CHECK(lists.menu.find("msg_online_storage") != std::string::npos);
     CHECK(lists.saves.find("Game One") != std::string::npos);
-    CHECK(lists.saves.find("/play.ps3") == std::string::npos);
+    CHECK(lists.games.find("Save") != std::string::npos);
+    CHECK(lists.games.find("/play.ps3") == std::string::npos);
     CHECK(lists.scripts.empty());
 }
 

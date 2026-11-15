@@ -402,7 +402,7 @@ Notice importUsbSaves(ConsoleStorage &storage, SyncState &state, const std::stri
 void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::string &savedata,
                 const SaveTarget *target, bool signedIn)
 {
-    std::vector<XmbSave> saves;
+    std::vector<XmbGame> games;
     if (signedIn)
     {
         std::string folderId;
@@ -419,7 +419,7 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
         {
             return;
         }
-        saves = XmbSaves(browser, storage, savedata, ReadDateStyle());
+        games = XmbGames(browser, storage, savedata, ReadDateStyle());
     }
     // A row needs webMAN to run its script, and Cobra to load the plugin that starts the app.
     FileStatus proxy;
@@ -432,7 +432,7 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
     {
         storageUse = ShownStorageUse(used, total);
     }
-    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, rowsRun, storageUse, saves));
+    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, rowsRun, storageUse, games));
 }
 
 /**
