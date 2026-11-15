@@ -6,8 +6,9 @@
 
 namespace
 {
-// The bars show a sync as well as a single save downloaded or an import.
-const char kProgressTitle[] = "Own Storage";
+// The bars show a sync as well as a single save downloaded or an import, each of which a quit or
+// a switch-off would leave half done.
+const char kProgressText[] = "Own Storage\nDo not quit or switch off the PS3.";
 const msgType kProgressType =
     static_cast<msgType>(MSG_DIALOG_MUTE_ON | MSG_DIALOG_DOUBLE_PROGRESSBAR);
 // Only Yes or No ends a question: closing it without an answer would leave the saves in doubt.
@@ -147,7 +148,7 @@ void SyncDialog::ShowProgress()
     {
         return;
     }
-    while (msgDialogOpen2(kProgressType, kProgressTitle, OnProgressButton, &m_cancelled, nullptr) !=
+    while (msgDialogOpen2(kProgressType, kProgressText, OnProgressButton, &m_cancelled, nullptr) !=
            0)
     {
         if (m_quit != 0)
