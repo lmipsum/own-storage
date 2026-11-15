@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "app/Notice.h"
 #include "sync/SaveBrowser.h"
 #include "sync/SyncDisplay.h"
 
@@ -13,6 +14,6 @@
  * @param browser the saves in the cloud, listed already
  * @param display asks the user
  * @param name the save folder's name
- * @return what came of it, as the user reads it
+ * @return what came of it, as the user is told it
  */
-std::string PickXmbSave(SaveBrowser &browser, SyncDisplay &display, const std::string &name);
+Notice PickXmbSave(SaveBrowser &browser, SyncDisplay &display, const std::string &name);

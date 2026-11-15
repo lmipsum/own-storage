@@ -195,34 +195,35 @@ std::string FitInDialog(const std::string &head, const std::string &middle, cons
     return head + CutText(middle, used < kDialogTextBytes ? kDialogTextBytes - used : 0) + tail;
 }
 
-std::string ShownResult(const std::string &name, LoadResult result)
+Notice ShownResult(const std::string &name, LoadResult result)
 {
     switch (result)
     {
     case LoadResult::Loaded:
-        return name + " is downloaded.";
+        return Result(name + " is downloaded.", "{system_plugin:msg_download_complete}");
     case LoadResult::LoadedNotResigned:
-        return name + " is downloaded as it was: it could not be made this user's.";
+        return Result(name + " is downloaded as it was: it could not be made this user's.");
     case LoadResult::AlreadyThere:
-        return name + " is on this PS3 already.";
+        return Result(name + " is on this PS3 already.");
     case LoadResult::Kept:
-        return name + " stays as it is on this PS3.";
+        return Result(name + " stays as it is on this PS3.");
     default:
-        return name + " could not be loaded.";
+        return Problem(name + " could not be loaded.");
     }
 }
 
-std::string ShownResult(const std::string &name, RemoveResult result)
+Notice ShownResult(const std::string &name, RemoveResult result)
 {
     switch (result)
     {
     case RemoveResult::Removed:
-        return name + " is in the Drive trash now.";
+        return Result(name + " is in the Drive trash now.", "{explore_plugin:msg_deleted}");
     case RemoveResult::OnConsole:
-        return name + " is on this PS3; delete it there first, or the next sync uploads it again.";
+        return Result(name +
+                      " is on this PS3; delete it there first, or the next sync uploads it again.");
     case RemoveResult::Kept:
-        return name + " stays in the cloud.";
+        return Result(name + " stays in the cloud.");
     default:
-        return name + " could not be deleted from the cloud.";
+        return Problem(name + " could not be deleted from the cloud.");
     }
 }

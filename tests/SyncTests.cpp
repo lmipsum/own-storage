@@ -6,6 +6,7 @@
 
 #include "app/CloudSaveText.h"
 #include "app/LauncherSetup.h"
+#include "app/Notice.h"
 #include "app/XmbLists.h"
 #include "app/XmbPick.h"
 #include "sync/Clock.h"
@@ -1074,6 +1075,19 @@ TEST(LauncherOnAConsoleWithoutABootListStartsOne)
     CHECK(!without.Exists(kLauncherPlace.bootList));
 }
 
+TEST(NoticesTellResultsAndProblemsApart)
+{
+    // A result without the system's words is shown in the app's own, on one line.
+    CHECK_EQUAL(std::string("The sync was stopped. Try again."),
+                NotificationLine(Result("The sync was stopped.\nTry again.")));
+    CHECK(!Result("Signed in.").problem);
+    CHECK(Problem("Cannot reach Google.").problem);
+    CHECK(ShownResult("BLES00001-SAVE", LoadResult::Failed).problem);
+    CHECK(ShownResult("BLES00001-SAVE", RemoveResult::Failed).problem);
+    CHECK_EQUAL(std::string("{explore_plugin:msg_deleted}"),
+                NotificationLine(ShownResult("BLES00001-SAVE", RemoveResult::Removed)));
+}
+
 TEST(StorageUseReadsInNumbersAlone)
 {
     const unsigned long long gigabyte = 1024ULL * 1024 * 1024;
@@ -1174,18 +1188,21 @@ TEST(XmbPickOffersWhatTheSaveAllows)
         Browsing there(setup, other);
         setup.display.answers = {Answer::No, Answer::No};
         CHECK(PickXmbSave(there.browser, setup.display, "BLES00001-SAVE")
-                  .find("stays in the cloud") != std::string::npos);
+                  .text.find("stays in the cloud") != std::string::npos);
         CHECK(setup.display.Question(0).find("is not on this PS3. Download it?") !=
               std::string::npos);
         setup.display.answers = {Answer::Yes};
-        CHECK_EQUAL(std::string("BLES00001-SAVE is downloaded."),
-                    PickXmbSave(there.browser, setup.display, "BLES00001-SAVE"));
+        const Notice downloaded = PickXmbSave(there.browser, setup.display, "BLES00001-SAVE");
+        CHECK_EQUAL(std::string("BLES00001-SAVE is downloaded."), downloaded.text);
+        // The notification has the system's words for it.
+        CHECK_EQUAL(std::string("{system_plugin:msg_download_complete}"),
+                    NotificationLine(downloaded));
         // On the console as the cloud has it: nothing to ask.
         const std::size_t asked = setup.display.questions.size();
         CHECK_EQUAL(std::string("BLES00001-SAVE is on this PS3 already."),
-                    PickXmbSave(there.browser, setup.display, "BLES00001-SAVE"));
+                    PickXmbSave(there.browser, setup.display, "BLES00001-SAVE").text);
         CHECK_EQUAL(asked, setup.display.questions.size());
-        CHECK(PickXmbSave(there.browser, setup.display, "BLES00009-GONE").find("no longer") !=
+        CHECK(PickXmbSave(there.browser, setup.display, "BLES00009-GONE").text.find("no longer") !=
               std::string::npos);
     }
     // Different on the console: the replace question, as from the menu.
@@ -1193,7 +1210,7 @@ TEST(XmbPickOffersWhatTheSaveAllows)
     Browsing here(setup, setup.console);
     setup.display.answers = {Answer::Yes};
     CHECK_EQUAL(std::string("BLES00001-SAVE is downloaded."),
-                PickXmbSave(here.browser, setup.display, "BLES00001-SAVE"));
+                PickXmbSave(here.browser, setup.display, "BLES00001-SAVE").text);
     CHECK(setup.display.questions.back().find("differs from the cloud's copy") !=
           std::string::npos);
 }
@@ -1323,7 +1340,7 @@ TEST(BrowserSaysWhetherALoadedSaveWasMadeThisUsers)
     other.target = &kHere;
     Browsing browsing(other, other.console);
     CHECK(browsing.browser.Load(kForeignSave) == LoadResult::LoadedNotResigned);
-    CHECK(ShownResult(kForeignSave, LoadResult::LoadedNotResigned).find("as it was") !=
+    CHECK(ShownResult(kForeignSave, LoadResult::LoadedNotResigned).text.find("as it was") !=
           std::string::npos);
 }
 
@@ -1347,8 +1364,9 @@ TEST(BrowserDeletesFromTheCloudOnlyASaveTheConsoleHasNot)
     // Its base went with it, so the next sync has nothing to ask about it.
     setup.Run();
     CHECK_EQUAL(std::size_t(2), setup.display.questions.size());
-    CHECK(ShownResult("BLES00001-SAVE", RemoveResult::OnConsole).find("delete it there first") !=
-          std::string::npos);
+    CHECK(
+        ShownResult("BLES00001-SAVE", RemoveResult::OnConsole).text.find("delete it there first") !=
+        std::string::npos);
 }
 
 TEST(BrowserListsGamesByTrimmedNameAndSavesNewestFirst)

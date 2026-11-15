@@ -1,0 +1,9 @@
+# The VSH's vshtask library, which the plugin imports; the NID is the system's.
+library: vshtask
+module: vshtask
+archive_name: vshtask
+version: 1
+exports:
+  - name: vshtask_notify
+    nid: '0xa02d46e7'
+    signature: 'int vshtask_notify(int arg, const char *message);'

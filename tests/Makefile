@@ -15,7 +15,7 @@ SHARED	:= sync/SyncState.cpp sync/SaveScanner.cpp sync/Sync.cpp sync/Tar.cpp syn
 	   sync/CloudSaves.cpp sync/GameName.cpp sync/SaveArchives.cpp sync/SaveBrowser.cpp \
 	   sync/ParamPfd.cpp sync/Resign.cpp sync/SaveProgress.cpp sync/SaveImport.cpp json/Json.cpp \
 	   app/Files.cpp app/DebugLog.cpp app/CloudSaveText.cpp app/XRegistry.cpp app/XmbLists.cpp \
-	   app/XmbPick.cpp app/LauncherSetup.cpp
+	   app/XmbPick.cpp app/LauncherSetup.cpp app/Notice.cpp
 SOURCES	:= $(wildcard *.cpp) $(addprefix ../source/,$(SHARED))
 # include/ goes first: its headers stand in for the console's.
 CXXFLAGS	:= -std=c++17 -O1 -g -Wall -Wextra -Iinclude -I../source -I$(JSON_C)/include \
