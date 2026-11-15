@@ -33,7 +33,6 @@
 #include <sys/thread.h>
 
 #include <sysutil/sysutil.h>
-#include <sysutil/video.h>
 #include <sysutil/save.h>
 
 #include <net/net.h>
@@ -42,9 +41,6 @@
 #include <atomic>
 #include <optional>
 #include <sstream>
-
-#include <SDL/SDL.h>
-#include <SDL/SDL_ttf.h>
 
 #include "auth/ClientCredentials.h"
 #include "drive/GoogleDrive.h"
@@ -72,7 +68,7 @@
 #include "json/Json.h"
 #include "app/DebugLog.h"
 #include "app/Paths.h"
-#include "ui/Screen.h"
+#include "ui/BlankScreen.h"
 #include "ui/SyncDialog.h"
 #include "ui/TransferBar.h"
 
@@ -89,9 +85,6 @@ const unsigned int backPollMicroseconds = 100000;
 HttpClient http;
 GoogleDeviceAuth googleAuth(http);
 GoogleDrive drive(http, googleAuth, parallelUploads, MakeTransferBar());
-
-SDL_Surface *screen = NULL;
-TTF_Font *Sans;
 
 // The app thread and the main thread both use this flag.
 std::atomic<int> exitapp(0);
@@ -132,9 +125,6 @@ const char signInExpiredMessage[] =
 const char localFileMessage[] =
     "Own Storage cannot write to the PS3 hard disk. Check the free space.";
 const char unknownUserMessage[] = "Own Storage cannot tell which user is logged in.";
-
-int appWidth = 1280;
-int appHeight = 720;
 
 typedef struct
 {
@@ -196,18 +186,21 @@ void stopWith(const std::string &message)
 /**
  * Signs the user in with a code to enter on another device, and keeps the sign-in for the next
  * runs. The user may close the code's message to stop.
- * @param screen says what the app is doing
  * @param profile the user's directory of the app
  * @param config receives the sign-in
  * @return what came of it, as the user is told it
  */
-Notice signIn(Screen &screen, const std::string &profile, Config &config)
+Notice signIn(const std::string &profile, Config &config)
 {
-    screen.ShowMessage("Asking Google for a sign-in code...");
+    syncDialog.ShowWaiting("Asking Google for a sign-in code...");
     const std::string code = googleAuth.Start();
     if (code.empty())
     {
         return Problem("Cannot reach Google. Check the network.");
+    }
+    if (syncDialog.WaitingClosed())
+    {
+        return Result("Sign-in cancelled.");
     }
     if (!syncDialog.ShowWaiting("On a phone or computer, open " + googleAuth.VerificationUrl() +
                                 " and enter this code:\n\n" + code))
@@ -295,10 +288,9 @@ struct RunListing
  * @param listing receives the backup folder
  * @return what came of it, as the user is told it
  */
-Notice runSync(Screen &screen, ConsoleStorage &storage, const std::string &profile,
-               const std::string &savedata, const SaveTarget *target, RunListing &listing)
+Notice runSync(ConsoleStorage &storage, const std::string &profile, const std::string &savedata,
+               const SaveTarget *target, RunListing &listing)
 {
-    screen.ShowMessage("Syncing... Do not quit or switch off the PS3.");
     syncDialog.Open();
     std::string folderId;
     std::size_t notResigned = 0;
@@ -461,13 +453,13 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
  * @param listing receives what the action found in the cloud
  * @return what came of it, as the user is told it; empty for an action this app does not know
  */
-Notice runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &profile,
+Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
                     const std::string &savedata, const SaveTarget *target, Config &config,
                     const std::string &action, RunListing &listing)
 {
     if (action == xmbSignIn)
     {
-        return signIn(screen, profile, config);
+        return signIn(profile, config);
     }
     if (config.refreshToken.empty())
     {
@@ -480,7 +472,7 @@ Notice runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &
     }
     if (action == xmbSync)
     {
-        return runSync(screen, storage, profile, savedata, target, listing);
+        return runSync(storage, profile, savedata, target, listing);
     }
     std::string folderId;
     const bool isSave = action.compare(0, sizeof xmbSave - 1, xmbSave) == 0;
@@ -586,9 +578,8 @@ void setUpLauncher(ConsoleStorage &storage)
  * The app on its own thread: sees that the rows' launcher plugin is in place, finds the logged-in
  * user, does what the XMB's row asked for, lists the saves in the cloud for the XMB anew and goes
  * back to the XMB. Started from its own icon, it only lists them, or signs the user in first.
- * @param screen says what the app is doing behind the system's dialogs
  */
-void runApp(Screen &screen)
+void runApp()
 {
     // It needs no network or user, so a run that stops early does it too.
     ConsoleStorage consoleStorage;
@@ -650,8 +641,8 @@ void runApp(Screen &screen)
     RunListing listing;
     if (!action.empty())
     {
-        tell(consoleStorage, runXmbAction(screen, consoleStorage, profile, savedata, saveTarget,
-                                          config, action, listing));
+        tell(consoleStorage,
+             runXmbAction(consoleStorage, profile, savedata, saveTarget, config, action, listing));
     }
     // A quit from the XMB leaves the lists as they are: the system may end the app any time.
     if (exitapp != 0)
@@ -679,54 +670,34 @@ void runApp(Screen &screen)
     exitapp = 1;
 }
 
-// SDL gives its threads a 16 KB stack, too small for the app's work.
+// The app's work needs more than a small thread's stack.
 const u64 appThreadStackSize = 256 * 1024;
-// The priority SDL gave the thread, so the app shares the console as it did.
+// Below the main thread's, which keeps the frames and the system's dialogs going.
 const s32 appThreadPriority = 1500;
+// How long the main thread waits between the system's callbacks when it has no frames to flip.
+const unsigned int frameMicroseconds = 16667;
 
-/**
- * Runs the app on a thread of its own; see runApp.
- * @param screen the Screen
- */
-void runAppThread(void *screen)
+/** Runs the app on a thread of its own; see runApp. */
+void runAppThread(void *)
 {
-    runApp(*static_cast<Screen *>(screen));
+    runApp();
     sysThreadExit(0);
 }
 
 int main(int argc, char **argv)
 {
-    char FontPath[] = APP_DIR "font.ttf";
-
     netInitialize();
     debugInit();
     networkStart.Start();
 
-    SDL_Init(SDL_INIT_EVERYTHING);
-    TTF_Init();
-
-    videoState state;
-    videoGetState(0, 0, &state);
-    videoResolution res;
-    videoGetResolution(state.displayMode.resolution, &res);
-
-    debugPrintf("Resolution %u,%u\n", res.width, res.height);
-
-    appWidth = res.width;
-    appHeight = res.height;
-
-    screen =
-        SDL_SetVideoMode(appWidth, appHeight, 32, SDL_SWSURFACE | SDL_DOUBLEBUF | SDL_FULLSCREEN);
-
-    Sans = TTF_OpenFont(FontPath, 20.0);
-
     sysUtilRegisterCallback(SYSUTIL_EVENT_SLOT0, sysevent_callback, NULL);
     {
-        // Gone before SDL shuts down, which the screen's surfaces need.
-        Screen appScreen(screen, Sans);
+        // Without frames the system's dialogs do not show, but the app still does its work.
+        BlankScreen blankScreen;
+        const bool shown = blankScreen.Open();
         sys_ppu_thread_t appThread;
         const s32 created =
-            sysThreadCreate(&appThread, runAppThread, &appScreen, appThreadPriority,
+            sysThreadCreate(&appThread, runAppThread, nullptr, appThreadPriority,
                             appThreadStackSize, THREAD_JOINABLE, const_cast<char *>("app"));
         if (created != 0)
         {
@@ -737,14 +708,20 @@ int main(int argc, char **argv)
         while (exitapp == 0)
         {
             sysUtilCheckCallback();
-            appScreen.Draw();
-            SDL_Flip(screen);
+            if (shown)
+            {
+                blankScreen.Flip();
+            }
+            else
+            {
+                sysUsleep(frameMicroseconds);
+            }
         }
 
         debugPrintf("The application exited...%d\n", exitapp.load());
 
-        // The app's thread uses the screen, which goes when this block ends, and may
-        // still open the sync dialog.
+        // Joined before the screen goes and the dialog is closed, so the app's thread cannot open
+        // one after; its waits for the user end once the app is closing.
         if (created == 0)
         {
             u64 status;
@@ -752,11 +729,6 @@ int main(int argc, char **argv)
         }
         syncDialog.Close();
     }
-    SDL_FreeSurface(screen);
-    TTF_CloseFont(Sans);
-
-    TTF_Quit();
-    SDL_Quit();
 
     networkStart.Stop();
     debugClose();
