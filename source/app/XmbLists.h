@@ -86,11 +86,13 @@ const char xmbSave[] = "save:";
  * @param place where the lists are, and how the app is started
  * @param signedIn whether the user is signed in; without it only the sign-in row is listed
  * @param webman whether webMAN MOD is there to run the rows' scripts
+ * @param storageUse how full the Google storage is, shown under the saves in the cloud; empty when
+ *        not known
  * @param saves the saves in the cloud
  * @return the files' content
  */
 XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
-                      const std::vector<XmbSave> &saves);
+                      const std::string &storageUse, const std::vector<XmbSave> &saves);
 
 /**
  * A row's webMAN script.

@@ -158,7 +158,7 @@ std::string Document(const std::string &views)
 } // namespace
 
 XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
-                      const std::vector<XmbSave> &saves)
+                      const std::string &storageUse, const std::vector<XmbSave> &saves)
 {
     XmbLists lists;
     lists.folder = Document(
@@ -198,8 +198,9 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
     {
         addAction("owns_sync", kSyncIcon, kSyncRsc, nullptr, xmbSync);
         addAction("owns_usb", kUsbIcon, kUsbRsc, kUsbInfo, xmbUsbImport);
-        tables += Table("owns_cloud",
-                        Pair("icon_rsc", kDownloadedIcon) + Pair("title_rsc", kCloudSavesRsc));
+        const std::string used = storageUse.empty() ? std::string() : Pair("info", storageUse);
+        tables += Table("owns_cloud", Pair("icon_rsc", kDownloadedIcon) +
+                                          Pair("title_rsc", kCloudSavesRsc) + used);
         items += FolderItem("owns_cloud", ViewSource(place, xmbSavesFile, kSavesView));
         addAction("owns_signout", kAccountIcon, kSignOutRsc, nullptr, xmbSignOut);
     }
