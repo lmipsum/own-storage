@@ -513,6 +513,8 @@ Notice runXmbAction(Screen &screen, ConsoleStorage &storage, const std::string &
     }
     const Notice picked = PickXmbSave(browser, syncDialog, action.substr(sizeof xmbSave - 1));
     // A download leaves the cloud as it was, and the browser knows of a save it moved to the trash.
+    // Telling how each save is on the console reads them, which takes a while.
+    syncDialog.ShowWaiting("Updating the list...");
     listing.games = XmbGames(browser, storage, savedata, ReadDateStyle());
     listing.gamesKnown = true;
     return picked;
@@ -634,7 +636,8 @@ void runApp(Screen &screen)
     }
     // Signed out, the lists need nothing from the cloud; written now, they are this app's even
     // when the user quits at the sign-in, as after an update.
-    if (config.refreshToken.empty())
+    const bool startedSignedOut = config.refreshToken.empty();
+    if (startedSignedOut)
     {
         refreshXmb(consoleStorage, profile, savedata, saveTarget, false, RunListing());
     }
@@ -655,9 +658,19 @@ void runApp(Screen &screen)
     {
         return;
     }
-    screen.ShowMessage("Updating the list...");
-    refreshXmb(consoleStorage, profile, savedata, saveTarget, !config.refreshToken.empty(),
-               listing);
+    // Still signed out, the lists written at the start are the ones.
+    if (!startedSignedOut || !config.refreshToken.empty())
+    {
+        // The back button takes the message away; the lists are written all the same. A save's
+        // row has shown it already.
+        if (!listing.gamesKnown)
+        {
+            syncDialog.ShowWaiting("Updating the list...");
+        }
+        refreshXmb(consoleStorage, profile, savedata, saveTarget, !config.refreshToken.empty(),
+                   listing);
+        syncDialog.Close();
+    }
     if (saveTarget == nullptr)
     {
         tell(consoleStorage, Result(targetUnknownMessage));
