@@ -91,6 +91,9 @@ const char xmbUsbImport[] = "usb";
 const char xmbSignIn[] = "signin";
 const char xmbSignOut[] = "signout";
 const char xmbSave[] = "save:";
+// What a save's options menu asks for, as the launcher plugin writes it; the save's name follows.
+const char xmbInformation[] = "info:";
+const char xmbDelete[] = "delete:";
 
 /**
  * The XMB's lists. Each row starts a webMAN script, which leaves its action for the app and

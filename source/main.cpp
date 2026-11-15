@@ -281,6 +281,8 @@ struct RunListing
     /** Whether games holds the saves in the cloud as they are after the action. */
     bool gamesKnown = false;
     std::vector<XmbGame> games;
+    /** Whether the action changed nothing the lists show, so they need no update. */
+    bool listsCurrent = false;
 };
 
 /**
@@ -475,7 +477,9 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
         return runSync(storage, profile, savedata, target, listing);
     }
     std::string folderId;
-    const bool isSave = action.compare(0, sizeof xmbSave - 1, xmbSave) == 0;
+    XmbSaveAction what = XmbSaveAction::Download;
+    std::string name;
+    const bool isSave = ReadXmbSaveAction(action, what, name);
     if (action != xmbUsbImport && !isSave)
     {
         return Result(std::string());
@@ -503,7 +507,38 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
     {
         return Problem(driveFailureMessage());
     }
-    const Notice picked = PickXmbSave(browser, syncDialog, action.substr(sizeof xmbSave - 1));
+    Notice picked = Result(std::string());
+    bool changed = false;
+    switch (what)
+    {
+    case XmbSaveAction::Download:
+        picked = DownloadXmbSave(browser, name, &changed);
+        break;
+    case XmbSaveAction::Information:
+    {
+        const std::string information = XmbSaveInformation(browser, name);
+        if (information.empty())
+        {
+            // The next update leaves the gone save out.
+            picked = XmbSaveGone(name);
+            changed = true;
+        }
+        else
+        {
+            syncDialog.ShowInfo(information);
+        }
+        break;
+    }
+    case XmbSaveAction::Delete:
+        picked = DeleteXmbSave(browser, name, &changed);
+        break;
+    }
+    // Kept as it was, or only asked about, the save shows as the lists have it.
+    if (!changed)
+    {
+        listing.listsCurrent = true;
+        return picked;
+    }
     // A download leaves the cloud as it was, and the browser knows of a save it moved to the trash.
     // Telling how each save is on the console reads them, which takes a while.
     syncDialog.ShowWaiting("Updating the list...");
@@ -650,7 +685,7 @@ void runApp()
         return;
     }
     // Still signed out, the lists written at the start are the ones.
-    if (!startedSignedOut || !config.refreshToken.empty())
+    if (!listing.listsCurrent && (!startedSignedOut || !config.refreshToken.empty()))
     {
         // The back button takes the message away; the lists are written all the same. A save's
         // row has shown it already.

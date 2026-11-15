@@ -1185,7 +1185,22 @@ TEST(XmbFolderGoesAfterTheSavedDataUtilityOnce)
     CHECK(!AddXmbCategoryEntry(none, entry));
 }
 
-TEST(XmbDownloadQuestionShowsWhatTheRowHasNoRoomFor)
+TEST(XmbSaveActionsAreReadFromTheActionFile)
+{
+    XmbSaveAction what = XmbSaveAction::Delete;
+    std::string name;
+    // The row's own choice downloads, as X does in the Saved Data Utility.
+    CHECK(ReadXmbSaveAction("save:BLES00001-SAVE", what, name));
+    CHECK(what == XmbSaveAction::Download && name == "BLES00001-SAVE");
+    CHECK(ReadXmbSaveAction("info:BLES00001-SAVE", what, name));
+    CHECK(what == XmbSaveAction::Information);
+    CHECK(ReadXmbSaveAction("delete:BLES00001-SAVE", what, name));
+    CHECK(what == XmbSaveAction::Delete);
+    CHECK(!ReadXmbSaveAction("delete:", what, name));
+    CHECK(!ReadXmbSaveAction("sync", what, name));
+}
+
+TEST(XmbSaveInformationShowsWhatTheRowHasNoRoomFor)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -1197,14 +1212,15 @@ TEST(XmbDownloadQuestionShowsWhatTheRowHasNoRoomFor)
     TestConsole other;
     other.MakeDirectories(kSavedata);
     Browsing there(setup, other);
-    setup.display.answers = {Answer::No, Answer::No};
-    PickXmbSave(there.browser, setup.display, "BLES00001-SAVE");
-    CHECK_EQUAL(std::string("Game One (BLES00001):\nLevel 12\n\nBLES00001-SAVE is not on this PS3. "
-                            "Download it?"),
-                setup.display.Question(0));
+    CHECK_EQUAL(std::string("Game One (BLES00001):\nChapter 3\n\nLevel 12"),
+                XmbSaveInformation(there.browser, "BLES00001-SAVE"));
+    // Nothing is downloaded, and nothing asked.
+    CHECK(!other.Exists(std::string(kSavedata) + "/BLES00001-SAVE"));
+    CHECK(setup.display.questions.empty());
+    CHECK(XmbSaveInformation(there.browser, "BLES00009-GONE").empty());
 }
 
-TEST(XmbPickOffersWhatTheSaveAllows)
+TEST(XmbSaveDownloadAsksOnlyToReplaceADifferentCopy)
 {
     Setup setup;
     PutSaves(setup.console);
@@ -1212,34 +1228,54 @@ TEST(XmbPickOffersWhatTheSaveAllows)
     TestConsole other;
     other.MakeDirectories(kSavedata);
     {
-        // Not on the console: first a download, and when that is not wanted, a deletion.
+        // Not on the console: downloaded without a question.
         Browsing there(setup, other);
-        setup.display.answers = {Answer::No, Answer::No};
-        CHECK(PickXmbSave(there.browser, setup.display, "BLES00001-SAVE")
-                  .text.find("stays in the cloud") != std::string::npos);
-        CHECK(setup.display.Question(0).find("is not on this PS3. Download it?") !=
-              std::string::npos);
-        setup.display.answers = {Answer::Yes};
-        const Notice downloaded = PickXmbSave(there.browser, setup.display, "BLES00001-SAVE");
+        const Notice downloaded = DownloadXmbSave(there.browser, "BLES00001-SAVE");
         CHECK_EQUAL(std::string("BLES00001-SAVE is downloaded."), downloaded.text);
+        CHECK(setup.display.questions.empty());
         // The notification has the system's words for it.
         CHECK_EQUAL(std::string("{system_plugin:msg_download_complete}"),
                     NotificationLine(downloaded));
-        // On the console as the cloud has it: nothing to ask.
-        const std::size_t asked = setup.display.questions.size();
+        // On the console as the cloud has it: only said to be there.
         CHECK_EQUAL(std::string("BLES00001-SAVE is on this PS3 already."),
-                    PickXmbSave(there.browser, setup.display, "BLES00001-SAVE").text);
-        CHECK_EQUAL(asked, setup.display.questions.size());
-        CHECK(PickXmbSave(there.browser, setup.display, "BLES00009-GONE").text.find("no longer") !=
+                    DownloadXmbSave(there.browser, "BLES00001-SAVE").text);
+        CHECK(setup.display.questions.empty());
+        CHECK(DownloadXmbSave(there.browser, "BLES00009-GONE").text.find("no longer") !=
               std::string::npos);
     }
-    // Different on the console: the replace question, as from the menu.
+    // Different on the console: the replace question.
     setup.console.Put(std::string(kSave) + "/DATA.BIN", "played here", kChanged);
     Browsing here(setup, setup.console);
     setup.display.answers = {Answer::Yes};
     CHECK_EQUAL(std::string("BLES00001-SAVE is downloaded."),
-                PickXmbSave(here.browser, setup.display, "BLES00001-SAVE").text);
+                DownloadXmbSave(here.browser, "BLES00001-SAVE").text);
     CHECK(setup.display.questions.back().find("differs from the cloud's copy") !=
+          std::string::npos);
+}
+
+TEST(XmbSaveDeleteAsksAndKeepsASaveTheConsoleHas)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    {
+        // On the console too: kept, as the next sync would upload it again.
+        Browsing here(setup, setup.console);
+        CHECK(DeleteXmbSave(here.browser, "BLES00001-SAVE").text.find("is on this PS3") !=
+              std::string::npos);
+        CHECK(setup.display.questions.empty());
+    }
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    Browsing there(setup, other);
+    setup.display.answers = {Answer::No};
+    CHECK(DeleteXmbSave(there.browser, "BLES00001-SAVE").text.find("stays in the cloud") !=
+          std::string::npos);
+    CHECK(setup.display.Question(0).find("Delete it from the cloud?") != std::string::npos);
+    setup.display.answers = {Answer::Yes};
+    CHECK_EQUAL(std::string("BLES00001-SAVE is in the Drive trash now."),
+                DeleteXmbSave(there.browser, "BLES00001-SAVE").text);
+    CHECK(DeleteXmbSave(there.browser, "BLES00001-SAVE").text.find("no longer") !=
           std::string::npos);
 }
 
