@@ -946,7 +946,9 @@ TEST(XmbListsTheSavesWithTheirIcons)
         // On the console with its icon.
         const XmbSave &withIcon = games[1].saves[0];
         CHECK_EQUAL(std::string("Game One"), withIcon.title);
-        CHECK_EQUAL(0u, withIcon.info.find("BLES00001-SAVE\nBLES00001 | "));
+        // The game's ID is on its folder's row, not the save's.
+        CHECK_EQUAL(0u, withIcon.info.find("BLES00001-SAVE\n"));
+        CHECK(withIcon.info.find("BLES00001 |") == std::string::npos);
         CHECK(withIcon.downloaded);
         CHECK_EQUAL(std::string(kSave) + "/ICON0.PNG", withIcon.icon);
     }
