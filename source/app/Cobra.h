@@ -7,5 +7,8 @@
  */
 bool CobraRuns();
 
-/** Restarts the console; it does not return when the system takes the request. */
+/**
+ * Restarts the console so the system does not say at the next start that it was not turned off
+ * properly; it does not return when the system takes the request.
+ */
 void RestartConsole();

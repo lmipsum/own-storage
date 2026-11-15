@@ -5,6 +5,7 @@
 
 #include <ppu-lv2.h>
 #include <stdint.h>
+#include <sys/file.h>
 
 namespace
 {
@@ -14,6 +15,9 @@ const u64 kCobraVersion = 0x7000;
 // sys_sm_shutdown, asked to restart, as webMAN MOD's installer restarts the console.
 const u64 kShutdownSyscall = 379;
 const u64 kRestart = 0x8201;
+// The system writes this as it starts and removes it as it shuts down; found at the next start, it
+// makes the system say it was not turned off properly. webMAN MOD removes it before it restarts.
+const char kRunningMark[] = "/dev_hdd0/tmp/turnoff";
 
 /** Asks Cobra for its version; negative without Cobra. */
 s32 CobraVersion(u32 *version)
@@ -39,6 +43,7 @@ bool CobraRuns()
 
 void RestartConsole()
 {
+    sysFsUnlink(kRunningMark);
     const s32 refused = Shutdown(kRestart);
     debugPrintf("RestartConsole: the system refused with %x\n", static_cast<unsigned int>(refused));
 }
