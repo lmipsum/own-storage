@@ -25,12 +25,9 @@ SaveImport::SaveImport(CloudStorage &cloud, SyncState &state, LocalStorage &stor
 bool SaveImport::Run(const std::vector<std::string> &folders, ImportResult &result)
 {
     result = ImportResult{0, 0, 0, 0};
-    m_display.SetText(ProgressBar::Overall, "Comparing saves...");
-    std::map<std::string, CloudSave> cloudSaves;
-    if (!ListCloudSaves(m_cloud, m_rootFolderId, m_ownSave, m_state, cloudSaves))
-    {
-        return false;
-    }
+    // How long the drives and the cloud's list take is logged, to tell which one to speed up.
+    m_display.SetText(ProgressBar::Overall, "Reading the USB drive...");
+    const std::time_t started = m_clock.Seconds();
     // Every drive is scanned before anything is uploaded, so the saves and their drives' archives
     // outlive the one run of the queue that uploads them all.
     std::deque<SaveArchives> drives;
@@ -42,6 +39,16 @@ bool SaveImport::Run(const std::vector<std::string> &folders, ImportResult &resu
                             m_workDirectory, nullptr);
         saves.push_back(SaveScanner(m_storage, folder, m_ownSave).Scan());
     }
+    const std::time_t read = m_clock.Seconds();
+    debugPrintf("SaveImport::Run: the drives took %ld s\n", static_cast<long>(read - started));
+    m_display.SetText(ProgressBar::Overall, "Listing the saves in the cloud...");
+    std::map<std::string, CloudSave> cloudSaves;
+    if (!ListCloudSaves(m_cloud, m_rootFolderId, m_ownSave, m_state, cloudSaves))
+    {
+        return false;
+    }
+    debugPrintf("SaveImport::Run: the cloud's list took %ld s\n",
+                static_cast<long>(m_clock.Seconds() - read));
     std::vector<std::pair<SaveArchives *, const LocalSave *>> uploads;
     for (std::size_t drive = 0; drive < saves.size(); ++drive)
     {
