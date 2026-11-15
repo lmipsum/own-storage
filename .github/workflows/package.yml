@@ -24,9 +24,58 @@ env:
   # The SDK's SDL source, pinned, rebuilt with patches/sdl-psl1ght-flip-room.patch.
   SDL_URL: https://github.com/zeldin/SDL_PSL1GHT/archive/641a8ca2efa3f775d489daa37878ada1d92c24ab.tar.gz
   SDL_SHA256: dc4a650d4b6afe4ad8c91e2d7d302570503fcf5453d7a183377225a2b3d0f66c
+  # PS3DK builds the XMB's VSH plugin: only its Windows release carries the SDK that builds modules.
+  PS3DK_URL: https://github.com/FirebirdTA01/PS3DK/releases/download/v0.27.0/ps3-sdk-v0.27.0-windows-x86_64.zip
+  PS3DK_SHA256: 4557df1c9535d1d1e5703c62a792ae68ba278a8d03503890827abc00ef83bc62
+  PS3DK_ROOT: ps3-sdk-v0.27.0-windows-x86_64
 
 jobs:
+  plugin:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - id: ps3dk
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ps3dk
+          key: ps3dk-${{ env.PS3DK_SHA256 }}
+      - name: PS3DK
+        if: steps.ps3dk.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          curl -fsSL "$PS3DK_URL" -o ps3dk.zip
+          echo "$PS3DK_SHA256  ps3dk.zip" | sha256sum -c -
+          mkdir ps3dk
+          # Windows' own tar reads zip archives.
+          /c/Windows/System32/tar.exe -xf ps3dk.zip -C ps3dk
+          rm ps3dk.zip
+      - name: Build
+        shell: pwsh
+        run: |
+          python -m pip install --quiet ninja==1.13.2
+          $env:PS3DK = Join-Path $PWD "ps3dk\$env:PS3DK_ROOT"
+          $env:PS3DEV = $env:PS3DK.Replace('\', '/')
+          $env:PSL1GHT = $env:PS3DEV
+          $env:PATH = "$env:PS3DK\bin;$env:PS3DK\ppu\bin;$env:PATH"
+          cmake -S plugin/launcher -B build/launcher -G Ninja `
+            -DCMAKE_TOOLCHAIN_FILE="$env:PS3DK\cmake\ps3-ppu-toolchain.cmake"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build/launcher
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: owns-launcher
+          path: build/launcher/owns_launcher.sprx
+          if-no-files-found: error
+          retention-days: 1
+
   package:
+    needs: plugin
     runs-on: ubuntu-24.04
     # The SDK is built on Ubuntu 24.04, and its tools need that system's libraries.
     container: ubuntu:24.04@sha256:2198e4c65076e9cb0b3d695219df667c0e3b0072da64ca3c2648aca17dcecaf5
@@ -65,6 +114,11 @@ jobs:
           export PATH="$PS3DEV/ppu/bin:$PATH"
           ./script.sh
           make -j"$(nproc)" install
+      # The package carries the plugin, which the app installs.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: owns-launcher
+          path: package/USRDIR/plugins
       - name: Build
         env:
           LOG_HOST: ${{ inputs.log_host }}

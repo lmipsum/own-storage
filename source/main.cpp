@@ -52,11 +52,13 @@
 #include "app/Config.h"
 #include "auth/GoogleDeviceAuth.h"
 #include "net/HttpClient.h"
+#include "app/Cobra.h"
 #include "app/ConsoleStorage.h"
 #include "app/ConsoleIdentity.h"
 #include "app/ConsoleSettings.h"
 #include "app/NetworkStart.h"
 #include "app/Profile.h"
+#include "app/LauncherSetup.h"
 #include "app/XmbInstall.h"
 #include "app/XmbPick.h"
 #include "sync/Clock.h"
@@ -99,11 +101,18 @@ NetworkStart networkStart(exitapp);
 const char targetUnknownMessage[] = "This PS3's or the user's ids cannot be read, so saves of "
                                     "other users are downloaded as they are.";
 
-// Where the XMB's lists go, beside webMAN MOD's own, and how their rows start the app.
+// Where the XMB's lists go, beside webMAN MOD's own, and how their rows start the app: the launch
+// request is the file plugin/launcher waits for.
 const XmbPlace xmbPlace{"/dev_hdd0/xmlhost/game_plugin/", APP_DIR "xmb/", APP_DIR "xmb_action.txt",
-                        APP_ID};
+                        "/dev_hdd0/tmp/owns_launch"};
 // webMAN MOD's proxy, which runs what the XMB's rows ask for.
 const char webmanProxy[] = "/dev_hdd0/tmp/wm_res/wm_proxy.sprx";
+// The plugin the rows start the app through, which Cobra loads as the console starts.
+const LauncherPlace launcherPlace{APP_DIR "plugins/owns_launcher.sprx",
+                                  "/dev_hdd0/plugins/owns_launcher.sprx",
+                                  "/dev_hdd0/boot_plugins.txt", APP_DIR "boot_plugins.bak"};
+// Kept once the user has been told the console lacks Cobra, so it is told once.
+const char cobraMissingTold[] = APP_DIR "cobra_missing.txt";
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then sync again.";
@@ -399,9 +408,10 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
         }
         saves = XmbSaves(browser, storage, savedata, ReadDateStyle());
     }
+    // A row needs webMAN to run its script, and Cobra to load the plugin that starts the app.
     FileStatus proxy;
-    const bool webman = storage.Status(webmanProxy, proxy);
-    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, webman, saves));
+    const bool rowsRun = storage.Status(webmanProxy, proxy) && CobraRuns();
+    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, rowsRun, saves));
 }
 
 /**
@@ -460,13 +470,46 @@ std::string runXmbAction(Screen &screen, ConsoleStorage &storage, const std::str
 }
 
 /**
- * The app on its own thread: finds the logged-in user, does what the XMB's row asked for, lists
- * the saves in the cloud for the XMB anew and goes back to the XMB. Started from its own icon, it
- * only lists them, or signs the user in first.
+ * Puts the plugin the XMB's rows start the app through in place, and offers to restart the console
+ * when it changed, as only a start loads it. Without Cobra nothing loads it, which the user is told
+ * once.
+ * @param storage the console's hard disk
+ */
+void setUpLauncher(ConsoleStorage &storage)
+{
+    if (!CobraRuns())
+    {
+        FileStatus told;
+        if (!storage.Status(cobraMissingTold, told))
+        {
+            syncDialog.ShowInfo("The XMB rows of Own Storage need a CFW with Cobra.");
+            storage.Write(cobraMissingTold, "");
+        }
+        return;
+    }
+    if (SetUpLauncher(storage, launcherPlace) == LauncherSetup::Changed &&
+        syncDialog.Ask("Own Storage has set up its XMB helper. Restart the PS3 now?") ==
+            Answer::Yes)
+    {
+        RestartConsole();
+    }
+}
+
+/**
+ * The app on its own thread: sees that the rows' launcher plugin is in place, finds the logged-in
+ * user, does what the XMB's row asked for, lists the saves in the cloud for the XMB anew and goes
+ * back to the XMB. Started from its own icon, it only lists them, or signs the user in first.
  * @param screen says what the app is doing behind the system's dialogs
  */
 void runApp(Screen &screen)
 {
+    // It needs no network or user, so a run that stops early does it too.
+    ConsoleStorage consoleStorage;
+    setUpLauncher(consoleStorage);
+    if (exitapp != 0)
+    {
+        return;
+    }
     if (!networkStart.Connect())
     {
         stopWith("Own Storage needs a network connection.");
@@ -484,7 +527,6 @@ void runApp(Screen &screen)
     }
     googleAuth.SetClient(client);
 
-    ConsoleStorage consoleStorage;
     const std::optional<std::string> user = FindLoggedInUser(consoleStorage);
     if (!user)
     {

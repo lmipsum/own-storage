@@ -7,3 +7,6 @@ build/
 
 # make -C tests output
 tests/run-tests
+
+# The VSH plugin, which the package job builds into package/USRDIR/plugins
+package/USRDIR/plugins/

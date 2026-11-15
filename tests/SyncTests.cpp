@@ -5,6 +5,7 @@
 #include "TestConsole.h"
 
 #include "app/CloudSaveText.h"
+#include "app/LauncherSetup.h"
 #include "app/XmbLists.h"
 #include "app/XmbPick.h"
 #include "sync/Clock.h"
@@ -919,7 +920,7 @@ TEST(BrowserAsksBeforeItReplacesADifferentSave)
 namespace
 {
 const XmbPlace kXmbPlace{"/dev_hdd0/xmlhost/game_plugin/", "/dev_hdd0/game/OWNS00001/USRDIR/xmb/",
-                         "/dev_hdd0/game/OWNS00001/USRDIR/act.txt", "OWNS00001"};
+                         "/dev_hdd0/game/OWNS00001/USRDIR/act.txt", "/dev_hdd0/tmp/launch"};
 const DateStyle kXmbDates{DateOrder::DayMonthYear, false, 0};
 } // namespace
 
@@ -951,7 +952,7 @@ TEST(XmbListsTheSavesWithTheirIcons)
     CHECK(saves.size() == 2 && !saves[1].downloaded && saves[1].icon.empty());
 }
 
-TEST(XmbListsRowsThatStartTheAppThroughWebman)
+TEST(XmbListsRowsThatStartTheAppThroughTheLauncher)
 {
     const XmbLists signedOut = MakeXmbLists(kXmbPlace, false, true, {});
     CHECK(signedOut.menu.find("Sign in") != std::string::npos);
@@ -992,13 +993,71 @@ TEST(XmbListsRowsThatStartTheAppThroughWebman)
     CHECK(saveScript);
     CHECK_EQUAL(std::string("del /dev_hdd0/game/OWNS00001/USRDIR/act.txt\n"
                             "logfile /dev_hdd0/game/OWNS00001/USRDIR/act.txt\n"
-                            "log sync\ndel /dev_hdd0/tmp/wm_request\n"
-                            "logfile /dev_hdd0/tmp/wm_request\nlog /play.ps3?OWNS00001\n"),
+                            "log sync\ndel /dev_hdd0/tmp/launch\n"
+                            "logfile /dev_hdd0/tmp/launch\nlog launch\n"),
                 XmbScriptText(kXmbPlace, XmbScript{"owns_sync", xmbSync}));
     const std::string saveScriptText =
         XmbScriptText(kXmbPlace, XmbScript{"owns_save_0", "save:BLES00001-SAVE"});
     CHECK(saveScriptText.find("\nlog save:BLES00001-SAVE\n") != std::string::npos);
-    CHECK(saveScriptText.find("\nlog /play.ps3?OWNS00001\n") != std::string::npos);
+    CHECK(saveScriptText.find("\nlogfile /dev_hdd0/tmp/launch\nlog launch\n") != std::string::npos);
+}
+
+namespace
+{
+const LauncherPlace kLauncherPlace{"/dev_hdd0/game/OWNS00001/USRDIR/plugins/launcher.sprx",
+                                   "/dev_hdd0/plugins/launcher.sprx", "/dev_hdd0/boot_plugins.txt",
+                                   "/dev_hdd0/game/OWNS00001/USRDIR/boot_plugins.bak"};
+} // namespace
+
+TEST(BootListGetsThePluginLineOnceAndKeepsTheOthers)
+{
+    const std::string webman = "/dev_hdd0/plugins/webftp_server.sprx";
+    CHECK_EQUAL(std::string("/p.sprx\r\n"), WithBootLine("", "/p.sprx"));
+    // A last line without its end is ended before the plugin's goes after it.
+    CHECK_EQUAL(webman + "\r\n/p.sprx\r\n", WithBootLine(webman, "/p.sprx"));
+    CHECK_EQUAL(webman + "\n/p.sprx\r\n", WithBootLine(webman + "\n", "/p.sprx"));
+    // A list that names the plugin already, whatever its line end, stays as it is.
+    const std::string listed = "/p.sprx \r\n" + webman;
+    CHECK_EQUAL(listed, WithBootLine(listed, "/p.sprx"));
+    CHECK_EQUAL(webman + "\r\n/p.sprx.old\r\n/p.sprx\r\n",
+                WithBootLine(webman + "\r\n/p.sprx.old\r\n", "/p.sprx"));
+}
+
+TEST(LauncherIsInstalledOnceAndAgainWhenTheAppBringsAnother)
+{
+    TestConsole console;
+    const std::string webman = "/dev_hdd0/plugins/webftp_server.sprx\r\n";
+    console.Put(kLauncherPlace.bundled, "plugin 1", kWritten);
+    console.Put(kLauncherPlace.bootList, webman, kWritten);
+    CHECK(SetUpLauncher(console, kLauncherPlace) == LauncherSetup::Changed);
+    std::string content;
+    CHECK(console.Read(kLauncherPlace.installed, content) && content == "plugin 1");
+    CHECK(console.Read(kLauncherPlace.bootList, content) &&
+          content == webman + "/dev_hdd0/plugins/launcher.sprx\r\n");
+    // The list as it was is kept before the plugin's line is added.
+    CHECK(console.Read(kLauncherPlace.bootListBackup, content) && content == webman);
+    CHECK(SetUpLauncher(console, kLauncherPlace) == LauncherSetup::Unchanged);
+    // An update brings another plugin; the backup stays the list from before the first.
+    console.Put(kLauncherPlace.bundled, "plugin 2", kWritten);
+    console.Put(kLauncherPlace.bootList, webman, kWritten);
+    CHECK(SetUpLauncher(console, kLauncherPlace) == LauncherSetup::Changed);
+    CHECK(console.Read(kLauncherPlace.installed, content) && content == "plugin 2");
+    CHECK(console.Read(kLauncherPlace.bootListBackup, content) && content == webman);
+}
+
+TEST(LauncherOnAConsoleWithoutABootListStartsOne)
+{
+    TestConsole console;
+    console.Put(kLauncherPlace.bundled, "plugin", kWritten);
+    CHECK(SetUpLauncher(console, kLauncherPlace) == LauncherSetup::Changed);
+    std::string content;
+    CHECK(console.Read(kLauncherPlace.bootList, content) &&
+          content == "/dev_hdd0/plugins/launcher.sprx\r\n");
+    CHECK(!console.Exists(kLauncherPlace.bootListBackup));
+    // An app built without the plugin leaves everything as it is.
+    TestConsole without;
+    CHECK(SetUpLauncher(without, kLauncherPlace) == LauncherSetup::Failed);
+    CHECK(!without.Exists(kLauncherPlace.bootList));
 }
 
 TEST(XmbSaveOfANameNoConsoleGivesIsOnlyListed)

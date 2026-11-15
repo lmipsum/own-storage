@@ -1,0 +1,12 @@
+# The VSH's paf library, which the plugin imports; the NIDs are the system's.
+library: paf
+module: paf
+archive_name: paf
+version: 1
+exports:
+  - name: View_Find
+    nid: '0xf21655f3'
+    signature: 'int View_Find(const char *name);'
+  - name: plugin_GetInterface
+    nid: '0x23afb290'
+    signature: 'void *plugin_GetInterface(int view, int id);'
