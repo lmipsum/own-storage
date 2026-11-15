@@ -28,7 +28,7 @@ struct XmbSave
     std::string name;
     /** The game's title. */
     std::string title;
-    /** The save's subtitle; below it the game's ID, when the save was stored, and its size. */
+    /** The save's subtitle; below it when the save was stored, and its size. */
     std::string info;
     /** The save's own icon; empty when the console has none of it to show. */
     std::string icon;

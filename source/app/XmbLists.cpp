@@ -317,10 +317,11 @@ std::vector<XmbGame> XmbGames(SaveBrowser &browser, const LocalStorage &storage,
             FileStatus iconStatus;
             XmbSave save;
             save.name = name;
-            // As the Saved Data Utility shows a save: the subtitle on a line of its own.
+            // As the Saved Data Utility shows a save: the subtitle on a line of its own. The game's
+            // ID is on its folder's row.
             save.title = game.name;
             save.info = (cloudSave.texts.subtitle.empty() ? name : cloudSave.texts.subtitle) +
-                        "\n" + game.titleId + " | " + ShownTime(cloudSave.modified, style) + "   " +
+                        "\n" + ShownTime(cloudSave.modified, style) + "   " +
                         ShownSize(cloudSave.size);
             save.downloaded = browser.Status(name) == SaveStatus::Same;
             save.icon = save.downloaded && storage.Status(icon, iconStatus) ? icon : std::string();
