@@ -19,7 +19,8 @@
 bool InstallXmbFolder(LocalStorage &storage, const XmbPlace &place);
 
 /**
- * Writes the XMB's lists, and the rows' webMAN scripts in place of those of the last lists.
+ * Writes the XMB's lists in the order they come, and the rows' webMAN scripts in place of those of
+ * the last lists.
  * @param storage the console's hard disk
  * @param place where the lists go
  * @param lists the files' content

@@ -46,8 +46,8 @@ Notice DownloadXmbSave(SaveBrowser &browser, const std::string &name, bool *chan
 std::string XmbSaveInformation(SaveBrowser &browser, const std::string &name);
 
 /**
- * Moves a save to the Drive trash after the browser asks; one the console has too is kept, as the
- * next sync would upload it again.
+ * Moves a save to the Drive trash, as the user confirmed on the XMB; one the console has too is
+ * kept, as the next sync would upload it again.
  * @param browser the saves in the cloud, listed already
  * @param name the save folder's name
  * @param changed receives whether the save left the cloud, which the XMB's lists then show; may
@@ -58,3 +58,41 @@ Notice DeleteXmbSave(SaveBrowser &browser, const std::string &name, bool *change
 
 /** What the user is told of a save the XMB still lists but the cloud no longer has. */
 Notice XmbSaveGone(const std::string &name);
+
+/** What the XMB asks of a game's saves in the cloud, as its options menu leaves it. */
+enum class XmbGameAction
+{
+    DownloadAll,
+    DeleteAll,
+};
+
+/**
+ * Reads a game's action as the action file holds it.
+ * @param action the action file's content
+ * @param what receives what is asked
+ * @param titleId receives the game's ID
+ * @return false when the action is not one of a game
+ */
+bool ReadXmbGameAction(const std::string &action, XmbGameAction &what, std::string &titleId);
+
+/**
+ * Downloads every save of a game in the cloud as DownloadXmbSave() does each: only a different
+ * copy on the console is asked about.
+ * @param browser the saves in the cloud, listed already
+ * @param titleId the game's ID
+ * @param changed receives whether the console's saves changed, which the XMB's lists then show;
+ *        may be null
+ * @return how many of the game's saves the console has now
+ */
+Notice DownloadXmbGame(SaveBrowser &browser, const std::string &titleId, bool *changed = nullptr);
+
+/**
+ * Moves every save of a game in the cloud to the Drive trash, as the user confirmed on the XMB;
+ * those the console has too are kept, as the next sync would upload them again.
+ * @param browser the saves in the cloud, listed already
+ * @param titleId the game's ID
+ * @param changed receives whether a save left the cloud, which the XMB's lists then show; may be
+ *        null
+ * @return how many saves went, and how many were kept
+ */
+Notice DeleteXmbGame(SaveBrowser &browser, const std::string &titleId, bool *changed = nullptr);

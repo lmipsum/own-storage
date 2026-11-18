@@ -5,6 +5,8 @@
 #include "app/XmbLists.h"
 #include "sync/GameName.h"
 
+#include <sstream>
+
 namespace
 {
 /** Whether an action starts with a prefix, and the rest of it then. */
@@ -26,6 +28,20 @@ void SetChanged(bool *changed, bool value)
     {
         *changed = value;
     }
+}
+
+/** A game in the cloud by its ID; false when the cloud has no save of it any more. */
+bool FindGame(const SaveBrowser &browser, const std::string &titleId, CloudGame &found)
+{
+    for (const CloudGame &game : browser.Games())
+    {
+        if (game.titleId == titleId)
+        {
+            found = game;
+            return true;
+        }
+    }
+    return false;
 }
 } // namespace
 
@@ -73,7 +89,7 @@ std::string XmbSaveInformation(SaveBrowser &browser, const std::string &name)
     const SaveTexts &texts = browser.Save(name).texts;
     const std::string head = GameLabel(TitleId(name), texts.title) + ":\n";
     std::string body = texts.subtitle.empty() ? name : texts.subtitle;
-    const std::string detail = texts.detail.substr(0, texts.detail.find_last_not_of('\n') + 1);
+    const std::string detail = ShownDetail(texts.detail);
     if (!detail.empty())
     {
         body += "\n\n" + detail;
@@ -88,7 +104,7 @@ Notice DeleteXmbSave(SaveBrowser &browser, const std::string &name, bool *change
         SetChanged(changed, true);
         return XmbSaveGone(name);
     }
-    // The browser asks before it deletes, and keeps a save the console has too.
+    // The browser keeps a save the console has too.
     const RemoveResult result = browser.Remove(name);
     SetChanged(changed, result == RemoveResult::Removed);
     return ShownResult(name, result);
@@ -97,4 +113,86 @@ Notice DeleteXmbSave(SaveBrowser &browser, const std::string &name, bool *change
 Notice XmbSaveGone(const std::string &name)
 {
     return Result(name + " is no longer in the cloud.");
+}
+
+bool ReadXmbGameAction(const std::string &action, XmbGameAction &what, std::string &titleId)
+{
+    if (TakePrefix(action, xmbDownloadAll, titleId))
+    {
+        what = XmbGameAction::DownloadAll;
+        return true;
+    }
+    if (TakePrefix(action, xmbDeleteAll, titleId))
+    {
+        what = XmbGameAction::DeleteAll;
+        return true;
+    }
+    return false;
+}
+
+Notice DownloadXmbGame(SaveBrowser &browser, const std::string &titleId, bool *changed)
+{
+    CloudGame game;
+    if (!FindGame(browser, titleId, game))
+    {
+        SetChanged(changed, true);
+        return XmbSaveGone(titleId);
+    }
+    std::size_t onConsole = 0;
+    bool loaded = false;
+    bool notResigned = false;
+    for (const std::string &name : game.saves)
+    {
+        const LoadResult result = browser.Load(name);
+        const bool loadedNow =
+            result == LoadResult::Loaded || result == LoadResult::LoadedNotResigned;
+        loaded = loaded || loadedNow;
+        notResigned = notResigned || result == LoadResult::LoadedNotResigned;
+        onConsole += loadedNow || result == LoadResult::AlreadyThere ? 1 : 0;
+    }
+    SetChanged(changed, loaded);
+    std::ostringstream text;
+    text << "Downloaded " << onConsole << " of " << SaveCount(game.saves.size()) << " of "
+         << game.label << ".";
+    // As for a single save: the game may refuse a save that is not the user's.
+    if (notResigned)
+    {
+        text << " Some could not be made this user's.";
+    }
+    return Result(text.str());
+}
+
+Notice DeleteXmbGame(SaveBrowser &browser, const std::string &titleId, bool *changed)
+{
+    CloudGame game;
+    if (!FindGame(browser, titleId, game))
+    {
+        SetChanged(changed, true);
+        return XmbSaveGone(titleId);
+    }
+    std::size_t removed = 0;
+    std::size_t kept = 0;
+    for (const std::string &name : game.saves)
+    {
+        switch (browser.Remove(name))
+        {
+        case RemoveResult::Removed:
+            ++removed;
+            break;
+        case RemoveResult::OnConsole:
+            ++kept;
+            break;
+        default:
+            break;
+        }
+    }
+    SetChanged(changed, removed > 0);
+    std::ostringstream text;
+    text << SaveCount(removed) << " of " << game.label << " moved to the Drive trash";
+    if (kept > 0)
+    {
+        text << "; " << kept << " on this PS3 kept";
+    }
+    text << ".";
+    return Result(text.str());
 }

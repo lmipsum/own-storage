@@ -56,8 +56,6 @@ enum class RemoveResult
     Removed,
     /** The console has it, so the next sync would only upload it again. */
     OnConsole,
-    /** The user kept it. */
-    Kept,
     Failed
 };
 
@@ -72,8 +70,7 @@ class SaveBrowser
      * @param cloud where the backup is kept
      * @param state the base of every save
      * @param storage the console's hard disk
-     * @param display what the user sees of a download, and asks before a save is replaced or
-     * deleted
+     * @param display what the user sees of a download, and asks before a save is replaced
      * @param rootFolderId the cloud id of the Own Storage folder
      * @param savedata the user's savedata directory
      * @param ownSave a save folder of the app itself, which is never backed up
@@ -109,8 +106,8 @@ class SaveBrowser
      */
     LoadResult Load(const std::string &name);
     /**
-     * Moves a save from Games() to the cloud's trash, once the user says so, and only when the
-     * console does not have it; its base goes with it.
+     * Moves a save from Games() to the cloud's trash, only when the console does not have it; its
+     * base goes with it. The user has confirmed it on the XMB already, so it asks nothing.
      */
     RemoveResult Remove(const std::string &name);
 

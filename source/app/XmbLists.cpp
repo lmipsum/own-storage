@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/XmbLists.h"
 
+#include "sync/GameName.h"
+
+#include <algorithm>
 #include <sstream>
 
 namespace
@@ -9,6 +12,7 @@ namespace
 const char kFolderView[] = "owns_folder_view";
 const char kMenuView[] = "owns_menu_view";
 const char kSavesView[] = "owns_saves_view";
+const char kCloudKey[] = "owns_cloud";
 const char kGameKeyPrefix[] = "owns_game_";
 const char kGameViewSuffix[] = "_view";
 const char kSaveKeyPrefix[] = "owns_save_";
@@ -41,12 +45,47 @@ const char kSaveIcon[] = "ICON0.PNG";
 // The longest name the console gives a save folder.
 const std::size_t kSaveNameMaxBytes = 31;
 
+// Every view; a view's letters, as the launcher plugin writes them, are at its sort's and group's
+// place in these.
+const XmbSort kSorts[] = {XmbSort::DateNewest, XmbSort::DateOldest, XmbSort::Title,
+                          XmbSort::Subtitle};
+const XmbGroup kGroups[] = {XmbGroup::ByTitle, XmbGroup::All};
+const char kSortLetters[] = "dots";
+const char kGroupLetters[] = "ta";
+const XmbView kDefaultView{XmbSort::DateNewest, XmbGroup::ByTitle};
+// The variants' names: a stem, the view's letters and the suffix make them as long as the files of
+// the lists' own names.
+const char kMenuVariantStem[] = "owns_m_";
+const char kSavesVariantStem[] = "owns_sa_";
+const char kGamesVariantStem[] = "owns_ga_";
+const char kListSuffix[] = ".xml";
+// The rows' index: what tells a game's row from a save's, and what separates the fields.
+const char kGameRecord[] = "G";
+const char kSaveRecord[] = "S";
+const char kFieldSeparator = '\t';
+
 /** A count in digits; the console's C++ library offers no std::to_string. */
 std::string Digits(std::size_t count)
 {
     std::ostringstream text;
     text << count;
     return text.str();
+}
+
+char SortLetter(XmbSort sort)
+{
+    return kSortLetters[static_cast<std::size_t>(sort)];
+}
+
+char GroupLetter(XmbGroup group)
+{
+    return kGroupLetters[static_cast<std::size_t>(group)];
+}
+
+/** A variant's name: its stem, the view's letters and the suffix. */
+std::string VariantName(const char *stem, XmbSort sort, XmbGroup group)
+{
+    return stem + std::string(1, SortLetter(sort)) + GroupLetter(group) + kListSuffix;
 }
 
 /**
@@ -98,10 +137,10 @@ std::string Escaped(const std::string &text)
     return escaped;
 }
 
-/** How many saves a game has in the cloud, as its folder's description tells it. */
-std::string SaveCount(std::size_t count)
+/** A game folder's description: its ID and how many saves it has. */
+std::string GameInfo(const XmbGame &game)
 {
-    return Digits(count) + (count == 1 ? " save" : " saves");
+    return game.titleId + " | " + SaveCount(game.saves.size());
 }
 
 /** A pair of an attribute table. */
@@ -118,7 +157,7 @@ std::string IconPair(const std::string &file, const char *systemIcon)
 }
 
 /** Where the XMB reads a view of a list file. */
-std::string ViewSource(const XmbPlace &place, const char *file, const std::string &view)
+std::string ViewSource(const XmbPlace &place, const std::string &file, const std::string &view)
 {
     return "xmb://localhost" + place.directory + file + "#" + view;
 }
@@ -164,20 +203,26 @@ std::string Document(const std::string &views)
            "</XMBML>\n";
 }
 
-} // namespace
-
-XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
-                      const std::string &storageUse, const std::vector<XmbGame> &games)
+/**
+ * The menu's rows but the folder of the saves in the cloud, which opens another file in each view.
+ * The folder comes after the row that asks for webMAN and before the rows that act.
+ */
+struct MenuRows
 {
-    XmbLists lists;
-    lists.folder = Document(
-        View(kFolderView,
-             Table("owns_folder", Pair("icon_rsc", kInCloudIcon) + Pair("title", kFolderTitle) +
-                                      Pair("info_rsc", kFolderInfoRsc)),
-             FolderItem("owns_folder", ViewSource(place, xmbMenuFile, kMenuView))));
-
     std::string tables;
-    std::string items;
+    std::string leadingItems;
+    bool cloud;
+    std::string actionItems;
+};
+
+/**
+ * The menu's rows.
+ * @param scripts receives the scripts of the rows that act
+ */
+MenuRows MakeMenuRows(const XmbPlace &place, bool signedIn, bool webman,
+                      const std::string &storageUse, std::vector<XmbScript> &scripts)
+{
+    MenuRows rows{std::string(), std::string(), signedIn, std::string()};
     // A row's title is a system text; its description, when it has one, is the app's own.
     const auto addAction = [&](const char *key, const char *icon, const char *title,
                                const char *info, const char *action)
@@ -187,69 +232,329 @@ XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
             return;
         }
         const std::string described = info != nullptr ? Pair("info", info) : std::string();
-        tables += Table(key, Pair("icon_rsc", icon) + Pair("title_rsc", title) + described +
-                                 ActionPairs(place, key));
-        items += ActionItem(key);
-        lists.scripts.push_back(XmbScript{key, action});
+        rows.tables += Table(key, Pair("icon_rsc", icon) + Pair("title_rsc", title) + described +
+                                      ActionPairs(place, key));
+        rows.actionItems += ActionItem(key);
+        scripts.push_back(XmbScript{key, action});
     };
     if (!webman)
     {
-        tables += Table("owns_webman",
-                        Pair("icon_rsc", kInCloudIcon) + Pair("title", "Install webMAN MOD") +
-                            Pair("info", "The rows here need it to start Own Storage."));
-        items += ActionItem("owns_webman");
+        rows.tables += Table("owns_webman",
+                             Pair("icon_rsc", kInCloudIcon) + Pair("title", "Install webMAN MOD") +
+                                 Pair("info", "The rows here need it to start Own Storage."));
+        rows.leadingItems += ActionItem("owns_webman");
     }
     if (!signedIn)
     {
         addAction("owns_signin", kAccountIcon, kSignInRsc, nullptr, xmbSignIn);
+        return rows;
     }
-    else
-    {
-        const std::string used = storageUse.empty() ? std::string() : Pair("info", storageUse);
-        tables += Table("owns_cloud", Pair("icon_rsc", kDownloadedIcon) +
-                                          Pair("title_rsc", kCloudSavesRsc) + used);
-        items += FolderItem("owns_cloud", ViewSource(place, xmbSavesFile, kSavesView));
-        addAction("owns_sync", kSyncIcon, kSyncRsc, nullptr, xmbSync);
-        addAction("owns_usb", kUsbIcon, kUsbRsc, kUsbInfo, xmbUsbImport);
-        addAction("owns_signout", kAccountIcon, kSignOutRsc, nullptr, xmbSignOut);
-    }
-    lists.menu = Document(View(kMenuView, tables, items));
+    const std::string used = storageUse.empty() ? std::string() : Pair("info", storageUse);
+    rows.tables += Table(kCloudKey, Pair("icon_rsc", kDownloadedIcon) +
+                                        Pair("title_rsc", kCloudSavesRsc) + used);
+    addAction("owns_sync", kSyncIcon, kSyncRsc, nullptr, xmbSync);
+    addAction("owns_usb", kUsbIcon, kUsbRsc, kUsbInfo, xmbUsbImport);
+    addAction("owns_signout", kAccountIcon, kSignOutRsc, nullptr, xmbSignOut);
+    return rows;
+}
 
-    tables.clear();
-    items.clear();
-    std::string gameViews;
-    // The saves' keys run on from game to game, as each names a script of the one folder.
+/** The menu's file, whose folder of the saves in the cloud opens a file of them. */
+std::string MenuDocument(const XmbPlace &place, const MenuRows &rows, const std::string &savesFile)
+{
+    const std::string cloud = rows.cloud
+                                  ? FolderItem(kCloudKey, ViewSource(place, savesFile, kSavesView))
+                                  : std::string();
+    return Document(View(kMenuView, rows.tables, rows.leadingItems + cloud + rows.actionItems));
+}
+
+/** A save's row, and the key it has in every view. */
+struct SaveRow
+{
+    const XmbSave *save;
+    std::string key;
+};
+
+/** A game's folder row, and its saves' rows, newest first. */
+struct GameRow
+{
+    const XmbGame *game;
+    std::string key;
+    std::vector<SaveRow> saves;
+};
+
+/**
+ * Keys every row once, the saves' running on from game to game as each names a script of the one
+ * folder: in the order the games come, by title, and their saves, newest first.
+ */
+std::vector<GameRow> KeyRows(const std::vector<XmbGame> &games)
+{
+    std::vector<GameRow> rows;
     std::size_t saveNumber = 0;
-    for (std::size_t g = 0; signedIn && g < games.size(); ++g)
+    for (std::size_t g = 0; g < games.size(); ++g)
     {
-        const XmbGame &game = games[g];
-        const std::string gameKey = kGameKeyPrefix + Digits(g);
-        const std::string gameView = gameKey + kGameViewSuffix;
-        tables +=
-            Table(gameKey, Pair("icon_rsc", kDownloadedIcon) + Pair("title", game.title) +
-                               Pair("info", game.titleId + " | " + SaveCount(game.saves.size())));
-        items += FolderItem(gameKey, ViewSource(place, xmbGamesFile, gameView));
-        std::string saveTables;
-        std::string saveItems;
-        for (const XmbSave &save : game.saves)
+        GameRow game{&games[g], kGameKeyPrefix + Digits(g), std::vector<SaveRow>()};
+        for (const XmbSave &save : games[g].saves)
         {
-            const std::string key = kSaveKeyPrefix + Digits(saveNumber++);
-            // A save of a name no console gives is only listed.
-            const bool acts = webman && IsSaveFolderName(save.name);
-            const std::string actionPairs = acts ? ActionPairs(place, key) : std::string();
-            saveTables +=
-                Table(key, IconPair(save.icon, save.downloaded ? kDownloadedIcon : kInCloudIcon) +
+            game.saves.push_back(SaveRow{&save, kSaveKeyPrefix + Digits(saveNumber++)});
+        }
+        rows.push_back(game);
+    }
+    return rows;
+}
+
+/**
+ * Whether a save's row acts: with webMAN, for a save of a name a console gives; any other is only
+ * listed.
+ */
+bool Acts(bool webman, const XmbSave &save)
+{
+    return webman && IsSaveFolderName(save.name);
+}
+
+/** Whether text a comes before text b, and on a tie text c before text d, from A to Z. */
+bool LessByTwo(const std::string &a, const std::string &b, const std::string &c,
+               const std::string &d)
+{
+    return LessIgnoringCase(a, b) || (!LessIgnoringCase(b, a) && LessIgnoringCase(c, d));
+}
+
+/** Whether save a comes before save b in a sort. */
+bool Before(const XmbSave &a, const XmbSave &b, XmbSort sort)
+{
+    // RFC 3339 times in one form sort as text does.
+    switch (sort)
+    {
+    case XmbSort::DateNewest:
+        return a.modified > b.modified;
+    case XmbSort::DateOldest:
+        return a.modified < b.modified;
+    case XmbSort::Title:
+        return LessByTwo(a.title, b.title, a.subtitle, b.subtitle);
+    case XmbSort::Subtitle:
+        return LessByTwo(a.subtitle, b.subtitle, a.title, b.title);
+    }
+    return false;
+}
+
+/** Saves' rows in a sort; those that sort alike keep their order, as their keys go. */
+std::vector<SaveRow> Sorted(std::vector<SaveRow> rows, XmbSort sort)
+{
+    std::stable_sort(rows.begin(), rows.end(), [sort](const SaveRow &a, const SaveRow &b)
+                     { return Before(*a.save, *b.save, sort); });
+    return rows;
+}
+
+/** A view of saves' rows. */
+std::string SavesView(const XmbPlace &place, bool webman, const std::string &id,
+                      const std::vector<SaveRow> &rows)
+{
+    std::string tables;
+    std::string items;
+    for (const SaveRow &row : rows)
+    {
+        const XmbSave &save = *row.save;
+        const std::string actionPairs =
+            Acts(webman, save) ? ActionPairs(place, row.key) : std::string();
+        tables +=
+            Table(row.key, IconPair(save.icon, save.downloaded ? kDownloadedIcon : kInCloudIcon) +
                                Pair("title", save.title) + Pair("info", save.info) + actionPairs);
-            saveItems += ActionItem(key);
-            if (acts)
+        items += ActionItem(row.key);
+    }
+    return View(id, tables, items);
+}
+
+/** The file of each game's saves, a view each, in a sort. */
+std::string GamesDocument(const XmbPlace &place, bool webman, const std::vector<GameRow> &games,
+                          XmbSort sort)
+{
+    std::string views;
+    for (const GameRow &game : games)
+    {
+        views += SavesView(place, webman, game.key + kGameViewSuffix, Sorted(game.saves, sort));
+    }
+    return Document(views);
+}
+
+/**
+ * The file of the saves in the cloud in a view: a folder per game by title, which opens the game's
+ * view in a file of each game's saves, or all saves in one list.
+ */
+std::string SavesDocument(const XmbPlace &place, bool webman, const std::vector<GameRow> &games,
+                          const XmbView &view, const std::string &gamesFile)
+{
+    if (view.group == XmbGroup::All)
+    {
+        std::vector<SaveRow> all;
+        for (const GameRow &game : games)
+        {
+            all.insert(all.end(), game.saves.begin(), game.saves.end());
+        }
+        return Document(SavesView(place, webman, kSavesView, Sorted(all, view.sort)));
+    }
+    std::string tables;
+    std::string items;
+    for (const GameRow &game : games)
+    {
+        tables +=
+            Table(game.key, Pair("icon_rsc", kDownloadedIcon) + Pair("title", game.game->title) +
+                                Pair("info", GameInfo(*game.game)));
+        items += FolderItem(game.key, ViewSource(place, gamesFile, game.key + kGameViewSuffix));
+    }
+    return Document(View(kSavesView, tables, items));
+}
+
+/** A field of the rows' index, whose tabs and line breaks would end the field or the row. */
+std::string IndexField(const std::string &text)
+{
+    std::string field;
+    for (const char c : text)
+    {
+        switch (c)
+        {
+        case '\\':
+            field += "\\\\";
+            break;
+        case '\t':
+            field += "\\t";
+            break;
+        case '\n':
+            field += "\\n";
+            break;
+        default:
+            field += c;
+        }
+    }
+    return field;
+}
+
+/** A row of the rows' index. */
+std::string IndexLine(const std::vector<std::string> &fields)
+{
+    std::string line;
+    for (std::size_t f = 0; f < fields.size(); ++f)
+    {
+        if (f > 0)
+        {
+            line += kFieldSeparator;
+        }
+        line += IndexField(fields[f]);
+    }
+    return line + "\n";
+}
+
+/** The rows' index, as xmbRowsFile tells it. */
+std::string RowsIndex(const std::vector<GameRow> &games)
+{
+    std::string index;
+    for (const GameRow &game : games)
+    {
+        const XmbGame &listed = *game.game;
+        index += IndexLine({kGameRecord, game.key, listed.titleId, listed.title, GameInfo(listed),
+                            Digits(listed.saves.size())});
+        for (const SaveRow &row : game.saves)
+        {
+            const XmbSave &save = *row.save;
+            index += IndexLine({kSaveRecord, row.key, save.name, save.title, save.info,
+                                save.subtitle, save.updated, save.size, save.detail, save.titleId});
+        }
+    }
+    return index;
+}
+
+} // namespace
+
+XmbView ParseXmbView(const std::string &text)
+{
+    std::string letters = text;
+    while (!letters.empty() && (letters.back() == '\n' || letters.back() == '\r'))
+    {
+        letters.pop_back();
+    }
+    if (letters.size() != 2)
+    {
+        return kDefaultView;
+    }
+    XmbView view = kDefaultView;
+    bool sortRead = false;
+    bool groupRead = false;
+    for (const XmbSort sort : kSorts)
+    {
+        if (SortLetter(sort) == letters[0])
+        {
+            view.sort = sort;
+            sortRead = true;
+        }
+    }
+    for (const XmbGroup group : kGroups)
+    {
+        if (GroupLetter(group) == letters[1])
+        {
+            view.group = group;
+            groupRead = true;
+        }
+    }
+    return sortRead && groupRead ? view : kDefaultView;
+}
+
+std::string XmbMenuVariant(const XmbView &view)
+{
+    return VariantName(kMenuVariantStem, view.sort, view.group);
+}
+
+std::string XmbSavesVariant(const XmbView &view)
+{
+    return VariantName(kSavesVariantStem, view.sort, view.group);
+}
+
+std::string XmbGamesVariant(XmbSort sort)
+{
+    return VariantName(kGamesVariantStem, sort, XmbGroup::ByTitle);
+}
+
+XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
+                      const std::string &storageUse, const std::vector<XmbGame> &games,
+                      const XmbView &chosen)
+{
+    XmbLists lists;
+    const MenuRows menu = MakeMenuRows(place, signedIn, webman, storageUse, lists.scripts);
+    const std::vector<GameRow> rows = signedIn ? KeyRows(games) : std::vector<GameRow>();
+    for (const GameRow &game : rows)
+    {
+        for (const SaveRow &row : game.saves)
+        {
+            if (Acts(webman, *row.save))
             {
-                lists.scripts.push_back(XmbScript{key, xmbSave + save.name});
+                lists.scripts.push_back(XmbScript{row.key, xmbSave + row.save->name});
             }
         }
-        gameViews += View(gameView, saveTables, saveItems);
     }
-    lists.saves = Document(View(kSavesView, tables, items));
-    lists.games = Document(gameViews);
+    // A file comes after those it opens, so the XMB never opens one that is not written yet.
+    const auto add = [&lists](const std::string &name, const std::string &content)
+    { lists.files.push_back(XmbFile{name, content}); };
+    for (const XmbSort sort : kSorts)
+    {
+        add(XmbGamesVariant(sort), GamesDocument(place, webman, rows, sort));
+    }
+    for (const XmbSort sort : kSorts)
+    {
+        for (const XmbGroup group : kGroups)
+        {
+            const XmbView view{sort, group};
+            add(XmbSavesVariant(view),
+                SavesDocument(place, webman, rows, view, XmbGamesVariant(sort)));
+            add(XmbMenuVariant(view), MenuDocument(place, menu, XmbSavesVariant(view)));
+        }
+    }
+    add(xmbGamesFile, GamesDocument(place, webman, rows, chosen.sort));
+    add(xmbSavesFile, SavesDocument(place, webman, rows, chosen, xmbGamesFile));
+    add(xmbMenuFile, MenuDocument(place, menu, xmbSavesFile));
+    add(xmbFolderFile,
+        Document(
+            View(kFolderView,
+                 Table("owns_folder", Pair("icon_rsc", kInCloudIcon) + Pair("title", kFolderTitle) +
+                                          Pair("info_rsc", kFolderInfoRsc)),
+                 FolderItem("owns_folder", ViewSource(place, xmbMenuFile, kMenuView)))));
+    add(xmbRowsFile, RowsIndex(rows));
     return lists;
 }
 
@@ -317,12 +622,16 @@ std::vector<XmbGame> XmbGames(SaveBrowser &browser, const LocalStorage &storage,
             FileStatus iconStatus;
             XmbSave save;
             save.name = name;
+            save.title = game.name;
+            save.subtitle = cloudSave.texts.subtitle.empty() ? name : cloudSave.texts.subtitle;
+            save.updated = ShownTime(cloudSave.modified, style);
+            save.size = ShownSize(cloudSave.size);
             // As the Saved Data Utility shows a save: the subtitle on a line of its own. The game's
             // ID is on its folder's row.
-            save.title = game.name;
-            save.info = (cloudSave.texts.subtitle.empty() ? name : cloudSave.texts.subtitle) +
-                        "\n" + ShownTime(cloudSave.modified, style) + "   " +
-                        ShownSize(cloudSave.size);
+            save.info = save.subtitle + "\n" + save.updated + "   " + save.size;
+            save.detail = ShownDetail(cloudSave.texts.detail);
+            save.modified = cloudSave.modified;
+            save.titleId = game.titleId;
             save.downloaded = browser.Status(name) == SaveStatus::Same;
             save.icon = save.downloaded && storage.Status(icon, iconStatus) ? icon : std::string();
             listed.saves.push_back(save);

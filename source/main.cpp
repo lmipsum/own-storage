@@ -444,9 +444,55 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
     {
         storageUse = ShownStorageUse(used, total);
     }
-    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, rowsRun, storageUse, games));
+    // Without the file, as before the user chose a view, the default one is listed.
+    std::string view;
+    storage.Read(appPath + xmbViewFile, view);
+    WriteXmbLists(storage, xmbPlace,
+                  MakeXmbLists(xmbPlace, signedIn, rowsRun, storageUse, games, ParseXmbView(view)));
     debugPrintf("refreshXmb: the lists took %ld s\n",
                 static_cast<long>(systemClock.Seconds() - started));
+}
+
+/**
+ * Does what the XMB asked of a save in the cloud.
+ * @param changed receives whether the XMB's lists need an update
+ * @return what came of it, as the user is told it; empty when a dialog told it
+ */
+Notice runSaveAction(SaveBrowser &browser, XmbSaveAction what, const std::string &name,
+                     bool &changed)
+{
+    switch (what)
+    {
+    case XmbSaveAction::Download:
+        return DownloadXmbSave(browser, name, &changed);
+    case XmbSaveAction::Information:
+    {
+        const std::string information = XmbSaveInformation(browser, name);
+        if (information.empty())
+        {
+            // The next update leaves the gone save out.
+            changed = true;
+            return XmbSaveGone(name);
+        }
+        syncDialog.ShowInfo(information);
+        return Result(std::string());
+    }
+    case XmbSaveAction::Delete:
+        return DeleteXmbSave(browser, name, &changed);
+    }
+    return Result(std::string());
+}
+
+/**
+ * Does what the XMB asked of a game's saves in the cloud.
+ * @param changed receives whether the XMB's lists need an update
+ * @return what came of it, as the user is told it
+ */
+Notice runGameAction(SaveBrowser &browser, XmbGameAction what, const std::string &titleId,
+                     bool &changed)
+{
+    return what == XmbGameAction::DownloadAll ? DownloadXmbGame(browser, titleId, &changed)
+                                              : DeleteXmbGame(browser, titleId, &changed);
 }
 
 /**
@@ -479,13 +525,17 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
     std::string folderId;
     XmbSaveAction what = XmbSaveAction::Download;
     std::string name;
+    XmbGameAction gameWhat = XmbGameAction::DownloadAll;
+    std::string titleId;
     const bool isSave = ReadXmbSaveAction(action, what, name);
-    if (action != xmbUsbImport && !isSave)
+    const bool isGame = !isSave && ReadXmbGameAction(action, gameWhat, titleId);
+    const bool picks = isSave || isGame;
+    if (action != xmbUsbImport && !picks)
     {
         return Result(std::string());
     }
     // An import creates the folder when it is missing, so that saves can go into it.
-    if (!findBackupFolder(!isSave, folderId))
+    if (!findBackupFolder(!picks, folderId))
     {
         return Problem(driveFailureMessage());
     }
@@ -493,7 +543,7 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
     listing.folderId = folderId;
     SyncState state(stateFile(profile), stateBackup(profile));
     state.Load();
-    if (!isSave)
+    if (!picks)
     {
         return importUsbSaves(storage, state, profile, folderId);
     }
@@ -507,32 +557,9 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
     {
         return Problem(driveFailureMessage());
     }
-    Notice picked = Result(std::string());
     bool changed = false;
-    switch (what)
-    {
-    case XmbSaveAction::Download:
-        picked = DownloadXmbSave(browser, name, &changed);
-        break;
-    case XmbSaveAction::Information:
-    {
-        const std::string information = XmbSaveInformation(browser, name);
-        if (information.empty())
-        {
-            // The next update leaves the gone save out.
-            picked = XmbSaveGone(name);
-            changed = true;
-        }
-        else
-        {
-            syncDialog.ShowInfo(information);
-        }
-        break;
-    }
-    case XmbSaveAction::Delete:
-        picked = DeleteXmbSave(browser, name, &changed);
-        break;
-    }
+    const Notice picked = isGame ? runGameAction(browser, gameWhat, titleId, changed)
+                                 : runSaveAction(browser, what, name, changed);
     // Kept as it was, or only asked about, the save shows as the lists have it.
     if (!changed)
     {

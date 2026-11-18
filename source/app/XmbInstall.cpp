@@ -143,10 +143,11 @@ bool WriteXmbLists(LocalStorage &storage, const XmbPlace &place, const XmbLists 
     MakeDirectories(storage, place.scriptDirectory);
     // The lists go first: should a script then fail, a row starts nothing rather than the action
     // of a row of the last lists that had its key.
-    bool written = storage.Write(place.directory + xmbFolderFile, lists.folder) &&
-                   storage.Write(place.directory + xmbMenuFile, lists.menu) &&
-                   storage.Write(place.directory + xmbSavesFile, lists.saves) &&
-                   storage.Write(place.directory + xmbGamesFile, lists.games);
+    bool written = true;
+    for (const XmbFile &file : lists.files)
+    {
+        written = written && storage.Write(place.directory + file.name, file.content);
+    }
     // The rows of the last lists, such as of a save gone from the cloud, start nothing any more.
     for (const std::string &old : storage.List(place.scriptDirectory))
     {

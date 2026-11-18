@@ -28,8 +28,20 @@ struct XmbSave
     std::string name;
     /** The game's title. */
     std::string title;
-    /** The save's subtitle; below it when the save was stored, and its size. */
+    /** The save's subtitle; its folder's name when it has none. */
+    std::string subtitle;
+    /** The row's description: the subtitle, below it when the save was stored, and its size. */
     std::string info;
+    /** When the save was stored, as the console shows dates. */
+    std::string updated;
+    /** The save's size, as the console shows it. */
+    std::string size;
+    /** What the game says of the save, without the line breaks it may end with. */
+    std::string detail;
+    /** When the save was stored, as Drive gives it, which sorts as text does. */
+    std::string modified;
+    /** The game's ID. */
+    std::string titleId;
     /** The save's own icon; empty when the console has none of it to show. */
     std::string icon;
     /** Whether the console has the cloud's copy. */
@@ -47,6 +59,59 @@ struct XmbGame
     std::vector<XmbSave> saves;
 };
 
+/** The order the XMB lists the saves in the cloud in. */
+enum class XmbSort
+{
+    DateNewest,
+    DateOldest,
+    /** By the game's title, then the save's subtitle. */
+    Title,
+    /** By the save's subtitle, then the game's title. */
+    Subtitle,
+};
+
+/** Whether the XMB lists the saves in the cloud in a folder per game, or all in one list. */
+enum class XmbGroup
+{
+    ByTitle,
+    All,
+};
+
+/** How the XMB lists the saves in the cloud, as the user chose it on the XMB. */
+struct XmbView
+{
+    XmbSort sort;
+    XmbGroup group;
+};
+
+/**
+ * Reads the view the launcher plugin keeps, in the app's folder as xmbViewFile: two letters, the
+ * sort's (d newest first, o oldest first, t title, s subtitle) and the group's (t by title, a all).
+ * @param text the file's content; a line end after the letters is allowed
+ * @return the view; newest first by title when the text is no view, as before the user chose one
+ */
+XmbView ParseXmbView(const std::string &text);
+
+/**
+ * The list file of the menu, which opens the saves in the cloud in a view, named as long as
+ * xmbMenuFile: the launcher plugin switches views by changing the name in the XMB's stored address,
+ * and the XMB keeps each file it read by its name, so each view needs a file of its own.
+ * @return such as "owns_m_dt.xml"
+ */
+std::string XmbMenuVariant(const XmbView &view);
+
+/**
+ * The list file of the saves in the cloud in a view, as long as xmbSavesFile.
+ * @return such as "owns_sa_dt.xml"
+ */
+std::string XmbSavesVariant(const XmbView &view);
+
+/**
+ * The list file of each game's saves in an order, as long as xmbGamesFile: only the saves in a
+ * folder per game need it, so its group letter is always that one's, such as "owns_ga_dt.xml".
+ */
+std::string XmbGamesVariant(XmbSort sort);
+
 /**
  * What a row of the XMB starts: a webMAN script that writes the row's action to the action file
  * and asks the launcher plugin to start the app. webMAN runs scripts in its user mode, where its
@@ -60,27 +125,43 @@ struct XmbScript
     std::string action;
 };
 
+/** A file of the lists in XmbPlace::directory. */
+struct XmbFile
+{
+    std::string name;
+    std::string content;
+};
+
 // How a row's script is named in XmbPlace::scriptDirectory, after the row's key.
 const char xmbScriptSuffix[] = ".bat";
 
 // The list files' names in XmbPlace::directory. Each level of folders is a file of its own, as
-// the XMB opens a folder only from a file other than the one that lists it.
+// the XMB opens a folder only from a file other than the one that lists it. These hold the view
+// the user chose last, which the XMB opens after the console starts.
 const char xmbFolderFile[] = "owns_folder.xml";
 const char xmbMenuFile[] = "owns_menu.xml";
 const char xmbSavesFile[] = "owns_saves.xml";
 const char xmbGamesFile[] = "owns_games.xml";
 
-/** The list files, one level of folders each. */
+/**
+ * The rows' index in XmbPlace::directory, from which the launcher plugin tells what a focused row
+ * is by its title and description, and shows what the row has no room for. A line per row, its
+ * fields separated by tabs; a backslash, a tab and a line break in a field are written as "\\",
+ * "\t" and "\n". A game's folder comes before its saves:
+ *   G, key, game ID, title, description, number of saves
+ *   S, key, save folder's name, title, description, subtitle, stored, size, detail, game ID
+ * The title and the description are the row's own, so they match what the XMB shows.
+ */
+const char xmbRowsFile[] = "owns_rows.txt";
+
+// The view the launcher plugin keeps in the app's folder, which ParseXmbView() reads.
+const char xmbViewFile[] = "xmb_view.txt";
+
+/** The list files and the rows' scripts. */
 struct XmbLists
 {
-    /** The app's folder, Cloud Save Utility, which the Game column lists. */
-    std::string folder;
-    /** Its rows, and the folder of the saves in the cloud. */
-    std::string menu;
-    /** The games in the cloud, a folder each. */
-    std::string saves;
-    /** Each game's saves. */
-    std::string games;
+    /** Every file of XmbPlace::directory: the lists of every view, and the rows' index. */
+    std::vector<XmbFile> files;
     /** Each row's script by its name in XmbPlace::scriptDirectory, with the action it leaves. */
     std::vector<XmbScript> scripts;
 };
@@ -92,24 +173,32 @@ const char xmbSignIn[] = "signin";
 const char xmbSignOut[] = "signout";
 const char xmbSave[] = "save:";
 // What a save's options menu asks for, as the launcher plugin writes it; the save's name follows.
+// A delete comes once the user confirmed it there.
 const char xmbInformation[] = "info:";
 const char xmbDelete[] = "delete:";
+// What a game's options menu asks for, as the launcher plugin writes it; the game's ID follows.
+// A delete comes once the user confirmed it there.
+const char xmbDownloadAll[] = "downloadall:";
+const char xmbDeleteAll[] = "deleteall:";
 
 /**
- * The XMB's lists. Each row starts a webMAN script, which leaves its action for the app and
- * asks the launcher plugin to start it; the XMB cannot start the app by itself. Without webMAN the
- * rows that act give way to a row that says so, and the saves are only listed, as is a save of a
- * name no console gives. The saves in the cloud, a folder per game, come before the rows that act.
+ * The XMB's lists in every view. Each row starts a webMAN script, which leaves its action for the
+ * app and asks the launcher plugin to start it; the XMB cannot start the app by itself. Without
+ * webMAN the rows that act give way to a row that says so, and the saves are only listed, as is a
+ * save of a name no console gives. The saves in the cloud come before the rows that act. A save's
+ * row has the same key and script in every view, so a view can change without the app.
  * @param place where the lists are, and how the app is started
  * @param signedIn whether the user is signed in; without it only the sign-in row is listed
  * @param webman whether webMAN MOD is there to run the rows' scripts
  * @param storageUse how full the Google storage is, shown under the saves in the cloud; empty when
  *        not known
- * @param games the games in the cloud, with their saves
+ * @param games the games in the cloud by title, with their saves newest first
+ * @param chosen the view the user chose last, which the files of the lists' own names hold
  * @return the files' content
  */
 XmbLists MakeXmbLists(const XmbPlace &place, bool signedIn, bool webman,
-                      const std::string &storageUse, const std::vector<XmbGame> &games);
+                      const std::string &storageUse, const std::vector<XmbGame> &games,
+                      const XmbView &chosen);
 
 /**
  * A row's webMAN script.

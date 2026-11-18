@@ -36,3 +36,6 @@ std::string GameLabel(const std::string &titleId, const std::string &title);
  * @return the text, or as much of it as fits
  */
 std::string CutText(const std::string &text, std::size_t bytes);
+
+/** Whether a comes before b from A to Z, whatever the letters' case. */
+bool LessIgnoringCase(const std::string &a, const std::string &b);
