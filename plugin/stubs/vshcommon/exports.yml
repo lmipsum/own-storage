@@ -1,4 +1,5 @@
-# The VSH's vshcommon library, whose option menu the save menu opens; the NIDs are the system's.
+# The VSH's vshcommon library, whose option menu, dialog and button hints the save menu uses; the
+# NIDs are the system's.
 library: vshcommon
 module: vshcommon
 archive_name: vshcommon
@@ -16,3 +17,21 @@ exports:
   - name: OptionMenu_GetMenuList
     nid: '0xe21c3432'
     signature: 'void *OptionMenu_GetMenuList(int level, int list_type);'
+  - name: OptionMenu_OpenChild
+    nid: '0x4a6e257d'
+    signature: 'int OptionMenu_OpenChild(int view, const char *plane, int style, int deferred_show, int label_type, void *layout, int a6, int a7);'
+  - name: OptionMenu_CloseChild
+    nid: '0xa6525ae6'
+    signature: 'int OptionMenu_CloseChild(int view);'
+  - name: OptionMenu_GetLevel
+    nid: '0x5dd71b31'
+    signature: 'int OptionMenu_GetLevel(void);'
+  - name: MessageDialog_Open
+    nid: '0x33c12393'
+    signature: 'void *MessageDialog_Open(void *parent, const void *text, int type, void *on_answer, int icon, int buttons, void *data, int a7);'
+  - name: MessageDialog_HideDelete
+    nid: '0x5a6c0db6'
+    signature: 'void MessageDialog_HideDelete(void *dialog);'
+  - name: ShowButtonNavigation_Back
+    nid: '0x9bd8429e'
+    signature: 'int ShowButtonNavigation_Back(int show);'

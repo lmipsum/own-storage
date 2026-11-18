@@ -16,6 +16,24 @@
 size_t utf8_put(char *text, size_t length, size_t room, unsigned int code);
 
 /**
+ * The character a UTF-8 text has at an index; a byte that starts no well-formed character
+ * stands for U+FFFD.
+ * @param length the text's bytes
+ * @param index the character's first byte; moves past the character
+ * @return the character's code point
+ */
+unsigned int utf8_next(const char *text, size_t length, size_t *index);
+
+/**
+ * Adds a character to a UTF-16 text, as a surrogate pair beyond the first 65536, when there is
+ * room for it and the closing NUL.
+ * @param length the text's units
+ * @param room the text's buffer units
+ * @return the text's new length
+ */
+size_t utf16_put(unsigned short *units, size_t length, size_t room, unsigned int code);
+
+/**
  * The character a UTF-16 text has at an index, joining a surrogate pair into one.
  * @param units the text
  * @param count its units

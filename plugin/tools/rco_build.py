@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Builds a VSH plugin's resource file (RCO) from a JSON description: one page of objects, and
-texts that are the same in every language the system has.
+"""Builds a VSH plugin's resource file (RCO) from a JSON description: pages of objects, and texts
+that are the same in every language the system has.
 
 The layout is the one the system's own RCOs have, as RCOMage reads and writes them: a header, the
 zlib-packed tables (entries, label hash tables, labels, event names), then one zlib-packed text
-block per language. The description names the RCO, its texts and its page; an object gives its
+block per language. The description names the RCO, its texts and its pages; an object gives its
 kind, its name, the attributes that differ from its kind's defaults below, and its children.
 
 Usage: rco_build.py <description.json> <output.rco>
@@ -263,8 +263,12 @@ class RcoWriter:
         self.tables += entry(MAIN_TABLE, 1, label, 0, ENTRY_BYTES, 2, 0, 0)
         text_table, languages, blocks = self.write_texts(main, texts)
         object_table = self.position()
-        self.tables += entry(OBJECT_TABLE, 0, NONE, 0, ENTRY_BYTES, 1, 0, object_table - main)
-        self.write_object(description["page"], object_table, 0, True)
+        pages = description["pages"]
+        self.tables += entry(OBJECT_TABLE, 0, NONE, 0, ENTRY_BYTES, len(pages), 0,
+                             object_table - main)
+        previous = 0
+        for index, page in enumerate(pages):
+            previous = self.write_object(page, object_table, previous, index == len(pages) - 1)
 
         text_pointers = self.position()
         for _, at in sorted(languages):

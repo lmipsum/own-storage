@@ -41,5 +41,25 @@ int PhMenuList_SetSelected(void *list, int index);
 const char *PhXmList_WidgetType(void);
 /** paf::PhXmList::GetItemWidget: the widget of one of the list's items. */
 void *PhXmList_GetItemWidget(void *list, int item);
+/**
+ * paf::View::PageOpen: builds one of the view's RCO pages; only the first is built as the view
+ * loads. explore_plugin passes 0, 0, -1 (the view's own draw priority), 0, 0.
+ * @return the page; NULL when it was not built
+ */
+void *View_PageOpen(int view, const char *page, int a2, int a3, int priority, int a5, int a6);
+/** paf::View::PageClose: closes one of the view's pages, which destroys its widgets. */
+int View_PageClose(int view, const char *page);
+/** paf::View::PageActivate(void *): activates a page by its node, as View +0x180 keeps it. */
+void View_PageActivatePage(int view, void *page);
+/** paf::View::FindWidget: a widget of the view's open pages by its RCO name; NULL without it. */
+void *View_FindWidget(int view, const char *name);
+/** paf::PhWidget::SetFocus: gives a widget the input focus; explore_plugin uses mode 2. */
+void PhWidget_SetFocus(void *widget, void *event, unsigned int mode);
+/** paf's operator new, which explore_plugin allocates its widgets with. */
+void *paf_new(unsigned int size);
+/** paf::PhInfoList's constructor: the list of label and value rows, as a child of a widget. */
+void PhInfoList_ctor(void *list, void *parent, void *appear);
+/** paf::PhInfoList::Create: makes the list's rows; explore_plugin passes 0.0f as the value. */
+int PhInfoList_Create(void *list, int rows, float value);
 
 #endif

@@ -23,6 +23,38 @@ size_t owns_text_append(char *text, size_t length, size_t room, const char *part
     return length;
 }
 
+size_t owns_text_put_hex(char *text, size_t length, uint32_t value)
+{
+    for (int shift = (OWNS_HEX_DIGITS - 1) * 4; shift >= 0; shift -= 4)
+    {
+        text[length++] = "0123456789abcdef"[(value >> shift) & 0xF];
+    }
+    return length;
+}
+
+uint32_t owns_text_get_hex(const char *text, int *valid)
+{
+    uint32_t value = 0;
+    for (int i = 0; i < OWNS_HEX_DIGITS; ++i)
+    {
+        const char digit = text[i];
+        if (digit >= '0' && digit <= '9')
+        {
+            value = (value << 4) | (uint32_t)(digit - '0');
+        }
+        else if (digit >= 'a' && digit <= 'f')
+        {
+            value = (value << 4) | (uint32_t)(digit - 'a' + 10);
+        }
+        else
+        {
+            *valid = 0;
+            return 0;
+        }
+    }
+    return value;
+}
+
 int64_t owns_read_file(const char *path, char *buffer, uint64_t room)
 {
     int file;
@@ -53,4 +85,10 @@ int owns_write_file(const char *path, const char *text)
     const int result = cellFsWrite(file, text, length, &written);
     cellFsClose(file);
     return result == 0 && written == length;
+}
+
+int owns_file_exists(const char *path)
+{
+    CellFsStat status;
+    return cellFsStat(path, &status) == 0;
 }

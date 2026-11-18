@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "list_switch.h"
 #include "menu_release.h"
 #include "option_menu.h"
 #include "owns_log.h"
@@ -14,7 +15,7 @@
 #include "owns_text.h"
 #include "paf.h"
 #include "vsh_types.h"
-#include "xmb_return.h"
+#include "xmb_state.h"
 
 #define MENU_PARENT "xmb_plugin"
 #define PLUGIN_DIR OWNS_APP_DIR "plugins/"
@@ -93,8 +94,9 @@ static void on_view_loaded(void *view)
     owns_log_value("menu view loaded", (uint32_t)(uintptr_t)view);
     if (view == NULL || !option_menu_open((int)(uintptr_t)view))
     {
-        xmb_return_focus();
-        menu_release_request();
+        xmb_state_restore();
+        cellFsUnlink(OWNS_MENU_TARGET);
+        menu_release_request(MENU_RELEASE_ONLY);
     }
 }
 
@@ -104,30 +106,25 @@ static void on_view_unloaded(const char *name)
     owns_log_value("menu view unloaded", (uint32_t)(uintptr_t)name);
 }
 
-/** Whether a file is there. */
-static int file_exists(const char *path)
-{
-    CellFsStat status;
-    return cellFsStat(path, &status) == 0;
-}
-
 int menu_view_loaded(void)
 {
     return View_Find(OWNS_MENU_VIEW) != 0;
 }
 
-void menu_view_load(void)
+int menu_view_load(void)
 {
-    if (!file_exists(MENU_RCO) || !file_exists(MENU_SPRX))
+    if (!owns_file_exists(MENU_RCO) || !owns_file_exists(MENU_SPRX))
     {
         owns_log("menu view files missing");
-        return;
+        return 0;
     }
     vsh_view_init_param init_param;
     View_InitParam_ctor(&init_param);
-    if (vsh_string_set(&init_param.name, OWNS_MENU_VIEW) &&
-        vsh_string_set(&init_param.parent, MENU_PARENT) &&
-        vsh_string_set(&init_param.rco, MENU_RCO) && vsh_string_set(&init_param.sprx, MENU_SPRX))
+    const int asked = vsh_string_set(&init_param.name, OWNS_MENU_VIEW) &&
+                      vsh_string_set(&init_param.parent, MENU_PARENT) &&
+                      vsh_string_set(&init_param.rco, MENU_RCO) &&
+                      vsh_string_set(&init_param.sprx, MENU_SPRX);
+    if (asked)
     {
         init_param.xmb_flag = XMB_PLUGIN_FLAG;
         init_param.module_flags = XMB_PLUGIN_FLAG;
@@ -140,17 +137,28 @@ void menu_view_load(void)
     vsh_string_free(&init_param.parent);
     vsh_string_free(&init_param.rco);
     vsh_string_free(&init_param.sprx);
+    return asked;
+}
+
+/** Has paf unload the save menu's view, when it is loaded. */
+static void menu_view_unload(void)
+{
+    if (menu_view_loaded())
+    {
+        View_UnloadAsync(OWNS_MENU_VIEW, (void *)on_view_unloaded, 1);
+    }
 }
 
 void menu_view_take_release(void)
 {
-    if (!file_exists(OWNS_MENU_RELEASE))
+    enum menu_release_then then = MENU_RELEASE_ONLY;
+    if (!menu_release_take(&then))
     {
         return;
     }
-    cellFsUnlink(OWNS_MENU_RELEASE);
-    if (menu_view_loaded())
+    menu_view_unload();
+    if (then == MENU_RELEASE_SWITCH_LIST)
     {
-        View_UnloadAsync(OWNS_MENU_VIEW, (void *)on_view_unloaded, 1);
+        owns_log_value("list switched", (uint32_t)list_switch_to_kept_view());
     }
 }

@@ -49,3 +49,27 @@ exports:
   - name: PhXmList_GetItemWidget
     nid: '0x796a32fe'
     signature: 'void *PhXmList_GetItemWidget(void *list, int item);'
+  - name: View_PageOpen
+    nid: '0x3cec3833'
+    signature: 'void *View_PageOpen(int view, const char *page, int a2, int a3, int priority, int a5, int a6);'
+  - name: View_PageClose
+    nid: '0x724e5a8b'
+    signature: 'int View_PageClose(int view, const char *page);'
+  - name: View_PageActivatePage
+    nid: '0x2166e819'
+    signature: 'void View_PageActivatePage(int view, void *page);'
+  - name: View_FindWidget
+    nid: '0x794ceacb'
+    signature: 'void *View_FindWidget(int view, const char *name);'
+  - name: PhWidget_SetFocus
+    nid: '0xd2649242'
+    signature: 'void PhWidget_SetFocus(void *widget, void *event, unsigned int mode);'
+  - name: paf_new
+    nid: '0x40211524'
+    signature: 'void *paf_new(unsigned int size);'
+  - name: PhInfoList_ctor
+    nid: '0x816d1a8f'
+    signature: 'void PhInfoList_ctor(void *list, void *parent, void *appear);'
+  - name: PhInfoList_Create
+    nid: '0xee05cf53'
+    signature: 'int PhInfoList_Create(void *list, int rows, float value);'

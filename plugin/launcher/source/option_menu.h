@@ -5,8 +5,8 @@
 #define OWNS_OPTION_MENU_H
 
 /**
- * Opens the save menu on the loaded view, its rows set and the cursor on the first, as
- * explore_plugin opens its own menu.
+ * Opens the save menu on the loaded view for the launcher's target, its rows set and the cursor
+ * on the first, as explore_plugin opens its own menu; saves what the XMB had the input on first.
  * @param view the save menu's view
  * @return 1 when it opened
  */

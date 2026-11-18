@@ -7,6 +7,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// A word as owns_text_put_hex writes it.
+#define OWNS_HEX_DIGITS 8
+
 /** A NUL-ended text's length. */
 size_t owns_text_length(const char *text);
 
@@ -17,6 +20,18 @@ size_t owns_text_length(const char *text);
  * @return the other text's new length
  */
 size_t owns_text_append(char *text, size_t length, size_t room, const char *part);
+
+/**
+ * Writes a word as OWNS_HEX_DIGITS lower-case hex digits, without a NUL.
+ * @return the text's new length
+ */
+size_t owns_text_put_hex(char *text, size_t length, uint32_t value);
+
+/**
+ * Reads OWNS_HEX_DIGITS hex digits as a word.
+ * @param valid cleared when they are not all hex digits
+ */
+uint32_t owns_text_get_hex(const char *text, int *valid);
 
 /**
  * Reads a whole small file into a buffer, NUL-ended; what does not fit is left out.
@@ -30,5 +45,8 @@ int64_t owns_read_file(const char *path, char *buffer, uint64_t room);
  * @return 1 when all of it was written
  */
 int owns_write_file(const char *path, const char *text);
+
+/** Whether a file is there. */
+int owns_file_exists(const char *path);
 
 #endif

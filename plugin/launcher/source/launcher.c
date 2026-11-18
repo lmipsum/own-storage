@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The XMB's rows start Own Storage through this VSH plugin, the way its own icon starts it. The
 // app's results show through it too, as the XMB's notifications. And Triangle on one of the app's
-// save rows opens the save menu, whose view (plugin/menu) the plugin loads and unloads.
+// save or game folder rows opens the save menu, whose view (plugin/menu) the plugin loads and
+// unloads.
 //
 // The module's only segment is read-only once loaded, as the PS3 refuses to load a segment that
 // is both writable and executable; so nothing here writes to a global, and the thread runs until
@@ -15,24 +16,28 @@
 #include <sys/thread.h>
 
 #include "app_start.h"
+#include "item_menu.h"
+#include "menu_recovery.h"
 #include "menu_view.h"
 #include "notices.h"
 #include "owns_log.h"
 #include "owns_paths.h"
 #include "pad.h"
 #include "paf.h"
-#include "save_menu.h"
 
 // Triangle is polled about 30 times a second, so a short press is not missed; the request files
 // are looked at every ninth poll, about every 0.3 s.
 static const unsigned int kPadPollMicroseconds = 33333;
 static const int kPadPollsPerRound = 9;
-// The watching thread waits most of the time; its stack holds an item's texts and a save row's
-// script, which the save menu reads.
+// The watching thread waits most of the time; its stack holds an item's texts and a list's URL,
+// which the save menu reads.
 static const s32 kThreadPriority = 3000;
 static const u64 kThreadStackBytes = 0x8000;
 
-/** Waits for the rows' requests, the app's results, the save menu's release and Triangle. */
+/**
+ * Waits for the rows' requests, the app's results, the save menu's release, the recovery request
+ * and Triangle.
+ */
 static void watch(void *unused)
 {
     (void)unused;
@@ -47,6 +52,9 @@ static void watch(void *unused)
     // No save menu is open yet.
     cellFsUnlink(OWNS_MENU_TARGET);
     cellFsUnlink(OWNS_MENU_RELEASE);
+    cellFsUnlink(OWNS_MENU_REFOCUS);
+    cellFsUnlink(OWNS_XMB_STATE);
+    cellFsUnlink(OWNS_DIALOG_OPEN);
     // The VSH's pad state and Triangle's last state: the thread's own. Without the pad state, the
     // save menu does not open; the rest works as before.
     const vsh_pad pad = pad_find();
@@ -65,6 +73,11 @@ static void watch(void *unused)
             cellFsUnlink(OWNS_LAUNCH_REQUEST);
             app_start();
         }
+        if (cellFsStat(OWNS_MENU_REFOCUS, &status) == 0)
+        {
+            cellFsUnlink(OWNS_MENU_REFOCUS);
+            menu_recover();
+        }
         if (cellFsStat(NOTICES_FILE, &status) == 0)
         {
             notices_take(notices, &taken);
@@ -80,7 +93,7 @@ static void watch(void *unused)
         {
             if (pad_triangle_pressed(&pad, &triangle_was_down))
             {
-                save_menu_open_for_focused_item();
+                item_menu_open_for_focused_item();
             }
             sysUsleep(kPadPollMicroseconds);
         }
