@@ -5,28 +5,15 @@
 #include "sync/GameName.h"
 
 #include <algorithm>
-#include <cctype>
-
-namespace
-{
-/** Whether a comes before b from A to Z, whatever the letters' case. */
-bool LessIgnoringCase(const std::string &a, const std::string &b)
-{
-    return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(),
-                                        [](char x, char y)
-                                        {
-                                            return std::tolower(static_cast<unsigned char>(x)) <
-                                                   std::tolower(static_cast<unsigned char>(y));
-                                        });
-}
-} // namespace
 
 SaveBrowser::SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
-                         SyncDisplay &display, const std::string &rootFolderId,
-                         const std::string &savedata, const std::string &ownSave,
-                         const std::string &workDirectory, const SaveTarget *target)
+                         SaveRegistry &registry, SyncDisplay &display,
+                         const std::string &rootFolderId, const std::string &savedata,
+                         const std::string &ownSave, const std::string &workDirectory,
+                         const SaveTarget *target)
     : m_state(state), m_display(display), m_cloud(cloud), m_scanner(storage, savedata, ownSave),
-      m_archives(cloud, state, storage, display, savedata, ownSave, workDirectory, target),
+      m_archives(cloud, state, storage, registry, display, savedata, ownSave, workDirectory,
+                 target),
       m_rootFolderId(rootFolderId), m_ownSave(ownSave)
 {
 }
@@ -140,15 +127,7 @@ RemoveResult SaveBrowser::Remove(const std::string &name)
     {
         return RemoveResult::OnConsole;
     }
-    const CloudSave &save = Save(name);
-    // The console has no PARAM.SFO of it to read the title from.
-    const std::string game = GameLabel(TitleId(name), save.texts.title);
-    if (m_display.Ask(game + ":\n" + name + " is not on this PS3. Delete it from the cloud?") !=
-        Answer::Yes)
-    {
-        return RemoveResult::Kept;
-    }
-    if (!m_cloud.TrashFile(save.fileId))
+    if (!m_cloud.TrashFile(Save(name).fileId))
     {
         return RemoveResult::Failed;
     }

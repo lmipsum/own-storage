@@ -6,6 +6,7 @@
 #include "sync/ParamSfo.h"
 #include "sync/SaveArchives.h"
 #include "sync/SaveProgress.h"
+#include "sync/SaveRegistry.h"
 #include "sync/SaveScanner.h"
 
 #include <algorithm>
@@ -28,50 +29,65 @@ bool SaveImport::Run(const std::vector<std::string> &folders, ImportResult &resu
     // How long the drives and the cloud's list take is logged, to tell which one to speed up.
     m_display.SetText(ProgressBar::Overall, "Reading the USB drive...");
     const std::time_t started = m_clock.Seconds();
-    // Every drive is scanned before anything is uploaded, so the saves and their drives' archives
-    // outlive the one run of the queue that uploads them all.
-    std::deque<SaveArchives> drives;
-    std::vector<std::vector<LocalSave>> saves;
-    std::set<std::string> seen;
+    std::vector<std::vector<std::string>> driveNames;
     for (const std::string &folder : folders)
     {
-        drives.emplace_back(m_cloud, m_state, m_storage, m_display, folder, m_ownSave,
-                            m_workDirectory, nullptr);
-        saves.push_back(SaveScanner(m_storage, folder, m_ownSave).Scan());
+        driveNames.push_back(SaveScanner(m_storage, folder, m_ownSave).Names());
     }
-    const std::time_t read = m_clock.Seconds();
-    debugPrintf("SaveImport::Run: the drives took %ld s\n", static_cast<long>(read - started));
+    const std::time_t named = m_clock.Seconds();
     m_display.SetText(ProgressBar::Overall, "Listing the saves in the cloud...");
     std::map<std::string, CloudSave> cloudSaves;
     if (!ListCloudSaves(m_cloud, m_rootFolderId, m_ownSave, m_state, cloudSaves))
     {
         return false;
     }
-    debugPrintf("SaveImport::Run: the cloud's list took %ld s\n",
-                static_cast<long>(m_clock.Seconds() - read));
-    std::vector<std::pair<SaveArchives *, const LocalSave *>> uploads;
-    for (std::size_t drive = 0; drive < saves.size(); ++drive)
+    const std::time_t listed = m_clock.Seconds();
+    m_display.SetText(ProgressBar::Overall, "Reading the USB drive...");
+    // Only the saves the cloud lacks are read file by file: on a slow drive that reading takes
+    // the time, and a save the cloud has is left as it is. Every drive is read before anything is
+    // uploaded, so the saves and their drives' archives outlive the one run of the queue that
+    // uploads them all. An import only reads the drives' saves, so it writes no folder to register.
+    NoSaveRegistry noRegistry;
+    std::deque<SaveArchives> drives;
+    std::vector<std::vector<LocalSave>> saves(folders.size());
+    std::set<std::string> seen;
+    for (std::size_t drive = 0; drive < folders.size(); ++drive)
     {
-        for (const LocalSave &save : saves[drive])
+        drives.emplace_back(m_cloud, m_state, m_storage, noRegistry, m_display, folders[drive],
+                            m_ownSave, m_workDirectory, nullptr);
+        const SaveScanner scanner(m_storage, folders[drive], m_ownSave);
+        for (const std::string &name : driveNames[drive])
         {
+            if (cloudSaves.count(name) != 0)
+            {
+                ++result.skipped;
+                continue;
+            }
+            LocalSave save = scanner.ScanSave(name);
             // A drive that was in a computer may hold files of its own there, such as
             // .DS_Store; every save has a PARAM.SFO.
             if (std::find(save.files.begin(), save.files.end(), paramSfoName) == save.files.end())
             {
                 continue;
             }
-            if (cloudSaves.count(save.name) != 0)
-            {
-                ++result.skipped;
-            }
-            else if (!seen.insert(save.name).second)
+            if (!seen.insert(name).second)
             {
                 ++result.duplicates;
+                continue;
             }
-            else
-            {
-                uploads.push_back(std::make_pair(&drives[drive], &save));
-            }
+            saves[drive].push_back(save);
+        }
+    }
+    debugPrintf(
+        "SaveImport::Run: the names took %ld s, the cloud's list %ld s, the new saves %ld s\n",
+        static_cast<long>(named - started), static_cast<long>(listed - named),
+        static_cast<long>(m_clock.Seconds() - listed));
+    std::vector<std::pair<SaveArchives *, const LocalSave *>> uploads;
+    for (std::size_t drive = 0; drive < saves.size(); ++drive)
+    {
+        for (const LocalSave &save : saves[drive])
+        {
+            uploads.push_back(std::make_pair(&drives[drive], &save));
         }
     }
     unsigned long long bytes = 0;

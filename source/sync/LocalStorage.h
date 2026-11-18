@@ -13,6 +13,13 @@ struct FileStatus
     std::time_t modified;
 };
 
+/** A name in a directory, with its file's status. */
+struct DirectoryEntry
+{
+    std::string name;
+    FileStatus status;
+};
+
 /**
  * The console's hard disk as the sync sees it, so that the sync does not depend on the console's
  * file system calls.
@@ -35,6 +42,23 @@ class LocalStorage
      * @return false when there is no such file
      */
     virtual bool Status(const std::string &path, FileStatus &status) const = 0;
+    /**
+     * The names in a directory with their files' statuses, which a console reads in one go rather
+     * than file by file.
+     * @param directory the directory
+     * @return the entries, without "." and ".."; empty when the directory cannot be read
+     */
+    virtual std::vector<DirectoryEntry> ListWithStatus(const std::string &directory) const
+    {
+        std::vector<DirectoryEntry> entries;
+        for (const std::string &name : List(directory))
+        {
+            DirectoryEntry entry{name, {0, 0}};
+            Status(directory + "/" + name, entry.status);
+            entries.push_back(entry);
+        }
+        return entries;
+    }
     /**
      * A file's MD5, the way Drive reports md5Checksum.
      * @param path the file
@@ -66,7 +90,7 @@ class LocalStorage
      */
     virtual bool Write(const std::string &path, const std::string &content) = 0;
     /**
-     * Adds to the end of a file that Write() created.
+     * Adds to the end of a file; one that is not there is created.
      * @param path the file
      * @param content what to add
      * @return false when it cannot be written

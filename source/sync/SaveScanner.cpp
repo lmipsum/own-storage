@@ -17,17 +17,20 @@ SaveScanner::SaveScanner(const LocalStorage &storage, const std::string &savedat
 {
 }
 
-std::vector<LocalSave> SaveScanner::Scan() const
+std::vector<std::string> SaveScanner::Names() const
 {
     std::vector<std::string> names = m_storage.List(m_savedata);
+    names.erase(std::remove(names.begin(), names.end(), m_ownSave), names.end());
     std::sort(names.begin(), names.end());
+    return names;
+}
+
+std::vector<LocalSave> SaveScanner::Scan() const
+{
     std::vector<LocalSave> saves;
-    for (const std::string &name : names)
+    for (const std::string &name : Names())
     {
-        if (name != m_ownSave)
-        {
-            saves.push_back(ScanSave(name));
-        }
+        saves.push_back(ScanSave(name));
     }
     debugPrintf("SaveScanner::Scan: %u save folders\n", static_cast<unsigned int>(saves.size()));
     return saves;
@@ -38,16 +41,17 @@ LocalSave SaveScanner::ScanSave(const std::string &name) const
     LocalSave save;
     save.name = name;
     const std::string folder = m_savedata + "/" + name;
-    save.files = m_storage.List(folder);
-    std::sort(save.files.begin(), save.files.end());
+    std::vector<DirectoryEntry> entries = m_storage.ListWithStatus(folder);
+    std::sort(entries.begin(), entries.end(),
+              [](const DirectoryEntry &a, const DirectoryEntry &b) { return a.name < b.name; });
     std::ostringstream fingerprint;
-    for (const std::string &file : save.files)
+    for (const DirectoryEntry &entry : entries)
     {
-        FileStatus status = {0, 0};
-        m_storage.Status(folder + "/" + file, status);
-        fingerprint << file << ' ' << status.size << ' ' << status.modified << '\n';
-        save.modified = std::max(save.modified, status.modified);
-        save.bytes += status.size;
+        save.files.push_back(entry.name);
+        fingerprint << entry.name << ' ' << entry.status.size << ' ' << entry.status.modified
+                    << '\n';
+        save.modified = std::max(save.modified, entry.status.modified);
+        save.bytes += entry.status.size;
     }
     save.fingerprint = fingerprint.str();
     return save;

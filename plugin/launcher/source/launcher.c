@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The XMB's rows start Own Storage through this VSH plugin, the way its own icon starts it: the
-// system's game_ext_plugin launches the installed app, whatever disc or game is mounted. The app's
-// results show through it too, as the XMB's notifications, in the system's words where it has them.
+// The XMB's rows start Own Storage through this VSH plugin, the way its own icon starts it. The
+// app's results show through it too, as the XMB's notifications, and the saves it downloaded are
+// registered through it in the system's saved data list. And Triangle on one of the app's
+// save or game folder rows opens the save menu, whose view (plugin/menu) the plugin loads and
+// unloads.
 //
 // The module's only segment is read-only once loaded, as the PS3 refuses to load a segment that
 // is both writable and executable; so nothing here writes to a global, and the thread runs until
@@ -14,221 +16,30 @@
 #include <sys/systime.h>
 #include <sys/thread.h>
 
-/** paf's View_Find: a loaded plugin's view; 0 when the plugin is not loaded. */
-extern int View_Find(const char *name);
-/** paf's plugin_GetInterface: one of a plugin's interfaces; NULL when it has none of the id. */
-extern void *plugin_GetInterface(int view, int id);
-/** paf's View::GetString: a plugin's text in the system's language, as UTF-16; NULL without it. */
-extern const unsigned short *View_GetString(int view, const char *label);
-/** vshtask's notification, which shows a line of UTF-8 in the XMB's corner. */
-extern int vshtask_notify(int arg, const char *message);
+#include "app_start.h"
+#include "item_menu.h"
+#include "menu_recovery.h"
+#include "menu_view.h"
+#include "notices.h"
+#include "owns_log.h"
+#include "owns_paths.h"
+#include "pad.h"
+#include "paf.h"
+#include "save_register.h"
 
-// xmb_plugin's interface that loads other plugins, and game_ext_plugin's id among them, as webMAN
-// MOD's vsh/xmb_plugin.h describes them.
-#define XMM0_INTERFACE 0x584d4d30
-#define GAME_EXT_PLUGIN 0x16
-
-/** The start of xmb_plugin's XMM0 interface. */
-typedef struct
-{
-    int (*GetPluginIdByName)(const char *);
-    char *(*GetPluginNameById)(int);
-    int (*IsPluginViewAvailable)(int);
-    /** Loads a plugin, then calls the handler once its view is up. */
-    int (*LoadPlugin3)(int, void *, int);
-} xmm0_interface;
-
-/** game_ext_plugin's interface 1, entry 3: starts the installed game in a folder. */
-typedef int (*select_by_folder)(const char *folder, int place);
-#define SELECT_BY_FOLDER 3
-// The folder is one in /dev_hdd0/game.
-#define HDD_GAME 2
-
-// The file a row's script writes to ask for the app, as the app's xmbPlace names it; the plugin
-// removes it as it starts the app.
-static const char kRequest[] = "/dev_hdd0/tmp/owns_launch";
-static const char kAppFolder[] = "OWNS00001";
-// The file the app writes its results to, a notification a line, as the app's notificationRequest
-// names it; a {plugin:label} part stands for that plugin's text in the system's language.
-static const char kNotices[] = "/dev_hdd0/tmp/owns_notify";
-// How much of the file and of a notification the stack holds; more is left out.
-#define NOTICES_BYTES 1024
-#define LINE_BYTES 512
-#define NAME_BYTES 64
-static const unsigned int kPollMicroseconds = 300000;
-// The watching thread waits most of the time; a small stack holds what it needs.
+// Triangle is polled about 30 times a second, so a short press is not missed; the request files
+// are looked at every ninth poll, about every 0.3 s.
+static const unsigned int kPadPollMicroseconds = 33333;
+static const int kPadPollsPerRound = 9;
+// The watching thread waits most of the time; its stack holds an item's texts and a list's URL,
+// which the save menu reads.
 static const s32 kThreadPriority = 3000;
-static const u64 kThreadStackBytes = 0x4000;
-
-/** Starts the app, once game_ext_plugin is loaded. */
-static void on_game_ext_loaded(void)
-{
-    const int view = View_Find("game_ext_plugin");
-    void **entries = view != 0 ? (void **)plugin_GetInterface(view, 1) : NULL;
-    if (entries != NULL)
-    {
-        ((select_by_folder)entries[SELECT_BY_FOLDER])(kAppFolder, HDD_GAME);
-    }
-}
-
-/** Has game_ext_plugin loaded, which then starts the app. */
-static void start_app(void)
-{
-    // Loaded already, it would not call the handler, and the request is dropped; the XMB unloads
-    // it once the app has started, so the next request starts the app again.
-    if (View_Find("game_ext_plugin") != 0)
-    {
-        return;
-    }
-    const int view = View_Find("xmb_plugin");
-    xmm0_interface *xmm0 =
-        view != 0 ? (xmm0_interface *)plugin_GetInterface(view, XMM0_INTERFACE) : NULL;
-    if (xmm0 != NULL)
-    {
-        xmm0->LoadPlugin3(GAME_EXT_PLUGIN, (void *)on_game_ext_loaded, 0);
-    }
-}
+static const u64 kThreadStackBytes = 0x8000;
 
 /**
- * Adds a character to a UTF-8 text, when there is room for it and the closing NUL.
- * @return the text's new length
+ * Waits for the rows' requests, the app's results and downloaded saves, the save menu's release,
+ * the recovery request and Triangle.
  */
-static size_t put_utf8(char *text, size_t length, size_t room, unsigned int code)
-{
-    const size_t bytes = code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-    if (length + bytes >= room)
-    {
-        return length;
-    }
-    if (bytes == 1)
-    {
-        text[length] = (char)code;
-        return length + 1;
-    }
-    // The lead byte's marks for 2, 3 and 4 bytes, then six bits a continuation byte.
-    static const unsigned char kLead[] = {0, 0, 0xC0, 0xE0, 0xF0};
-    for (size_t i = bytes - 1; i > 0; --i)
-    {
-        text[length + i] = (char)(0x80 | (code & 0x3F));
-        code >>= 6;
-    }
-    text[length] = (char)(kLead[bytes] | code);
-    return length + bytes;
-}
-
-/**
- * Adds a plugin's text in the system's language to a UTF-8 text.
- * @param name "plugin:label", not NUL-ended
- * @param size the name's bytes
- * @return the text's new length
- */
-static size_t put_system_text(char *text, size_t length, size_t room, const char *name, size_t size)
-{
-    char plugin[NAME_BYTES];
-    char label[NAME_BYTES];
-    size_t colon = 0;
-    while (colon < size && name[colon] != ':')
-    {
-        ++colon;
-    }
-    if (colon >= NAME_BYTES || colon == size || size - colon > NAME_BYTES)
-    {
-        return length;
-    }
-    for (size_t i = 0; i < colon; ++i)
-    {
-        plugin[i] = name[i];
-    }
-    plugin[colon] = '\0';
-    for (size_t i = colon + 1; i < size; ++i)
-    {
-        label[i - colon - 1] = name[i];
-    }
-    label[size - colon - 1] = '\0';
-    const int view = View_Find(plugin);
-    const unsigned short *units = view != 0 ? View_GetString(view, label) : NULL;
-    for (size_t i = 0; units != NULL && units[i] != 0; ++i)
-    {
-        unsigned int code = units[i];
-        // A surrogate pair stands for a character beyond the first 65536.
-        if (code >= 0xD800 && code < 0xDC00 && units[i + 1] >= 0xDC00 && units[i + 1] < 0xE000)
-        {
-            code = 0x10000 + ((code - 0xD800) << 10) + (units[i + 1] - 0xDC00);
-            ++i;
-        }
-        // The system's texts break their lines; a notification is one line.
-        length = put_utf8(text, length, room, code == '\n' ? ' ' : code);
-    }
-    return length;
-}
-
-/** Shows one line of the app's as a notification, its {plugin:label} parts in system words. */
-static void notify(const char *line, size_t size)
-{
-    char text[LINE_BYTES];
-    size_t length = 0;
-    for (size_t i = 0; i < size; ++i)
-    {
-        size_t end = i;
-        if (line[i] == '{')
-        {
-            while (end < size && line[end] != '}')
-            {
-                ++end;
-            }
-        }
-        if (line[i] == '{' && end < size)
-        {
-            length = put_system_text(text, length, sizeof text, line + i + 1, end - i - 1);
-            i = end;
-        }
-        else if (length + 1 < sizeof text)
-        {
-            text[length++] = line[i];
-        }
-    }
-    text[length] = '\0';
-    if (length > 0)
-    {
-        vshtask_notify(0, text);
-    }
-}
-
-/**
- * Takes the app's results from their file, which tells the app they are taken, after those taken
- * before.
- * @param notices the results taken so far
- * @param size their bytes; grows by those taken now
- */
-static void take_notices(char *notices, uint64_t *size)
-{
-    int file;
-    if (cellFsOpen(kNotices, CELL_FS_O_RDONLY, &file, NULL, 0) != 0)
-    {
-        return;
-    }
-    uint64_t read = 0;
-    cellFsRead(file, notices + *size, NOTICES_BYTES - *size, &read);
-    cellFsClose(file);
-    cellFsUnlink(kNotices);
-    *size += read;
-}
-
-/** Shows results, a notification a line. */
-static void show_notices(const char *notices, uint64_t size)
-{
-    size_t start = 0;
-    for (size_t i = 0; i <= size; ++i)
-    {
-        if (i == size || notices[i] == '\n')
-        {
-            notify(notices + start, i - start);
-            start = i + 1;
-        }
-    }
-}
-
-/** Waits for a row's request, starting the app for each, and for the app's results. */
 static void watch(void *unused)
 {
     (void)unused;
@@ -237,29 +48,71 @@ static void watch(void *unused)
     uint64_t taken = 0;
     // A request left from before the console started, as when the user used a row before the
     // restart that loads this plugin, would start the app unasked.
-    cellFsUnlink(kRequest);
+    cellFsUnlink(OWNS_LAUNCH_REQUEST);
     // Results left so would be shown as new.
-    cellFsUnlink(kNotices);
+    cellFsUnlink(NOTICES_FILE);
+    // No save menu is open yet.
+    cellFsUnlink(OWNS_MENU_TARGET);
+    cellFsUnlink(OWNS_MENU_RELEASE);
+    cellFsUnlink(OWNS_MENU_REFOCUS);
+    cellFsUnlink(OWNS_XMB_STATE);
+    cellFsUnlink(OWNS_DIALOG_OPEN);
+    // The app's register request, and one taken whose batch a shutdown cut short, are kept: their
+    // saves are still to be registered.
+    save_register registry;
+    save_register_init(&registry);
+    // The VSH's pad state and Triangle's last state: the thread's own. Without the pad state, the
+    // save menu does not open; the rest works as before.
+    const vsh_pad pad = pad_find();
+    if (!pad_found(&pad))
+    {
+        owns_log("pad state not found: Triangle is off");
+    }
+    int triangle_was_down = 0;
     for (;;)
     {
+        // The view's unload is asked for before the app a menu row asked for starts.
+        const int released = menu_view_take_release();
         CellFsStat status;
-        if (cellFsStat(kRequest, &status) == 0)
+        // The request waits a round after the save menu's view was released, and while it is
+        // still loaded: game_ext_plugin is only asked for once paf is done with the view.
+        if (!released && cellFsStat(OWNS_LAUNCH_REQUEST, &status) == 0 && !menu_view_loaded())
         {
-            cellFsUnlink(kRequest);
-            start_app();
+            cellFsUnlink(OWNS_LAUNCH_REQUEST);
+            app_start();
         }
-        if (cellFsStat(kNotices, &status) == 0)
+        if (cellFsStat(OWNS_MENU_REFOCUS, &status) == 0)
         {
-            take_notices(notices, &taken);
+            cellFsUnlink(OWNS_MENU_REFOCUS);
+            menu_recover();
+        }
+        if (cellFsStat(NOTICES_FILE, &status) == 0)
+        {
+            notices_take(notices, &taken);
         }
         // They show once the user is back on the XMB, with explore_plugin loaded, whose texts they
         // use; while the app runs they would show without them.
         if (taken > 0 && View_Find("explore_plugin") != 0)
         {
-            show_notices(notices, taken);
+            notices_show(notices, taken);
             taken = 0;
         }
-        sysUsleep(kPollMicroseconds);
+        // The app's downloads are registered on the XMB too, as explore_plugin runs the commands;
+        // not while a game runs, as the in-game XMB loads explore_plugin while the app may still
+        // write the request, nor while the save menu is open, whose commands they would hold up.
+        if (save_register_waiting(&registry) && View_Find("explore_plugin") != 0 &&
+            View_Find("game_plugin") == 0 && !menu_view_loaded())
+        {
+            save_register_round(&registry);
+        }
+        for (int poll = 0; poll < kPadPollsPerRound; ++poll)
+        {
+            if (pad_triangle_pressed(&pad, &triangle_was_down))
+            {
+                item_menu_open_for_focused_item();
+            }
+            sysUsleep(kPadPollMicroseconds);
+        }
     }
 }
 

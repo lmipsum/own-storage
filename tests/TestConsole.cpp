@@ -105,8 +105,14 @@ const std::string &TestConsole::Scratch() const
     return m_scratch;
 }
 
+bool TestConsole::WasListed(const std::string &directory) const
+{
+    return std::find(m_listed.begin(), m_listed.end(), directory) != m_listed.end();
+}
+
 std::vector<std::string> TestConsole::List(const std::string &directory) const
 {
+    m_listed.push_back(directory);
     std::vector<std::string> names;
     if (DIR *opened = opendir(Map(directory).c_str()))
     {

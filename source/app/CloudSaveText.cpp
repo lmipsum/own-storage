@@ -189,6 +189,19 @@ std::string ShownTime(const std::string &modified, const DateStyle &style)
     return text.str();
 }
 
+std::string SaveCount(std::size_t count)
+{
+    std::ostringstream text;
+    text << count << (count == 1 ? " save" : " saves");
+    return text.str();
+}
+
+std::string ShownDetail(const std::string &detail)
+{
+    // Without any other character npos + 1 wraps to 0, which leaves nothing.
+    return detail.substr(0, detail.find_last_not_of('\n') + 1);
+}
+
 std::string FitInDialog(const std::string &head, const std::string &middle, const std::string &tail)
 {
     const std::size_t used = head.size() + tail.size();
@@ -221,8 +234,6 @@ Notice ShownResult(const std::string &name, RemoveResult result)
     case RemoveResult::OnConsole:
         return Result(name +
                       " is on this PS3; delete it there first, or the next sync uploads it again.");
-    case RemoveResult::Kept:
-        return Result(name + " stays in the cloud.");
     default:
         return Problem(name + " could not be deleted from the cloud.");
     }

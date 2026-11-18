@@ -57,6 +57,7 @@
 #include "app/Profile.h"
 #include "app/LauncherSetup.h"
 #include "app/Notice.h"
+#include "app/SaveRegisterRequest.h"
 #include "app/XmbInstall.h"
 #include "app/XmbPick.h"
 #include "sync/Clock.h"
@@ -110,11 +111,36 @@ const LauncherPlace launcherPlace{APP_DIR "plugins/owns_launcher.sprx",
 const char cobraMissingTold[] = APP_DIR "cobra_missing.txt";
 // The file the launcher plugin shows notifications from, a line each, as plugin/launcher reads it.
 const char notificationRequest[] = "/dev_hdd0/tmp/owns_notify";
+// The file the launcher plugin registers downloaded save folders from, a full path a line, as
+// plugin/launcher reads it; the system's saved data list shows a save only once it is registered.
+const char saveRegisterRequest[] = "/dev_hdd0/tmp/owns_register";
 // Whether the launcher plugin runs, and so can show notifications: it is set up unchanged since
 // the console started, and has taken every notification so far.
 bool launcherRuns = false;
 // How long the launcher plugin takes at most to take a notification: two of its polls.
 const unsigned int notificationWaitMicroseconds = 700000;
+
+/**
+ * Where a run registers the saves it downloads: through the launcher plugin while it runs, as for
+ * notifications. Without it nothing takes the request, which would only grow, so then nothing is
+ * registered.
+ */
+class DownloadRegistry : public SaveRegistry
+{
+  public:
+    explicit DownloadRegistry(ConsoleStorage &storage) : m_request(storage, saveRegisterRequest) {}
+
+    void Register(const std::string &folder) override
+    {
+        if (launcherRuns)
+        {
+            m_request.Register(folder);
+        }
+    }
+
+  private:
+    SaveRegisterRequest m_request;
+};
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then sync again.";
@@ -281,6 +307,8 @@ struct RunListing
     /** Whether games holds the saves in the cloud as they are after the action. */
     bool gamesKnown = false;
     std::vector<XmbGame> games;
+    /** Whether the action changed nothing the lists show, so they need no update. */
+    bool listsCurrent = false;
 };
 
 /**
@@ -302,7 +330,8 @@ Notice runSync(ConsoleStorage &storage, const std::string &profile, const std::s
         // Without a state of its own every save starts without a base; the sync works it out.
         SyncState state(stateFile(profile), stateBackup(profile));
         state.Load();
-        Sync sync(drive, state, storage, syncDialog, systemClock, folderId, savedata,
+        DownloadRegistry registry(storage);
+        Sync sync(drive, state, storage, registry, syncDialog, systemClock, folderId, savedata,
                   profileMarkerSave, profile, target);
         done = sync.Run();
         notResigned = sync.NotResigned().size();
@@ -422,7 +451,8 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
         }
         SyncState state(stateFile(profile), stateBackup(profile));
         state.Load();
-        SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata,
+        DownloadRegistry registry(storage);
+        SaveBrowser browser(drive, state, storage, registry, syncDialog, folderId, savedata,
                             profileMarkerSave, profile, target);
         // A user who has never synced has no backup folder, and so no saves to list.
         if (!folderId.empty() && !browser.Refresh())
@@ -442,9 +472,55 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
     {
         storageUse = ShownStorageUse(used, total);
     }
-    WriteXmbLists(storage, xmbPlace, MakeXmbLists(xmbPlace, signedIn, rowsRun, storageUse, games));
+    // Without the file, as before the user chose a view, the default one is listed.
+    std::string view;
+    storage.Read(appPath + xmbViewFile, view);
+    WriteXmbLists(storage, xmbPlace,
+                  MakeXmbLists(xmbPlace, signedIn, rowsRun, storageUse, games, ParseXmbView(view)));
     debugPrintf("refreshXmb: the lists took %ld s\n",
                 static_cast<long>(systemClock.Seconds() - started));
+}
+
+/**
+ * Does what the XMB asked of a save in the cloud.
+ * @param changed receives whether the XMB's lists need an update
+ * @return what came of it, as the user is told it; empty when a dialog told it
+ */
+Notice runSaveAction(SaveBrowser &browser, XmbSaveAction what, const std::string &name,
+                     bool &changed)
+{
+    switch (what)
+    {
+    case XmbSaveAction::Download:
+        return DownloadXmbSave(browser, name, &changed);
+    case XmbSaveAction::Information:
+    {
+        const std::string information = XmbSaveInformation(browser, name);
+        if (information.empty())
+        {
+            // The next update leaves the gone save out.
+            changed = true;
+            return XmbSaveGone(name);
+        }
+        syncDialog.ShowInfo(information);
+        return Result(std::string());
+    }
+    case XmbSaveAction::Delete:
+        return DeleteXmbSave(browser, name, &changed);
+    }
+    return Result(std::string());
+}
+
+/**
+ * Does what the XMB asked of a game's saves in the cloud.
+ * @param changed receives whether the XMB's lists need an update
+ * @return what came of it, as the user is told it
+ */
+Notice runGameAction(SaveBrowser &browser, XmbGameAction what, const std::string &titleId,
+                     bool &changed)
+{
+    return what == XmbGameAction::DownloadAll ? DownloadXmbGame(browser, titleId, &changed)
+                                              : DeleteXmbGame(browser, titleId, &changed);
 }
 
 /**
@@ -475,13 +551,19 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
         return runSync(storage, profile, savedata, target, listing);
     }
     std::string folderId;
-    const bool isSave = action.compare(0, sizeof xmbSave - 1, xmbSave) == 0;
-    if (action != xmbUsbImport && !isSave)
+    XmbSaveAction what = XmbSaveAction::Download;
+    std::string name;
+    XmbGameAction gameWhat = XmbGameAction::DownloadAll;
+    std::string titleId;
+    const bool isSave = ReadXmbSaveAction(action, what, name);
+    const bool isGame = !isSave && ReadXmbGameAction(action, gameWhat, titleId);
+    const bool picks = isSave || isGame;
+    if (action != xmbUsbImport && !picks)
     {
         return Result(std::string());
     }
     // An import creates the folder when it is missing, so that saves can go into it.
-    if (!findBackupFolder(!isSave, folderId))
+    if (!findBackupFolder(!picks, folderId))
     {
         return Problem(driveFailureMessage());
     }
@@ -489,12 +571,13 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
     listing.folderId = folderId;
     SyncState state(stateFile(profile), stateBackup(profile));
     state.Load();
-    if (!isSave)
+    if (!picks)
     {
         return importUsbSaves(storage, state, profile, folderId);
     }
-    SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
-                        profile, target);
+    DownloadRegistry registry(storage);
+    SaveBrowser browser(drive, state, storage, registry, syncDialog, folderId, savedata,
+                        profileMarkerSave, profile, target);
     if (folderId.empty())
     {
         return Result("There are no saves in the cloud.", "{explore_plugin:msg_error_no_savedata}");
@@ -503,7 +586,15 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
     {
         return Problem(driveFailureMessage());
     }
-    const Notice picked = PickXmbSave(browser, syncDialog, action.substr(sizeof xmbSave - 1));
+    bool changed = false;
+    const Notice picked = isGame ? runGameAction(browser, gameWhat, titleId, changed)
+                                 : runSaveAction(browser, what, name, changed);
+    // Kept as it was, or only asked about, the save shows as the lists have it.
+    if (!changed)
+    {
+        listing.listsCurrent = true;
+        return picked;
+    }
     // A download leaves the cloud as it was, and the browser knows of a save it moved to the trash.
     // Telling how each save is on the console reads them, which takes a while.
     syncDialog.ShowWaiting("Updating the list...");
@@ -650,7 +741,7 @@ void runApp()
         return;
     }
     // Still signed out, the lists written at the start are the ones.
-    if (!startedSignedOut || !config.refreshToken.empty())
+    if (!listing.listsCurrent && (!startedSignedOut || !config.refreshToken.empty()))
     {
         // The back button takes the message away; the lists are written all the same. A save's
         // row has shown it already.

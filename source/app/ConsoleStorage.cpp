@@ -3,6 +3,7 @@
 
 #include "app/Files.h"
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <stdio.h>
@@ -16,6 +17,22 @@ namespace
 const s32 kDirectoryMode = 0755;
 // The access a written file gets: the owner writes, everyone reads.
 const s32 kFileMode = 0644;
+// How many directory entries one call reads; a save folder rarely has more files.
+const std::size_t kDirectoryBatch = 32;
+
+/**
+ * A directory entry as the firmware writes it (CellFsDirectoryEntry): PSL1GHT's
+ * sysFSDirectoryEntry has room for a whole path in the name, so its entries do not line up with
+ * the firmware's.
+ */
+struct __attribute__((packed)) FirmwareDirectoryEntry
+{
+    sysFSStat attribute;
+    u8 type;
+    u8 nameLength;
+    char name[256];
+};
+static_assert(sizeof(FirmwareDirectoryEntry) == 310, "CellFsDirectoryEntry is 310 bytes");
 } // namespace
 
 std::vector<std::string> ConsoleStorage::List(const std::string &directory) const
@@ -37,6 +54,39 @@ std::vector<std::string> ConsoleStorage::List(const std::string &directory) cons
     }
     sysFsClosedir(fd);
     return names;
+}
+
+std::vector<DirectoryEntry> ConsoleStorage::ListWithStatus(const std::string &directory) const
+{
+    std::vector<DirectoryEntry> entries;
+    s32 fd;
+    if (sysFsOpendir(directory.c_str(), &fd) != 0)
+    {
+        return entries;
+    }
+    // The system hands the entries over a batch at a time, each with its file's status, rather
+    // than one call for every file's status.
+    std::vector<FirmwareDirectoryEntry> batch(kDirectoryBatch);
+    u32 count = 0;
+    while (sysFsGetDirectoryEntries(fd, reinterpret_cast<sysFSDirectoryEntry *>(batch.data()),
+                                    batch.size() * sizeof(FirmwareDirectoryEntry), &count) == 0 &&
+           count > 0)
+    {
+        for (u32 i = 0; i < count && i < batch.size(); ++i)
+        {
+            // The firmware does not end a name that fills its field.
+            const char *start = batch[i].name;
+            const char *end = std::find(start, start + sizeof batch[i].name, '\0');
+            const std::string name(start, end);
+            if (name != "." && name != "..")
+            {
+                entries.push_back(DirectoryEntry{
+                    name, {batch[i].attribute.st_size, batch[i].attribute.st_mtime}});
+            }
+        }
+    }
+    sysFsClosedir(fd);
+    return entries;
 }
 
 bool ConsoleStorage::Status(const std::string &path, FileStatus &status) const

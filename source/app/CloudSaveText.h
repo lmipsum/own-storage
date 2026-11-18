@@ -44,6 +44,12 @@ std::string ShownStorageUse(unsigned long long used, unsigned long long total);
  */
 std::string ShownTime(const std::string &modified, const DateStyle &style);
 
+/** A number of saves, such as "1 save" or "3 saves". */
+std::string SaveCount(std::size_t count);
+
+/** A save's detail as it is shown: games often end it with line breaks, which only take room. */
+std::string ShownDetail(const std::string &detail);
+
 /**
  * A text short enough for the system dialog, which takes fewer than 512 bytes: the middle part
  * gives way, cut where a UTF-8 character starts, so the head and the tail stay readable.

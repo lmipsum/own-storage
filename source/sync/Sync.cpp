@@ -8,12 +8,13 @@
 #include <sstream>
 #include <utility>
 
-Sync::Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-           const Clock &clock, const std::string &rootFolderId, const std::string &savedata,
-           const std::string &ownSave, const std::string &workDirectory, const SaveTarget *target)
+Sync::Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SaveRegistry &registry,
+           SyncDisplay &display, const Clock &clock, const std::string &rootFolderId,
+           const std::string &savedata, const std::string &ownSave,
+           const std::string &workDirectory, const SaveTarget *target)
     : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display), m_clock(clock),
-      m_scanner(storage, savedata, ownSave),
-      m_archives(cloud, state, storage, display, savedata, ownSave, workDirectory, target),
+      m_scanner(storage, savedata, ownSave), m_archives(cloud, state, storage, registry, display,
+                                                        savedata, ownSave, workDirectory, target),
       m_rootFolderId(rootFolderId), m_ownSave(ownSave)
 {
 }

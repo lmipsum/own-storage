@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sync/GameName.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 
 namespace
@@ -63,4 +65,14 @@ std::string CutText(const std::string &text, std::size_t bytes)
         --end;
     }
     return text.substr(0, end);
+}
+
+bool LessIgnoringCase(const std::string &a, const std::string &b)
+{
+    return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(),
+                                        [](char x, char y)
+                                        {
+                                            return std::tolower(static_cast<unsigned char>(x)) <
+                                                   std::tolower(static_cast<unsigned char>(y));
+                                        });
 }

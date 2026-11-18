@@ -52,6 +52,9 @@ jobs:
           /c/Windows/System32/tar.exe -xf ps3dk.zip -C ps3dk
           rm ps3dk.zip
       - name: Build
+        env:
+          # A debug package's plugins log to the console's disk.
+          PLUGIN_LOG: ${{ inputs.log_host != '' && 'ON' || 'OFF' }}
         shell: pwsh
         run: |
           python -m pip install --quiet ninja==1.13.2
@@ -59,15 +62,19 @@ jobs:
           $env:PS3DEV = $env:PS3DK.Replace('\', '/')
           $env:PSL1GHT = $env:PS3DEV
           $env:PATH = "$env:PS3DK\bin;$env:PS3DK\ppu\bin;$env:PATH"
-          cmake -S plugin/launcher -B build/launcher -G Ninja `
-            -DCMAKE_TOOLCHAIN_FILE="$env:PS3DK\cmake\ps3-ppu-toolchain.cmake"
+          cmake -S plugin -B build/plugin -G Ninja `
+            -DCMAKE_TOOLCHAIN_FILE="$env:PS3DK\cmake\ps3-ppu-toolchain.cmake" `
+            -DOWNS_PLUGIN_LOG="$env:PLUGIN_LOG"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build/launcher
+          cmake --build build/plugin
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: owns-launcher
-          path: build/launcher/owns_launcher.sprx
+          name: owns-plugins
+          path: |
+            build/plugin/owns_launcher.sprx
+            build/plugin/owns_menu.sprx
+            build/plugin/owns_menu.rco
           if-no-files-found: error
           retention-days: 1
 
@@ -97,10 +104,11 @@ jobs:
           rm ps3dev.tar.gz
           echo "PS3DEV=/opt/ps3dev" >> "$GITHUB_ENV"
           echo "PSL1GHT=/opt/ps3dev" >> "$GITHUB_ENV"
-      # The package carries the plugin, which the app installs.
+      # The package carries the plugins: the launcher, which the app installs, and the save menu's
+      # view, which the launcher loads from there.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: owns-launcher
+          name: owns-plugins
           path: package/USRDIR/plugins
       - name: Build
         env:

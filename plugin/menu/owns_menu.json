@@ -1,0 +1,212 @@
+{
+  "name": "owns_menu",
+  "texts": {
+    "msg_info": "Information",
+    "msg_del": "Delete",
+    "msg_owns_download_all": "Download All",
+    "msg_owns_delete_all": "Delete All",
+    "msg_sort": "Sort By",
+    "msg_folder_class_with_icon": "Group Content",
+    "msg_updated_date_r": "Update Date ▼",
+    "msg_updated_date_f": "Update Date ▲",
+    "msg_title_f": "Title Name",
+    "msg_subtitle_f": "Sub-Title",
+    "msg_title_folder": "By Title",
+    "msg_all": "All",
+    "msg_title": "Title",
+    "msg_subtitle": "Sub-Title",
+    "msg_updated_date": "Updated",
+    "msg_size": "Size",
+    "msg_info_detail": "Details",
+    "msg_folder": "Folder",
+    "msg_savedata_count": "Saves",
+    "msg_savedata_count_value": "%1 Save",
+    "msg_savedatas_count_value": "%1 Saves",
+    "msg_savedata_delete_ask": "The saved data will be deleted.\nAre you sure you want to continue?",
+    "msg_owns_delete_all_ask":
+      "All saved data of this game in the cloud will be deleted.\nAre you sure you want to continue?"
+  },
+  "pages": [
+    {
+      "kind": "page",
+      "name": "owns_menu",
+      "attributes": {"onCancel": "Owns::cbCancel", "onContextMenu": "Owns::cbContextMenu"},
+      "children": [
+        {
+          "kind": "plane",
+          "name": "plane_menu0",
+          "children": [
+            {"kind": "plane", "name": "plane_menu0_BG0"},
+            {"kind": "plane", "name": "plane_menu0_BG1"},
+            {
+              "kind": "mlist",
+              "name": "plane_menu0_LowerMenu",
+              "attributes": {
+                "iconOffset": "0x110000", "unknown17": "0x101f6", "unknown18": "0x101f7",
+                "unknown19": "0x101f8", "unknown23": 7,
+                "onPush": "Owns::cbPush", "onFocusRight": "Owns::cbFocusRight",
+                "onFocusUp": "Owns::cbFocusUp",
+                "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+              }
+            },
+            {
+              "kind": "mlist",
+              "name": "plane_menu0_UpperMenu",
+              "attributes": {
+                "iconOffset": "0x210000", "unknown17": "0x101f9", "unknown18": "0x101fa",
+                "unknown19": "0x101fb",
+                "onPush": "Owns::cbPush", "onFocusRight": "Owns::cbFocusRight",
+                "onFocusDown": "Owns::cbFocusDown",
+                "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "plane",
+          "name": "plane_menu1",
+          "attributes": {"width": 128.0, "height": 272.0},
+          "children": [
+            {"kind": "plane", "name": "plane_menu1_BG0"},
+            {"kind": "plane", "name": "plane_menu1_BG1"},
+            {
+              "kind": "mlist",
+              "name": "plane_menu1_LowerMenu",
+              "attributes": {
+                "iconOffset": "0x110000", "unknown17": "0x101f6", "unknown18": "0x101f7",
+                "unknown19": "0x101f8",
+                "onPush": "Owns::cbPush", "onFocusLeft": "Owns::cbFocusLeft",
+                "onFocusRight": "Owns::cbFocusRight", "onFocusUp": "Owns::cbFocusUp",
+                "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+              }
+            },
+            {
+              "kind": "mlist",
+              "name": "plane_menu1_UpperMenu",
+              "attributes": {
+                "iconOffset": "0x210000", "unknown17": "0x101f9", "unknown18": "0x101fa",
+                "unknown19": "0x101fb", "unknown29": "0x1fc",
+                "onPush": "Owns::cbPush", "onFocusLeft": "Owns::cbFocusLeft",
+                "onFocusRight": "Owns::cbFocusRight", "onFocusDown": "Owns::cbFocusDown",
+                "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "plane",
+          "name": "plane_menu2",
+          "attributes": {"width": 128.0, "height": 272.0},
+          "children": [
+            {"kind": "plane", "name": "plane_menu2_BG0"},
+            {"kind": "plane", "name": "plane_menu2_BG1"},
+            {
+              "kind": "mlist",
+              "name": "plane_menu2_LowerMenu",
+              "attributes": {
+                "iconOffset": "0x110000", "unknown17": "0x101f6", "unknown18": "0x101f7",
+                "unknown19": "0x101f8",
+                "onPush": "Owns::cbPush", "onFocusLeft": "Owns::cbFocusLeft",
+                "onFocusUp": "Owns::cbFocusUp",
+                "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+              }
+            },
+            {
+              "kind": "mlist",
+              "name": "plane_menu2_UpperMenu",
+              "attributes": {
+                "iconOffset": "0x210000", "unknown17": "0x101f9", "unknown18": "0x101fa",
+                "unknown19": "0x101fb",
+                "onPush": "Owns::cbPush", "onFocusLeft": "Owns::cbFocusLeft",
+                "onFocusDown": "Owns::cbFocusDown",
+                "onScrollIn": "Owns::cbScrollIn", "onScrollOut": "Owns::cbScrollOut"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "page",
+      "name": "owns_info",
+      "attributes": {
+        "onInit": "Owns::cbInfoInit", "onCancel": "Owns::cbInfoCancel",
+        "onActivate": "Owns::cbInfoActivate"
+      },
+      "children": [
+        {
+          "kind": "plane",
+          "name": "owns_info_plane",
+          "attributes": {"iconOffset": 0, "unknown17": 0, "unknown18": 0, "unknown19": 0}
+        }
+      ]
+    },
+    {
+      "kind": "page",
+      "name": "owns_delete",
+      "attributes": {
+        "onInit": "Owns::cbInfoInit", "onCancel": "Owns::cbQuestionCancel",
+        "onActivate": "Owns::cbInfoActivate"
+      },
+      "children": [
+        {
+          "kind": "text",
+          "name": "text_delete_msg",
+          "attributes": {
+            "depth": 1.0, "iconOffset": "0x300000", "unknown17": "0x1d0", "unknown18": "0x0",
+            "unknownInt20": "0x0", "unknownInt21": "0x0", "unknown22": "0x0",
+            "unknownInt27": "0x1", "size": 10.0, "unknown55": "0xffffffff",
+            "unknownInt56": "0x10014"
+          }
+        },
+        {"kind": "text", "name": "text_delete_title"},
+        {
+          "kind": "text",
+          "name": "text_delete_create_date",
+          "attributes": {
+            "posY": -0.8, "iconOffset": "0x0", "unknownInt27": "0x1", "unknown55": "0xffffffff"
+          }
+        },
+        {
+          "kind": "text",
+          "name": "text_delete_data_size",
+          "attributes": {
+            "posY": -1.8, "iconOffset": "0x0", "unknownInt27": "0x1", "unknown55": "0xffffffff"
+          }
+        },
+        {
+          "kind": "text",
+          "name": "text_delete_sub_title",
+          "attributes": {
+            "iconOffset": "0x110000", "unknown17": "0x10cff", "unknown18": "0x10d05",
+            "unknown19": "0x10000", "unknownInt20": "0x108fe", "unknownInt21": "0x10914",
+            "unknownInt56": "0x13"
+          }
+        },
+        {
+          "kind": "text",
+          "name": "text_delete_detail",
+          "attributes": {
+            "iconOffset": "0x110000", "unknown17": "0xcff", "unknown18": "0xd01",
+            "unknownInt20": "0x8fe", "unknownInt21": "0xd03", "unknown22": "0x0",
+            "unknownInt27": "0x1010001", "unknownInt56": "0x91d", "unknownInt57": "0x908"
+          }
+        },
+        {
+          "kind": "text",
+          "name": "text_delete_detail_omit",
+          "attributes": {
+            "iconOffset": "0x110000", "unknown17": "0xcff", "unknown18": "0xd04",
+            "unknownInt20": "0x0", "unknownInt21": "0x0", "unknown22": "0x0",
+            "unknownInt27": "0x1000001", "unknown55": "0xffffffff", "unknownInt56": "0x91d",
+            "unknownInt57": "0x908"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "page",
+      "name": "owns_dialog"
+    }
+  ]
+}

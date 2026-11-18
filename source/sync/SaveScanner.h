@@ -49,6 +49,8 @@ class SaveScanner
 
     /** The user's save folders, sorted by name. */
     std::vector<LocalSave> Scan() const;
+    /** The save folders' names alone, sorted, which a single listing gives. */
+    std::vector<std::string> Names() const;
     /**
      * One save folder as it is now.
      * @param name the folder's name in the savedata directory

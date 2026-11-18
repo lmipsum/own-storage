@@ -5,6 +5,7 @@
 #include "sync/CloudStorage.h"
 #include "sync/LocalStorage.h"
 #include "sync/SaveArchives.h"
+#include "sync/SaveRegistry.h"
 #include "sync/SaveScanner.h"
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
@@ -56,8 +57,6 @@ enum class RemoveResult
     Removed,
     /** The console has it, so the next sync would only upload it again. */
     OnConsole,
-    /** The user kept it. */
-    Kept,
     Failed
 };
 
@@ -72,18 +71,18 @@ class SaveBrowser
      * @param cloud where the backup is kept
      * @param state the base of every save
      * @param storage the console's hard disk
-     * @param display what the user sees of a download, and asks before a save is replaced or
-     * deleted
+     * @param registry where each save folder loaded whole is registered
+     * @param display what the user sees of a download, and asks before a save is replaced
      * @param rootFolderId the cloud id of the Own Storage folder
      * @param savedata the user's savedata directory
      * @param ownSave a save folder of the app itself, which is never backed up
      * @param workDirectory where archives are kept while they move
      * @param target whom a save downloaded is made to belong to; null to leave saves as they are
      */
-    SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-                const std::string &rootFolderId, const std::string &savedata,
-                const std::string &ownSave, const std::string &workDirectory,
-                const SaveTarget *target);
+    SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
+                SaveRegistry &registry, SyncDisplay &display, const std::string &rootFolderId,
+                const std::string &savedata, const std::string &ownSave,
+                const std::string &workDirectory, const SaveTarget *target);
     SaveBrowser(const SaveBrowser &) = delete;
     SaveBrowser &operator=(const SaveBrowser &) = delete;
 
@@ -109,8 +108,8 @@ class SaveBrowser
      */
     LoadResult Load(const std::string &name);
     /**
-     * Moves a save from Games() to the cloud's trash, once the user says so, and only when the
-     * console does not have it; its base goes with it.
+     * Moves a save from Games() to the cloud's trash, only when the console does not have it; its
+     * base goes with it. The user has confirmed it on the XMB already, so it asks nothing.
      */
     RemoveResult Remove(const std::string &name);
 

@@ -1,0 +1,13 @@
+# The VSH's allocator library (operator new and delete), which paf's strings use; the NIDs are the
+# system's.
+library: allocator
+module: allocator
+archive_name: allocator
+version: 1
+exports:
+  - name: vsh_new
+    nid: '0x83b2cc6f'
+    signature: 'void *vsh_new(unsigned int size);'
+  - name: vsh_delete
+    nid: '0xd84b3689'
+    signature: 'void vsh_delete(void *block);'
