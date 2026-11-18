@@ -149,16 +149,17 @@ static void menu_view_unload(void)
     }
 }
 
-void menu_view_take_release(void)
+int menu_view_take_release(void)
 {
     enum menu_release_then then = MENU_RELEASE_ONLY;
     if (!menu_release_take(&then))
     {
-        return;
+        return 0;
     }
     menu_view_unload();
     if (then == MENU_RELEASE_SWITCH_LIST)
     {
         owns_log_value("list switched", (uint32_t)list_switch_to_kept_view());
     }
+    return 1;
 }

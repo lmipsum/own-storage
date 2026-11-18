@@ -11,8 +11,6 @@ enum xmb_backdrop
     XMB_BACKDROP_INFO,
     // The Saved Data Utility's pages, its delete question among them.
     XMB_BACKDROP_UTILITY,
-    // The XMB as it was.
-    XMB_BACKDROP_OFF,
 };
 
 /**
@@ -21,5 +19,11 @@ enum xmb_backdrop
  * @return 1 when xmb_plugin was asked
  */
 int xmb_backdrop_set(enum xmb_backdrop backdrop);
+
+/**
+ * Puts the XMB back as it was before a backdrop, as the page that set it does on its close.
+ * @return 1 when xmb_plugin was asked
+ */
+int xmb_backdrop_clear(enum xmb_backdrop backdrop);
 
 #endif

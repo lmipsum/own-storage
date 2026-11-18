@@ -17,6 +17,22 @@ typedef struct
     uint32_t length;
 } explore_url;
 
+// More open list levels than the XMB has.
+#define EXPLORE_LISTS_MAX 16
+
+/**
+ * The open lists of explore_plugin's current category, one a folder level, the deepest last.
+ * Every step is checked to be as traced; nothing is written.
+ * @return their count; -1 when explore_plugin is not as traced, or they are more than room
+ */
+int explore_query_lists(uint32_t *lists, int room);
+
+/**
+ * The stored query URL of one of explore_query_lists' lists.
+ * @return 1 when it has one, as traced
+ */
+int explore_query_list_url(uint32_t list, explore_url *url);
+
 /**
  * Finds the stored query URL of the deepest open list of explore_plugin's current category, the
  * one the user is on. Every step is checked to be as traced; nothing is written.
@@ -36,5 +52,17 @@ void explore_url_copy(const explore_url *url, char *text);
  * @return 1 when explore_plugin took it
  */
 int explore_command(const char *command);
+
+// How long a wait on explore_plugin lasts: a check every 0.1 s, at most 2 s.
+#define EXPLORE_WAIT_MICROSECONDS 100000
+#define EXPLORE_WAIT_ROUNDS 20
+
+/**
+ * Hands explore_plugin a command, waiting while its runner is busy with another: the runner takes
+ * one command at a time, and refuses the next until it is done with the one before.
+ * @param command a text that stays, as for explore_command
+ * @return 1 when explore_plugin took it; 0 when its runner stayed busy
+ */
+int explore_command_wait(const char *command);
 
 #endif

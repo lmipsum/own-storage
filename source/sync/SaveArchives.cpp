@@ -38,10 +38,10 @@ std::string CloudTime(std::time_t time)
 } // namespace
 
 SaveArchives::SaveArchives(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
-                           SyncDisplay &display, const std::string &savedata,
-                           const std::string &ownSave, const std::string &workDirectory,
-                           const SaveTarget *target)
-    : m_cloud(cloud), m_state(state), m_storage(storage), m_display(display),
+                           SaveRegistry &registry, SyncDisplay &display,
+                           const std::string &savedata, const std::string &ownSave,
+                           const std::string &workDirectory, const SaveTarget *target)
+    : m_cloud(cloud), m_state(state), m_storage(storage), m_registry(registry), m_display(display),
       m_scanner(storage, savedata, ownSave), m_savedata(savedata), m_workDirectory(workDirectory),
       m_target(target)
 {
@@ -196,6 +196,7 @@ Downloaded SaveArchives::Download(const std::string &name, const CloudSave &clou
     }
     m_state.Record(name, SaveBase{cloudSave.fileId, cloudSave.md5,
                                   m_scanner.ScanSave(name).fingerprint, false});
+    m_registry.Register(folder);
     debugPrintf("SaveArchives::Download: %s saved\n", name.c_str());
     return resignRefused ? Downloaded::DoneNotResigned : Downloaded::Done;
 }

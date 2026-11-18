@@ -6,6 +6,7 @@
 #include "sync/ParamSfo.h"
 #include "sync/SaveArchives.h"
 #include "sync/SaveProgress.h"
+#include "sync/SaveRegistry.h"
 #include "sync/SaveScanner.h"
 
 #include <algorithm>
@@ -45,14 +46,15 @@ bool SaveImport::Run(const std::vector<std::string> &folders, ImportResult &resu
     // Only the saves the cloud lacks are read file by file: on a slow drive that reading takes
     // the time, and a save the cloud has is left as it is. Every drive is read before anything is
     // uploaded, so the saves and their drives' archives outlive the one run of the queue that
-    // uploads them all.
+    // uploads them all. An import only reads the drives' saves, so it writes no folder to register.
+    NoSaveRegistry noRegistry;
     std::deque<SaveArchives> drives;
     std::vector<std::vector<LocalSave>> saves(folders.size());
     std::set<std::string> seen;
     for (std::size_t drive = 0; drive < folders.size(); ++drive)
     {
-        drives.emplace_back(m_cloud, m_state, m_storage, m_display, folders[drive], m_ownSave,
-                            m_workDirectory, nullptr);
+        drives.emplace_back(m_cloud, m_state, m_storage, noRegistry, m_display, folders[drive],
+                            m_ownSave, m_workDirectory, nullptr);
         const SaveScanner scanner(m_storage, folders[drive], m_ownSave);
         for (const std::string &name : driveNames[drive])
         {

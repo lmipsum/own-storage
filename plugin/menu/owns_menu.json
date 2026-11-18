@@ -143,6 +143,69 @@
     },
     {
       "kind": "page",
+      "name": "owns_delete",
+      "attributes": {
+        "onInit": "Owns::cbInfoInit", "onCancel": "Owns::cbQuestionCancel",
+        "onActivate": "Owns::cbInfoActivate"
+      },
+      "children": [
+        {
+          "kind": "text",
+          "name": "text_delete_msg",
+          "attributes": {
+            "depth": 1.0, "iconOffset": "0x300000", "unknown17": "0x1d0", "unknown18": "0x0",
+            "unknownInt20": "0x0", "unknownInt21": "0x0", "unknown22": "0x0",
+            "unknownInt27": "0x1", "size": 10.0, "unknown55": "0xffffffff",
+            "unknownInt56": "0x10014"
+          }
+        },
+        {"kind": "text", "name": "text_delete_title"},
+        {
+          "kind": "text",
+          "name": "text_delete_create_date",
+          "attributes": {
+            "posY": -0.8, "iconOffset": "0x0", "unknownInt27": "0x1", "unknown55": "0xffffffff"
+          }
+        },
+        {
+          "kind": "text",
+          "name": "text_delete_data_size",
+          "attributes": {
+            "posY": -1.8, "iconOffset": "0x0", "unknownInt27": "0x1", "unknown55": "0xffffffff"
+          }
+        },
+        {
+          "kind": "text",
+          "name": "text_delete_sub_title",
+          "attributes": {
+            "iconOffset": "0x110000", "unknown17": "0x10cff", "unknown18": "0x10d05",
+            "unknown19": "0x10000", "unknownInt20": "0x108fe", "unknownInt21": "0x10914",
+            "unknownInt56": "0x13"
+          }
+        },
+        {
+          "kind": "text",
+          "name": "text_delete_detail",
+          "attributes": {
+            "iconOffset": "0x110000", "unknown17": "0xcff", "unknown18": "0xd01",
+            "unknownInt20": "0x8fe", "unknownInt21": "0xd03", "unknown22": "0x0",
+            "unknownInt27": "0x1010001", "unknownInt56": "0x91d", "unknownInt57": "0x908"
+          }
+        },
+        {
+          "kind": "text",
+          "name": "text_delete_detail_omit",
+          "attributes": {
+            "iconOffset": "0x110000", "unknown17": "0xcff", "unknown18": "0xd04",
+            "unknownInt20": "0x0", "unknownInt21": "0x0", "unknown22": "0x0",
+            "unknownInt27": "0x1000001", "unknown55": "0xffffffff", "unknownInt56": "0x91d",
+            "unknownInt57": "0x908"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "page",
       "name": "owns_dialog"
     }
   ]

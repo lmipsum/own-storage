@@ -95,8 +95,14 @@ enum menu_end game_menu_run(int view, enum menu_action action, const menu_target
     }
     else if (action == MENU_ACTION_DELETE_ALL)
     {
-        opened = confirm_page_open(view, rows, FOLDER_ROWS, menu_text(&kDeleteAllQuestion),
-                                   on_delete_all_answer);
+        // The game where the Saved Data Utility has the save's title, the count where its
+        // sub-title is; a game has no one date, size or detail.
+        const confirm_value values[CONFIRM_TEXTS] = {
+            [CONFIRM_TITLE] = {menu_target_field(target, ROW_FIELD_TITLE), NULL},
+            [CONFIRM_SUBTITLE] = {NULL, is_count(count) ? count_units : NULL},
+        };
+        opened =
+            confirm_page_open(view, values, menu_text(&kDeleteAllQuestion), on_delete_all_answer);
     }
     return opened ? MENU_END_PAGE_OPEN : MENU_END_CLOSE;
 }

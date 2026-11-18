@@ -22,9 +22,10 @@ static void hand_over(enum menu_end end)
     menu_release_request(end == MENU_END_SWITCH_LIST ? MENU_RELEASE_SWITCH_LIST
                                                      : MENU_RELEASE_ONLY);
     // After the release, so that the launcher unloads the view before it starts the app.
-    if (end == MENU_END_START_APP && !owns_write_file(OWNS_LAUNCH_REQUEST, "launch"))
+    if (end == MENU_END_START_APP)
     {
-        owns_log("launch not requested");
+        owns_log(owns_write_file(OWNS_LAUNCH_REQUEST, "launch") ? "launch requested"
+                                                                : "launch not requested");
     }
 }
 
@@ -44,17 +45,21 @@ void menu_close_menu(int view, enum menu_end end)
     menu_end_closed(end);
 }
 
-void menu_close_pages(int view, int with_dialog, enum menu_end end)
+void menu_close_pages(int view, enum menu_pages pages, enum menu_end end)
 {
-    // As explore_plugin's Info closes: its hint and the XMB's looks go back first, and the XMB has
+    // Its hint and the XMB's looks go back first, each look with its own close, and the XMB has
     // the input before the pages close, so that neither stays on a page's widget.
     ShowButtonNavigation_Back(0);
-    xmb_backdrop_set(XMB_BACKDROP_OFF);
+    xmb_backdrop_clear(pages == MENU_PAGES_INFO ? XMB_BACKDROP_INFO : XMB_BACKDROP_UTILITY);
     xmb_state_restore();
-    if (with_dialog)
+    if (pages == MENU_PAGES_QUESTION)
     {
-        View_PageClose(view, OWNS_DIALOG_PAGE);
+        owns_log_value("dialog page closed", (uint32_t)View_PageClose(view, OWNS_DIALOG_PAGE));
+        owns_log_value("delete page closed", (uint32_t)View_PageClose(view, OWNS_DELETE_PAGE));
     }
-    View_PageClose(view, OWNS_INFO_PAGE);
+    else
+    {
+        owns_log_value("info page closed", (uint32_t)View_PageClose(view, OWNS_INFO_PAGE));
+    }
     hand_over(end == MENU_END_PAGE_OPEN ? MENU_END_CLOSE : end);
 }

@@ -3,7 +3,8 @@
 // backdrop through xmb_plugin's interface "XMB2", entry 7, (flags, mask): (0x200, 0x3c0) on open,
 // which fades the bar and the columns away, and (0x40, 0x3c0) on close. ps3_savedata_plugin
 // shows its pages, the delete question among them (0x1e7c8), with (0x400, 0xc00), and puts the
-// XMB back with (0x40, 0xdc0), which also clears what Info set. Info also moves explore_plugin
+// XMB back with (0x40, 0xdc0). That mask leaves out Info's 0x200, so each look is put back with
+// the mask of its own close, or Info's stays on. Info also moves explore_plugin
 // (layer 2) to the top of xmb_plugin's "XMM0" layers (entry 8), which makes explore_plugin the
 // active view; the save menu's pages never do, or the input would go to explore_plugin. The entry
 // is checked word by word before it is called; a relocated immediate is checked by its opcode
@@ -23,7 +24,7 @@
 #define DISPLAY_UTILITY 0x400
 #define DISPLAY_UTILITY_MASK 0xc00
 #define DISPLAY_NORMAL 0x40
-#define DISPLAY_NORMAL_MASK 0xdc0
+#define DISPLAY_UTILITY_CLEAR_MASK 0xdc0
 #define WHOLE 0xffffffffu
 #define IMMEDIATE 0xffff0000u
 
@@ -65,9 +66,10 @@ static const void *xmb_entry(int interface, int entry, const code_word *code, si
     return function;
 }
 
-int xmb_backdrop_set(enum xmb_backdrop backdrop)
+/** Calls xmb_plugin's display mode with flags and a mask, once its code is the traced one. */
+static int display_mode(int flags, int mask)
 {
-    typedef void (*display_mode)(int flags, int mask);
+    typedef void (*display_mode_function)(int flags, int mask);
     const void *function =
         xmb_entry(XMB2_INTERFACE, DISPLAY_MODE_ENTRY, kDisplayMode, WORDS(kDisplayMode));
     if (function == NULL)
@@ -75,13 +77,20 @@ int xmb_backdrop_set(enum xmb_backdrop backdrop)
         owns_log("XMB display mode skipped: not as traced");
         return 0;
     }
-    const int flags = backdrop == XMB_BACKDROP_INFO      ? DISPLAY_INFO
-                      : backdrop == XMB_BACKDROP_UTILITY ? DISPLAY_UTILITY
-                                                         : DISPLAY_NORMAL;
-    const int mask = backdrop == XMB_BACKDROP_INFO      ? DISPLAY_INFO_MASK
-                     : backdrop == XMB_BACKDROP_UTILITY ? DISPLAY_UTILITY_MASK
-                                                        : DISPLAY_NORMAL_MASK;
-    ((display_mode)function)(flags, mask);
-    owns_log_value("XMB display mode set", (uint32_t)flags);
+    ((display_mode_function)function)(flags, mask);
+    owns_log_value("XMB display mode flags", (uint32_t)flags);
+    owns_log_value("XMB display mode mask", (uint32_t)mask);
     return 1;
+}
+
+int xmb_backdrop_set(enum xmb_backdrop backdrop)
+{
+    return backdrop == XMB_BACKDROP_INFO ? display_mode(DISPLAY_INFO, DISPLAY_INFO_MASK)
+                                         : display_mode(DISPLAY_UTILITY, DISPLAY_UTILITY_MASK);
+}
+
+int xmb_backdrop_clear(enum xmb_backdrop backdrop)
+{
+    return backdrop == XMB_BACKDROP_INFO ? display_mode(DISPLAY_NORMAL, DISPLAY_INFO_MASK)
+                                         : display_mode(DISPLAY_NORMAL, DISPLAY_UTILITY_CLEAR_MASK);
 }

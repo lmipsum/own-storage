@@ -17,7 +17,8 @@ int menu_view_load(void);
 /**
  * Unloads the save menu's view when it asked for it, once its menu and pages closed, then
  * switches the XMB's list to the chosen view when it asked for that too.
+ * @return 1 when the view had asked
  */
-void menu_view_take_release(void);
+int menu_view_take_release(void);
 
 #endif

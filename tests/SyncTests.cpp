@@ -7,6 +7,7 @@
 #include "app/CloudSaveText.h"
 #include "app/LauncherSetup.h"
 #include "app/Notice.h"
+#include "app/SaveRegisterRequest.h"
 #include "app/XmbLists.h"
 #include "app/XmbPick.h"
 #include "sync/Clock.h"
@@ -17,6 +18,7 @@
 #include "sync/SaveBrowser.h"
 #include "sync/SaveImport.h"
 #include "sync/SaveProgress.h"
+#include "sync/SaveRegistry.h"
 #include "sync/SaveScanner.h"
 #include "sync/Sync.h"
 #include "sync/SyncDisplay.h"
@@ -86,6 +88,18 @@ class HandClock : public Clock
     std::time_t now = 0;
 };
 
+/** A registry that keeps the folders it was asked to register, in turn. */
+class RecordingRegistry : public SaveRegistry
+{
+  public:
+    void Register(const std::string &folder) override
+    {
+        folders.push_back(folder);
+    }
+
+    std::vector<std::string> folders;
+};
+
 /** Whether a bar said the text at some time. */
 bool Shown(const std::vector<std::string> &texts, const std::string &text)
 {
@@ -133,6 +147,7 @@ struct Setup
 {
     TestConsole console;
     TestCloud cloud;
+    RecordingRegistry registry;
     ScriptedDisplay display;
     HandClock clock;
     std::string rootId;
@@ -149,8 +164,8 @@ struct Setup
     {
         SyncState state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup");
         state.Load();
-        return Sync(cloud, state, on, display, clock, rootId, savedata, kOwnSave, on.Scratch(),
-                    target)
+        return Sync(cloud, state, on, registry, display, clock, rootId, savedata, kOwnSave,
+                    on.Scratch(), target)
             .Run();
     }
 
@@ -217,8 +232,8 @@ struct Browsing
 {
     Browsing(Setup &setup, TestConsole &on)
         : state(on.Scratch() + "/state.json", on.Scratch() + "/state.backup"),
-          browser(setup.cloud, state, on, setup.display, setup.rootId, kSavedata, kOwnSave,
-                  on.Scratch(), setup.target)
+          browser(setup.cloud, state, on, setup.registry, setup.display, setup.rootId, kSavedata,
+                  kOwnSave, on.Scratch(), setup.target)
     {
         state.Load();
         browser.Refresh();
@@ -916,6 +931,65 @@ TEST(BrowserAsksBeforeItReplacesADifferentSave)
     CHECK_EQUAL(std::string("data-1"), setup.console.Content(std::string(kSave) + "/DATA.BIN"));
     CHECK_EQUAL(std::size_t(2), setup.display.questions.size());
     CHECK_EQUAL(std::size_t(0), setup.display.Question(0).find("Game One (BLES00001):\n"));
+}
+
+TEST(SyncRegistersTheFoldersItDownloaded)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    // An upload writes no folder on the console.
+    CHECK(setup.registry.folders.empty());
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    setup.Run(other, kSavedata);
+    CHECK(setup.registry.folders ==
+          (std::vector<std::string>{kSave, std::string(kSavedata) + "/BLUS00002-AUTO"}));
+}
+
+TEST(SyncRegistersNoFolderOfAFailedDownload)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.cloud.DamageDownloads(true);
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    setup.Run(other, kSavedata);
+    CHECK(setup.registry.folders.empty());
+}
+
+TEST(BrowserRegistersOnlyTheSaveItLoaded)
+{
+    Setup setup;
+    PutSaves(setup.console);
+    setup.Run();
+    setup.console.Put(std::string(kSave) + "/DATA.BIN", "played here", kChanged);
+    Browsing browsing(setup, setup.console);
+    setup.display.answers = {Answer::No, Answer::Yes};
+    CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::Kept);
+    CHECK(setup.registry.folders.empty());
+    CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::Loaded);
+    CHECK(browsing.browser.Load("BLES00001-SAVE") == LoadResult::AlreadyThere);
+    CHECK(setup.registry.folders == std::vector<std::string>{kSave});
+
+    TestConsole other;
+    other.MakeDirectories(kSavedata);
+    setup.cloud.DamageDownloads(true);
+    CHECK(Browsing(setup, other).browser.Load("BLES00001-SAVE") == LoadResult::Failed);
+    CHECK(setup.registry.folders == std::vector<std::string>{kSave});
+}
+
+TEST(RegisterRequestAddsALinePerFolder)
+{
+    TestConsole console;
+    console.MakeDirectories("/dev_hdd0/tmp");
+    const std::string requestFile = "/dev_hdd0/tmp/owns_register";
+    SaveRegisterRequest request(console, requestFile);
+    request.Register(kSave);
+    request.Register(std::string(kSavedata) + "/BLUS00002-AUTO");
+    CHECK_EQUAL(std::string(kSave) + "\n" + kSavedata + "/BLUS00002-AUTO\n",
+                console.Content(requestFile));
 }
 
 namespace
@@ -1725,8 +1799,8 @@ TEST(SaveThatCannotBeMadeThisUsersIsDownloadedAsItIsAndIsNamed)
     SyncState state(setup.console.Scratch() + "/state.json",
                     setup.console.Scratch() + "/state.backup");
     state.Load();
-    Sync sync(setup.cloud, state, setup.console, setup.display, setup.clock, setup.rootId,
-              kSavedata, kOwnSave, setup.console.Scratch(), &kHere);
+    Sync sync(setup.cloud, state, setup.console, setup.registry, setup.display, setup.clock,
+              setup.rootId, kSavedata, kOwnSave, setup.console.Scratch(), &kHere);
     CHECK(sync.Run());
     CHECK(sync.NotResigned() == std::vector<std::string>{kForeignSave});
     SaveOwner owner;
@@ -1760,6 +1834,18 @@ TEST(BrowserSaysWhetherALoadedSaveWasMadeThisUsers)
     CHECK(browsing.browser.Load(kForeignSave) == LoadResult::LoadedNotResigned);
     CHECK(ShownResult(kForeignSave, LoadResult::LoadedNotResigned).text.find("as it was") !=
           std::string::npos);
+}
+
+TEST(SaveLoadedAsItWasIsRegisteredToo)
+{
+    Setup setup;
+    setup.console.MakeDirectories(kSavedata);
+    StoreForeignSave(setup, kDamaged);
+    setup.target = &kHere;
+    Browsing browsing(setup, setup.console);
+    CHECK(browsing.browser.Load(kForeignSave) == LoadResult::LoadedNotResigned);
+    CHECK(setup.registry.folders ==
+          std::vector<std::string>{std::string(kSavedata) + "/" + kForeignSave});
 }
 
 TEST(BrowserDeletesFromTheCloudOnlyASaveTheConsoleHasNot)

@@ -23,10 +23,16 @@ void menu_end_closed(enum menu_end end);
 /** Closes the option menu, from whichever of its levels, and ends the menu. */
 void menu_close_menu(int view, enum menu_end end);
 
-/**
- * Closes the menu's full-screen pages, puts the XMB's looks back and ends the menu.
- * @param with_dialog whether the question's dialog page is open too
- */
-void menu_close_pages(int view, int with_dialog, enum menu_end end);
+/** The menu's full-screen pages that can be open. */
+enum menu_pages
+{
+    /** The information page. */
+    MENU_PAGES_INFO,
+    /** A delete question's page and its dialog's page. */
+    MENU_PAGES_QUESTION,
+};
+
+/** Closes the menu's full-screen pages, puts the XMB's looks back and ends the menu. */
+void menu_close_pages(int view, enum menu_pages pages, enum menu_end end);
 
 #endif

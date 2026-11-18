@@ -233,7 +233,7 @@ static void on_info_cancel(void *widget, void *event, void *data)
     const int view = View_Find(OWNS_MENU_VIEW);
     if (view != 0 && !event_ignored(event))
     {
-        menu_close_pages(view, 0, MENU_END_CLOSE);
+        menu_close_pages(view, MENU_PAGES_INFO, MENU_END_CLOSE);
     }
 }
 
@@ -259,6 +259,8 @@ static const vsh_event_entry kEvents[] = {
     {"Owns::cbInfoInit", on_other_event, 0},
     {"Owns::cbInfoActivate", on_other_event, 0},
     {"Owns::cbInfoCancel", on_info_cancel, 0},
+    // The question's dialog has the input and answers O itself; its answer closes the pages.
+    {"Owns::cbQuestionCancel", on_other_event, 0},
     {NULL, NULL, 0},
 };
 

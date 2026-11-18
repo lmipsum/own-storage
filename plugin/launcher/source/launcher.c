@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The XMB's rows start Own Storage through this VSH plugin, the way its own icon starts it. The
-// app's results show through it too, as the XMB's notifications. And Triangle on one of the app's
+// app's results show through it too, as the XMB's notifications, and the saves it downloaded are
+// registered through it in the system's saved data list. And Triangle on one of the app's
 // save or game folder rows opens the save menu, whose view (plugin/menu) the plugin loads and
 // unloads.
 //
@@ -24,6 +25,7 @@
 #include "owns_paths.h"
 #include "pad.h"
 #include "paf.h"
+#include "save_register.h"
 
 // Triangle is polled about 30 times a second, so a short press is not missed; the request files
 // are looked at every ninth poll, about every 0.3 s.
@@ -35,8 +37,8 @@ static const s32 kThreadPriority = 3000;
 static const u64 kThreadStackBytes = 0x8000;
 
 /**
- * Waits for the rows' requests, the app's results, the save menu's release, the recovery request
- * and Triangle.
+ * Waits for the rows' requests, the app's results and downloaded saves, the save menu's release,
+ * the recovery request and Triangle.
  */
 static void watch(void *unused)
 {
@@ -55,6 +57,10 @@ static void watch(void *unused)
     cellFsUnlink(OWNS_MENU_REFOCUS);
     cellFsUnlink(OWNS_XMB_STATE);
     cellFsUnlink(OWNS_DIALOG_OPEN);
+    // The app's register request, and one taken whose batch a shutdown cut short, are kept: their
+    // saves are still to be registered.
+    save_register registry;
+    save_register_init(&registry);
     // The VSH's pad state and Triangle's last state: the thread's own. Without the pad state, the
     // save menu does not open; the rest works as before.
     const vsh_pad pad = pad_find();
@@ -66,9 +72,11 @@ static void watch(void *unused)
     for (;;)
     {
         // The view's unload is asked for before the app a menu row asked for starts.
-        menu_view_take_release();
+        const int released = menu_view_take_release();
         CellFsStat status;
-        if (cellFsStat(OWNS_LAUNCH_REQUEST, &status) == 0)
+        // The request waits a round after the save menu's view was released, and while it is
+        // still loaded: game_ext_plugin is only asked for once paf is done with the view.
+        if (!released && cellFsStat(OWNS_LAUNCH_REQUEST, &status) == 0 && !menu_view_loaded())
         {
             cellFsUnlink(OWNS_LAUNCH_REQUEST);
             app_start();
@@ -88,6 +96,14 @@ static void watch(void *unused)
         {
             notices_show(notices, taken);
             taken = 0;
+        }
+        // The app's downloads are registered on the XMB too, as explore_plugin runs the commands;
+        // not while a game runs, as the in-game XMB loads explore_plugin while the app may still
+        // write the request, nor while the save menu is open, whose commands they would hold up.
+        if (save_register_waiting(&registry) && View_Find("explore_plugin") != 0 &&
+            View_Find("game_plugin") == 0 && !menu_view_loaded())
+        {
+            save_register_round(&registry);
         }
         for (int poll = 0; poll < kPadPollsPerRound; ++poll)
         {

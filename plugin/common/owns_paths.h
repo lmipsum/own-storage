@@ -16,14 +16,19 @@
 #define OWNS_VIEW_FILE OWNS_APP_DIR "xmb_view.txt"
 // The app's index of its XMB rows (xmbRowsFile), beside its list files.
 #define OWNS_ROWS_FILE "/dev_hdd0/xmlhost/game_plugin/owns_rows.txt"
+// The save folders the app downloaded, a full path and "\n" a line, as its saveRegisterRequest
+// names it; the launcher registers them in the system's saved data list (save_register.h).
+#define OWNS_REGISTER_REQUEST "/dev_hdd0/tmp/owns_register"
 
 // The save menu's plugin view and its pages in owns_menu.rco (plugin/menu/owns_menu.json): the
-// option menu, the full-screen information page with the plane its list is made on, and the empty
-// page a question's dialog opens on.
+// option menu, the full-screen information page with the plane its list is made on, the delete
+// question's page, and the empty page a question's dialog opens on.
 #define OWNS_MENU_VIEW "owns_menu"
 #define OWNS_MENU_PAGE "owns_menu"
 #define OWNS_INFO_PAGE "owns_info"
 #define OWNS_INFO_PLANE "owns_info_plane"
+// The full-screen page of a delete question, a copy of the Saved Data Utility's.
+#define OWNS_DELETE_PAGE "owns_delete"
 #define OWNS_DIALOG_PAGE "owns_dialog"
 
 // The row the menu acts on, which the launcher writes before it loads the view (menu_target.h).

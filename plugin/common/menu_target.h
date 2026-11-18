@@ -17,7 +17,7 @@ enum menu_place
 {
     /** The saves in the cloud: their order and their folders per game. */
     MENU_PLACE_CLOUD = 'C',
-    /** A game's folder of saves: only their order, as the folder is one of the folders per game. */
+    /** A game's folder of saves, one of the folders per game: grouping them all leaves it. */
     MENU_PLACE_GAME_FOLDER = 'F',
     /** Not known: only the order, kept for the app without changing the list. */
     MENU_PLACE_OTHER = '-',

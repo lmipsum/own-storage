@@ -7,11 +7,13 @@
 #include <algorithm>
 
 SaveBrowser::SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
-                         SyncDisplay &display, const std::string &rootFolderId,
-                         const std::string &savedata, const std::string &ownSave,
-                         const std::string &workDirectory, const SaveTarget *target)
+                         SaveRegistry &registry, SyncDisplay &display,
+                         const std::string &rootFolderId, const std::string &savedata,
+                         const std::string &ownSave, const std::string &workDirectory,
+                         const SaveTarget *target)
     : m_state(state), m_display(display), m_cloud(cloud), m_scanner(storage, savedata, ownSave),
-      m_archives(cloud, state, storage, display, savedata, ownSave, workDirectory, target),
+      m_archives(cloud, state, storage, registry, display, savedata, ownSave, workDirectory,
+                 target),
       m_rootFolderId(rootFolderId), m_ownSave(ownSave)
 {
 }

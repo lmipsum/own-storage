@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # The VSH plugins: the launcher, which starts Own Storage for the XMB's rows, shows its
-# notifications, opens the save menu on Triangle and switches the XMB's list to the view chosen
-# there, and the save menu's view with its RCO. Built with PS3DK:
+# notifications, registers the saves it downloaded, opens the save menu on Triangle and switches
+# the XMB's list to the view chosen there, and the save menu's view with its RCO. Built with PS3DK:
 #   cmake -S plugin -B build/plugin -G Ninja \
 #     -DCMAKE_TOOLCHAIN_FILE="$PS3DK/cmake/ps3-ppu-toolchain.cmake" [-DOWNS_PLUGIN_LOG=ON]
 #   cmake --build build/plugin
@@ -74,6 +74,7 @@ add_executable(owns-launcher
     launcher/source/explore_query.c
     launcher/source/list_files.c
     launcher/source/list_switch.c
+    launcher/source/save_register.c
     ${shared_sources})
 target_link_libraries(owns-launcher PRIVATE paf_stub vshtask_stub allocator_stub vshcommon_stub
                                             fs_stub lv2)

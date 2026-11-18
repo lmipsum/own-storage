@@ -41,10 +41,13 @@ void menu_recover(void)
     {
         option_menu_close(view);
         View_PageClose(view, OWNS_DIALOG_PAGE);
+        View_PageClose(view, OWNS_DELETE_PAGE);
         View_PageClose(view, OWNS_INFO_PAGE);
     }
     ShowButtonNavigation_Back(0);
-    xmb_backdrop_set(XMB_BACKDROP_OFF);
+    // Which look a page left is not known here; each is put back with its own close.
+    xmb_backdrop_clear(XMB_BACKDROP_INFO);
+    xmb_backdrop_clear(XMB_BACKDROP_UTILITY);
     xmb_state_restore();
     cellFsUnlink(OWNS_MENU_TARGET);
     if (view != 0)

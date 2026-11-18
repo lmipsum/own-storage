@@ -18,8 +18,11 @@ enum list_file list_switch_current(xmb_view *shown);
 
 /**
  * Switches the list the user is on to the view kept in OWNS_VIEW_FILE. Nothing is written unless
- * the URL names one of the app's list files, and the view's file name is as long and another; a
- * game's folder is switched within the views by title, which it belongs to.
+ * the URL names one of the app's list files, and the view's file name is as long and another. A
+ * game's folder is switched within the views by title, which it belongs to; a view of all saves
+ * in one list switches its parent instead and closes the folder. Blocks while it waits for
+ * explore_plugin: up to 2 s for a list switched in place, up to about 6 s when it leaves a game's
+ * folder (close_list taken, the folder closed, reload_list taken: up to 2 s each).
  * @return 1 when the list was switched and reloaded
  */
 int list_switch_to_kept_view(void);

@@ -5,6 +5,7 @@
 #include "sync/CloudStorage.h"
 #include "sync/LocalStorage.h"
 #include "sync/SaveArchives.h"
+#include "sync/SaveRegistry.h"
 #include "sync/SaveScanner.h"
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
@@ -70,6 +71,7 @@ class SaveBrowser
      * @param cloud where the backup is kept
      * @param state the base of every save
      * @param storage the console's hard disk
+     * @param registry where each save folder loaded whole is registered
      * @param display what the user sees of a download, and asks before a save is replaced
      * @param rootFolderId the cloud id of the Own Storage folder
      * @param savedata the user's savedata directory
@@ -77,10 +79,10 @@ class SaveBrowser
      * @param workDirectory where archives are kept while they move
      * @param target whom a save downloaded is made to belong to; null to leave saves as they are
      */
-    SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-                const std::string &rootFolderId, const std::string &savedata,
-                const std::string &ownSave, const std::string &workDirectory,
-                const SaveTarget *target);
+    SaveBrowser(CloudStorage &cloud, SyncState &state, LocalStorage &storage,
+                SaveRegistry &registry, SyncDisplay &display, const std::string &rootFolderId,
+                const std::string &savedata, const std::string &ownSave,
+                const std::string &workDirectory, const SaveTarget *target);
     SaveBrowser(const SaveBrowser &) = delete;
     SaveBrowser &operator=(const SaveBrowser &) = delete;
 

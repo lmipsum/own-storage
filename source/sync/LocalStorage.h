@@ -90,7 +90,7 @@ class LocalStorage
      */
     virtual bool Write(const std::string &path, const std::string &content) = 0;
     /**
-     * Adds to the end of a file that Write() created.
+     * Adds to the end of a file; one that is not there is created.
      * @param path the file
      * @param content what to add
      * @return false when it cannot be written

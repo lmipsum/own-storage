@@ -7,6 +7,7 @@
 #include "sync/LocalStorage.h"
 #include "sync/SaveArchives.h"
 #include "sync/SaveProgress.h"
+#include "sync/SaveRegistry.h"
 #include "sync/SaveScanner.h"
 #include "sync/SyncDisplay.h"
 #include "sync/SyncState.h"
@@ -29,6 +30,7 @@ class Sync
      * @param cloud where the backup is kept
      * @param state the base of every save
      * @param storage the console's hard disk
+     * @param registry where each save folder downloaded whole is registered
      * @param display what the user sees of the sync
      * @param clock tells how long the sync has taken, and so about how long the rest will
      * @param rootFolderId the cloud id of the Own Storage folder
@@ -37,9 +39,10 @@ class Sync
      * @param workDirectory where archives are kept while they move
      * @param target whom a save downloaded is made to belong to; null to leave saves as they are
      */
-    Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SyncDisplay &display,
-         const Clock &clock, const std::string &rootFolderId, const std::string &savedata,
-         const std::string &ownSave, const std::string &workDirectory, const SaveTarget *target);
+    Sync(CloudStorage &cloud, SyncState &state, LocalStorage &storage, SaveRegistry &registry,
+         SyncDisplay &display, const Clock &clock, const std::string &rootFolderId,
+         const std::string &savedata, const std::string &ownSave, const std::string &workDirectory,
+         const SaveTarget *target);
     Sync(const Sync &) = delete;
     Sync &operator=(const Sync &) = delete;
 

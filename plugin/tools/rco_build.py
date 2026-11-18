@@ -66,8 +66,70 @@ _POSITION = [
     ("unknown22", "word", 0),
 ]
 
+# A text's attributes with the defaults of the Saved Data Utility's delete page (ps3_savedata_plugin,
+# page_plugin_delete, text_delete_title): its position, colour, size and layout, the text and its
+# font (set in code), and the type's own words.
+_TEXT = [
+    ("posX", "float", 0.0),
+    ("posY", "float", 0.0),
+    ("posZ", "float", 0.0),
+    ("redScale", "float", 1.0),
+    ("greenScale", "float", 1.0),
+    ("blueScale", "float", 1.0),
+    ("alphaScale", "float", 1.0),
+    ("width", "float", 0.0),
+    ("height", "float", 0.0),
+    ("depth", "float", 0.0),
+    ("scaleWidth", "float", 1.0),
+    ("scaleHeight", "float", 1.0),
+    ("scaleDepth", "float", 1.0),
+    ("iconOffset", "word", 0x430000),
+    ("onLoad", "event", None),
+    ("unknown17", "word", 0x10CF7),
+    ("unknown18", "word", 0x410CF9),
+    ("unknown19", "word", 0),
+    ("unknownInt20", "word", 0x10CFA),
+    ("unknownInt21", "word", 0x10CFB),
+    ("unknown22", "word", 0x10000),
+    ("text", "reference", None),
+    ("font", "reference", None),
+    ("unknownInt27", "word", 0x1000101),
+    ("unknownInt29", "word", 0x1000000),
+    ("size", "float", 0.0),
+    ("topRed", "float", 1.0),
+    ("topGreen", "float", 1.0),
+    ("topBlue", "float", 1.0),
+    ("bottomRed", "float", 1.0),
+    ("bottomGreen", "float", 1.0),
+    ("bottomBlue", "float", 1.0),
+    ("spacingHorizontal", "float", 0.0),
+    ("unknown37", "word", 0),
+    ("unknown38", "word", 0),
+    ("unknown39", "word", 0),
+    ("spacingVertical", "float", 0.0),
+    ("shadowX", "float", 4.0),
+    ("shadowY", "float", -5.0),
+    ("shadowPerspective", "float", 0.0),
+    ("shadowRed", "float", 0.25),
+    ("shadowGreen", "float", 0.25),
+    ("shadowBlue", "float", 0.25),
+    ("shadowAlpha", "float", 1.0),
+    ("unknown48", "word", 0),
+    ("unknown49", "word", 0),
+    ("unknown50", "word", 0),
+    ("unknownFloat51", "float", 1.0),
+    ("unknownFloat52", "float", 1.0),
+    ("unknownFloat53", "float", 1.0),
+    ("unknownFloat54", "float", 1.0),
+    ("unknown55", "word", 0),
+    ("unknownInt56", "word", 0x15),
+    ("unknownInt57", "word", 3),
+    ("unknown58", "word", 0),
+]
+
 # Each kind's object type, and its attributes in order with their defaults: the values most
-# objects of the system's option menu page (explore_plugin's expage_menu) have.
+# objects of the system's option menu page (explore_plugin's expage_menu) have, and the texts'
+# above.
 KINDS = {
     "page": (
         1,
@@ -80,6 +142,7 @@ KINDS = {
         ],
     ),
     "plane": (2, _POSITION + [("image", "reference", None), ("unknownInt24", "word", 0)]),
+    "text": (13, _TEXT),
     "mlist": (
         9,
         _POSITION

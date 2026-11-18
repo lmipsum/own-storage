@@ -9,9 +9,8 @@
 static const enum menu_action kSaveActions[] = {MENU_ACTION_INFO, MENU_ACTION_DELETE};
 static const enum menu_action kGameActions[] = {MENU_ACTION_INFO, MENU_ACTION_DOWNLOAD_ALL,
                                                 MENU_ACTION_DELETE_ALL};
-// Grouping is offered only on the saves in the cloud: in a game's folder it would take away the
-// folder the user is in.
-static const enum menu_section kCloudSections[] = {MENU_SECTION_SORT, MENU_SECTION_GROUP};
+// Both where the app's lists are known; elsewhere only the order, which needs no list to switch.
+static const enum menu_section kListSections[] = {MENU_SECTION_SORT, MENU_SECTION_GROUP};
 static const enum menu_section kOtherSections[] = {MENU_SECTION_SORT};
 
 int menu_action_count(char kind)
@@ -32,7 +31,7 @@ enum menu_action menu_action_at(char kind, uint32_t row)
 
 int menu_section_count(enum menu_place place)
 {
-    return place == MENU_PLACE_CLOUD ? COUNT(kCloudSections) : COUNT(kOtherSections);
+    return place != MENU_PLACE_OTHER ? COUNT(kListSections) : COUNT(kOtherSections);
 }
 
 enum menu_section menu_section_at(enum menu_place place, uint32_t row)
@@ -41,7 +40,7 @@ enum menu_section menu_section_at(enum menu_place place, uint32_t row)
     {
         return MENU_SECTIONS;
     }
-    return place == MENU_PLACE_CLOUD ? kCloudSections[row] : kOtherSections[row];
+    return place != MENU_PLACE_OTHER ? kListSections[row] : kOtherSections[row];
 }
 
 int menu_choice_count(enum menu_section section)

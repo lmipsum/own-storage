@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 
+#include "owns_log.h"
 #include "owns_paths.h"
 #include "paf.h"
 
@@ -32,10 +33,13 @@ static void on_game_ext_loaded(void)
 {
     const int view = View_Find("game_ext_plugin");
     void **entries = view != 0 ? (void **)plugin_GetInterface(view, 1) : NULL;
-    if (entries != NULL)
+    if (entries == NULL)
     {
-        ((select_by_folder)entries[SELECT_BY_FOLDER])(OWNS_APP_FOLDER, HDD_GAME);
+        owns_log("app not started: no game_ext_plugin interface");
+        return;
     }
+    owns_log_value("app started", (uint32_t)((select_by_folder)entries[SELECT_BY_FOLDER])(
+                                      OWNS_APP_FOLDER, HDD_GAME));
 }
 
 void app_start(void)
@@ -44,13 +48,17 @@ void app_start(void)
     // it once the app has started, so the next request starts the app again.
     if (View_Find("game_ext_plugin") != 0)
     {
+        owns_log("app not started: game_ext_plugin is loaded");
         return;
     }
     const int view = View_Find("xmb_plugin");
     xmm0_interface *xmm0 =
         view != 0 ? (xmm0_interface *)plugin_GetInterface(view, XMM0_INTERFACE) : NULL;
-    if (xmm0 != NULL)
+    if (xmm0 == NULL)
     {
-        xmm0->LoadPlugin3(GAME_EXT_PLUGIN, (void *)on_game_ext_loaded, 0);
+        owns_log("app not started: no xmb_plugin interface");
+        return;
     }
+    owns_log_value("game_ext_plugin load asked",
+                   (uint32_t)xmm0->LoadPlugin3(GAME_EXT_PLUGIN, (void *)on_game_ext_loaded, 0));
 }

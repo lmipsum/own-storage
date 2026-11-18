@@ -57,6 +57,7 @@
 #include "app/Profile.h"
 #include "app/LauncherSetup.h"
 #include "app/Notice.h"
+#include "app/SaveRegisterRequest.h"
 #include "app/XmbInstall.h"
 #include "app/XmbPick.h"
 #include "sync/Clock.h"
@@ -110,11 +111,36 @@ const LauncherPlace launcherPlace{APP_DIR "plugins/owns_launcher.sprx",
 const char cobraMissingTold[] = APP_DIR "cobra_missing.txt";
 // The file the launcher plugin shows notifications from, a line each, as plugin/launcher reads it.
 const char notificationRequest[] = "/dev_hdd0/tmp/owns_notify";
+// The file the launcher plugin registers downloaded save folders from, a full path a line, as
+// plugin/launcher reads it; the system's saved data list shows a save only once it is registered.
+const char saveRegisterRequest[] = "/dev_hdd0/tmp/owns_register";
 // Whether the launcher plugin runs, and so can show notifications: it is set up unchanged since
 // the console started, and has taken every notification so far.
 bool launcherRuns = false;
 // How long the launcher plugin takes at most to take a notification: two of its polls.
 const unsigned int notificationWaitMicroseconds = 700000;
+
+/**
+ * Where a run registers the saves it downloads: through the launcher plugin while it runs, as for
+ * notifications. Without it nothing takes the request, which would only grow, so then nothing is
+ * registered.
+ */
+class DownloadRegistry : public SaveRegistry
+{
+  public:
+    explicit DownloadRegistry(ConsoleStorage &storage) : m_request(storage, saveRegisterRequest) {}
+
+    void Register(const std::string &folder) override
+    {
+        if (launcherRuns)
+        {
+            m_request.Register(folder);
+        }
+    }
+
+  private:
+    SaveRegisterRequest m_request;
+};
 
 const char driveFullMessage[] = "Your Google storage is full, so some saves were not backed up. "
                                 "Free up space in Google Drive, then sync again.";
@@ -304,7 +330,8 @@ Notice runSync(ConsoleStorage &storage, const std::string &profile, const std::s
         // Without a state of its own every save starts without a base; the sync works it out.
         SyncState state(stateFile(profile), stateBackup(profile));
         state.Load();
-        Sync sync(drive, state, storage, syncDialog, systemClock, folderId, savedata,
+        DownloadRegistry registry(storage);
+        Sync sync(drive, state, storage, registry, syncDialog, systemClock, folderId, savedata,
                   profileMarkerSave, profile, target);
         done = sync.Run();
         notResigned = sync.NotResigned().size();
@@ -424,7 +451,8 @@ void refreshXmb(ConsoleStorage &storage, const std::string &profile, const std::
         }
         SyncState state(stateFile(profile), stateBackup(profile));
         state.Load();
-        SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata,
+        DownloadRegistry registry(storage);
+        SaveBrowser browser(drive, state, storage, registry, syncDialog, folderId, savedata,
                             profileMarkerSave, profile, target);
         // A user who has never synced has no backup folder, and so no saves to list.
         if (!folderId.empty() && !browser.Refresh())
@@ -547,8 +575,9 @@ Notice runXmbAction(ConsoleStorage &storage, const std::string &profile,
     {
         return importUsbSaves(storage, state, profile, folderId);
     }
-    SaveBrowser browser(drive, state, storage, syncDialog, folderId, savedata, profileMarkerSave,
-                        profile, target);
+    DownloadRegistry registry(storage);
+    SaveBrowser browser(drive, state, storage, registry, syncDialog, folderId, savedata,
+                        profileMarkerSave, profile, target);
     if (folderId.empty())
     {
         return Result("There are no saves in the cloud.", "{explore_plugin:msg_error_no_savedata}");

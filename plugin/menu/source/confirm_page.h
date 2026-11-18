@@ -1,11 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// A question before a delete, as the Saved Data Utility asks it: what is to be deleted on the
-// full-screen information page, and over it the system's Yes/No dialog.
+// A question before a delete, as the Saved Data Utility asks it: what is to be deleted on a
+// full-screen page that is a copy of its own (ps3_savedata_plugin's page_plugin_delete), and over
+// it the system's Yes/No dialog.
 
 #ifndef OWNS_CONFIRM_PAGE_H
 #define OWNS_CONFIRM_PAGE_H
 
-#include "info_page.h"
+/** The delete page's texts, by their widgets in owns_menu.json. */
+enum confirm_text
+{
+    CONFIRM_TITLE,
+    CONFIRM_SUBTITLE,
+    CONFIRM_DATE,
+    CONFIRM_SIZE,
+    CONFIRM_DETAIL,
+    CONFIRM_TEXTS
+};
+
+/** A text of the page: UTF-8, or UTF-16 when units is set; an empty or NULL one is left empty. */
+typedef struct
+{
+    const char *text;
+    const unsigned short *units;
+} confirm_value;
 
 /**
  * The dialog's answer, in paf's job once the dialog has gone by itself.
@@ -15,13 +32,14 @@
 typedef void (*confirm_answer)(int result, void *data);
 
 /**
- * Opens the rows full screen and the dialog with the question over them.
+ * Opens the page with its texts and the dialog with the question over it.
+ * @param values the page's texts, CONFIRM_TEXTS of them
  * @param question UTF-16, NUL-ended; the dialog copies it
  * @param on_answer gets the answer, which it hands to confirm_page_finish
- * @return 0 when not even the rows opened, and nothing is shown; 1 otherwise, the pages already
+ * @return 0 when not even the page opened, and nothing is shown; 1 otherwise, the pages already
  *         closed again when the dialog could not open
  */
-int confirm_page_open(int view, const info_row *rows, int count, const unsigned short *question,
+int confirm_page_open(int view, const confirm_value *values, const unsigned short *question,
                       confirm_answer on_answer);
 
 /**

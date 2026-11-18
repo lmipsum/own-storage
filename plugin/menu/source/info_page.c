@@ -99,7 +99,7 @@ int info_page_open(int view, const info_row *rows, int count, enum xmb_backdrop 
     if (list == NULL)
     {
         View_PageClose(view, OWNS_INFO_PAGE);
-        xmb_backdrop_set(XMB_BACKDROP_OFF);
+        xmb_backdrop_clear(backdrop);
         return 0;
     }
     PhInfoList_ctor(list, plane, NULL);

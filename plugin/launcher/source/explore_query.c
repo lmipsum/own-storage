@@ -13,6 +13,7 @@
 #include "explore_query.h"
 
 #include <stddef.h>
+#include <sys/systime.h>
 
 #include "owns_log.h"
 #include "paf.h"
@@ -128,8 +129,7 @@ static int heap_vector(uint32_t at, uint32_t element, uint32_t *begin)
     return (int)((end - *begin) / element);
 }
 
-/** The deepest open list of explore_plugin's current category; 0 when a hop is not as traced. */
-static uint32_t deepest_list(void)
+int explore_query_lists(uint32_t *lists, int room)
 {
     const uint32_t delta = data_delta();
     const uint32_t manager = delta != 0 ? word_at(CATEGORY_MANAGER_ELF + delta) : 0;
@@ -151,18 +151,27 @@ static uint32_t deepest_list(void)
         focused != 0 ? heap_vector(focused + ENTRY_CATEGORIES, 4, &categories) : -1;
     const uint32_t category =
         category_count > 0 ? word_at(categories + 4 * (uint32_t)(category_count - 1)) : 0;
-    uint32_t lists = 0;
-    const int list_count =
-        in_heap(category) ? heap_vector(category + CATEGORY_LISTS, 4, &lists) : -1;
-    const uint32_t list = list_count > 0 ? word_at(lists + 4 * (uint32_t)(list_count - 1)) : 0;
-    owns_log_value("deepest open list", list);
-    return in_heap(list) ? list : 0;
+    uint32_t vector = 0;
+    const int count = in_heap(category) ? heap_vector(category + CATEGORY_LISTS, 4, &vector) : -1;
+    if (count < 0 || count > room)
+    {
+        return -1;
+    }
+    for (int i = 0; i < count; ++i)
+    {
+        lists[i] = word_at(vector + 4 * (uint32_t)i);
+        if (!in_heap(lists[i]))
+        {
+            return -1;
+        }
+    }
+    owns_log_value("open lists", (uint32_t)count);
+    return count;
 }
 
-int explore_query_url(explore_url *url)
+int explore_query_list_url(uint32_t list, explore_url *url)
 {
-    const uint32_t list = deepest_list();
-    const uint32_t query = list != 0 ? word_at(list + LIST_QUERY) : 0;
+    const uint32_t query = word_at(list + LIST_QUERY);
     if (!in_heap(query))
     {
         return 0;
@@ -188,6 +197,13 @@ int explore_query_url(explore_url *url)
     return 1;
 }
 
+int explore_query_url(explore_url *url)
+{
+    uint32_t lists[EXPLORE_LISTS_MAX];
+    const int count = explore_query_lists(lists, EXPLORE_LISTS_MAX);
+    return count > 0 && explore_query_list_url(lists[count - 1], url);
+}
+
 void explore_url_copy(const explore_url *url, char *text)
 {
     uint32_t i = 0;
@@ -205,4 +221,19 @@ int explore_command(const char *command)
     const exec_command exec =
         entries != NULL ? (exec_command)entries[EXEC_COMMAND_ENTRY] : (exec_command)NULL;
     return exec != NULL && exec(command, NULL, 0) != 0;
+}
+
+int explore_command_wait(const char *command)
+{
+    for (int round = 0; round < EXPLORE_WAIT_ROUNDS; ++round)
+    {
+        if (explore_command(command))
+        {
+            owns_log(command);
+            return 1;
+        }
+        sysUsleep(EXPLORE_WAIT_MICROSECONDS);
+    }
+    owns_log("command not taken");
+    return 0;
 }
